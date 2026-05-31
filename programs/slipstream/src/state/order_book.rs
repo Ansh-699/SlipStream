@@ -189,15 +189,35 @@ impl<'a> OrderBookView<'a> {
     }
 
     /// Push a fill event to the ring buffer queue.
+    ///
+    /// This is a TRUE ring: when full, it OVERWRITES the oldest entry (advances
+    /// head) instead of erroring. The OrderBook is delegated to the ER and L1
+    /// can't pop it, so nothing ever drains `fill_event_count` — making the old
+    /// "error when full" behavior a hard wall that bricked trading after
+    /// `max_fill_events` cumulative fills (surfaced as `FillQueueFull` /
+    /// custom 0x11e on place_order and on close/flatten IOC orders).
+    ///
+    /// Overwriting is safe because settlement does not depend on this ring being
+    /// drained: `mirror_fills` copies fills (sequence > last_mirrored) into the
+    /// small FillLog and the keeper runs continuously, so already-mirrored old
+    /// fills are the only thing ever overwritten. Mirrors the FillLog ring's
+    /// overwrite-when-full semantics. Kept returning Result for call-site compat;
+    /// it now never returns Err.
     pub fn push_fill_event(&mut self, event: FillEvent) -> Result<(), ProgramError> {
         let max = self.header.max_fill_events;
-        if self.header.fill_event_count >= max {
-            return Err(SlipstreamError::FillQueueFull.into());
+        if max == 0 {
+            return Ok(());
         }
         let tail = self.header.fill_event_tail;
         self.fill_events[tail as usize] = event;
         self.header.fill_event_tail = (tail + 1) % max;
-        self.header.fill_event_count += 1;
+        if self.header.fill_event_count < max {
+            self.header.fill_event_count += 1;
+        } else {
+            // Full: the write above overwrote the oldest entry — advance head so
+            // head/tail stay coincident and count stays pinned at max.
+            self.header.fill_event_head = (self.header.fill_event_head + 1) % max;
+        }
         Ok(())
     }
 

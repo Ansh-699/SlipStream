@@ -262,22 +262,29 @@ fn test_fill_event_queue_wraparound() {
             _pad: [0; 3],
         };
 
-    // Fill the queue
+    // Fill the queue (capacity = 3)
     ob.push_fill_event(fill).unwrap();
     ob.push_fill_event(fill).unwrap();
-    ob.push_fill_event(fill).unwrap();
-
-    // Queue is full
-    assert!(ob.push_fill_event(fill).is_err());
-
-    // Pop one
-    ob.pop_fill_event().unwrap();
-
-    // Now we can push again (wraps around)
     ob.push_fill_event(fill).unwrap();
     assert_eq!(ob.header.fill_event_count, 3);
-    assert_eq!(ob.header.fill_event_head, 1);
-    assert_eq!(ob.header.fill_event_tail, 1); // Wrapped
+
+    // Full: the next push now OVERWRITES the oldest entry instead of erroring
+    // (true ring; the OrderBook is delegated to the ER and L1 never drains it,
+    // so erroring here would brick trading — see push_fill_event docs).
+    ob.push_fill_event(fill).unwrap();
+    assert_eq!(ob.header.fill_event_count, 3); // pinned at max
+    assert_eq!(ob.header.fill_event_head, 1); // oldest dropped, head advanced
+    assert_eq!(ob.header.fill_event_tail, 1); // wrapped
+
+    // Pop one still works (count drops, head advances).
+    ob.pop_fill_event().unwrap();
+    assert_eq!(ob.header.fill_event_count, 2);
+    assert_eq!(ob.header.fill_event_head, 2);
+
+    // And we can push again into the freed space.
+    ob.push_fill_event(fill).unwrap();
+    assert_eq!(ob.header.fill_event_count, 3);
+    assert_eq!(ob.header.fill_event_tail, 2); // wrapped again
 }
 
 #[test]
