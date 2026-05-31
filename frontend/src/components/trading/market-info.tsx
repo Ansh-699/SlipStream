@@ -9,10 +9,9 @@ const PRICE_SCALE = 1_000_000;
 function Brand() {
   return (
     <div className="flex items-center gap-2.5 shrink-0">
-      <div className="relative h-7 w-7 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center shadow-[0_0_18px_rgba(16,185,129,0.5)]">
-        <svg viewBox="0 0 24 24" className="h-4 w-4 text-black" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 12h4l3-8 4 16 3-8h4" />
-        </svg>
+      <div className="relative h-7 w-7 rounded-lg overflow-hidden shadow-[0_0_18px_rgba(16,185,129,0.5)]">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.png" alt="Slipstream" className="h-full w-full object-cover" />
       </div>
       <span className="text-base font-bold tracking-tight bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent hidden sm:inline">
         Slipstream

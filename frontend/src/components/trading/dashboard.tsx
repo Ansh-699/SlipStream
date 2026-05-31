@@ -26,30 +26,35 @@ export function TradingDashboard() {
         </div>
       )}
 
-      {/* ── Single-viewport trading screen ───────────────────────────────── */}
-      <section className="h-screen min-h-[680px] flex flex-col px-3 md:px-4 lg:px-6 pt-3 pb-3 gap-3 max-w-[1700px] mx-auto w-full relative z-10">
+      {/* ── Trading screen ───────────────────────────────────────────────
+          The single-viewport lock (lg:h-screen) only applies on large screens
+          where everything fits. On smaller/shorter screens the section grows to
+          its natural height and the PAGE scrolls, so the order-form + session
+          controls (Deposit + Init / Delegate to ER) are always reachable. */}
+      <section className="lg:h-screen lg:min-h-[680px] flex flex-col px-3 md:px-4 lg:px-6 pt-3 pb-3 gap-3 max-w-[1700px] mx-auto w-full relative z-10">
         <div className="shrink-0">
           <MarketInfo />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 lg:min-h-0">
           {/* Chart */}
-          <div className="lg:col-span-6 min-h-0 rise-in">
+          <div className="lg:col-span-6 min-h-[360px] lg:min-h-0 rise-in">
             <PriceChart />
           </div>
 
           {/* Order Book + Recent Trades */}
-          <div className="lg:col-span-3 flex flex-col gap-3 min-h-0 rise-in" style={{ animationDelay: "60ms" }}>
-            <div className="flex-[7] min-h-0">
+          <div className="lg:col-span-3 flex flex-col gap-3 lg:min-h-0 rise-in" style={{ animationDelay: "60ms" }}>
+            <div className="min-h-[280px] lg:flex-[7] lg:min-h-0">
               <OrderBookDisplay />
             </div>
-            <div className="flex-[4] min-h-0">
+            <div className="min-h-[200px] lg:flex-[4] lg:min-h-0">
               <RecentTrades />
             </div>
           </div>
 
-          {/* Order Form + Session */}
-          <div className="lg:col-span-3 flex flex-col gap-3 min-h-0 overflow-y-auto pr-1 pb-1 rise-in slim-scroll" style={{ animationDelay: "120ms" }}>
+          {/* Order Form + Session — scrolls within the column on large screens,
+              flows naturally (page scroll) on smaller ones. */}
+          <div className="lg:col-span-3 flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto pr-1 pb-1 rise-in slim-scroll" style={{ animationDelay: "120ms" }}>
             <OrderForm />
             <SessionPanel />
           </div>
