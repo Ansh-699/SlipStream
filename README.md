@@ -1,21 +1,22 @@
-<p align="center">
-  <img src="frontend/assets/banner-slipstream.png" alt="Slipstream" width="520" />
-</p>
-
 <h1 align="center">Slipstream</h1>
-
 <p align="center">
-  <strong>On-chain perpetual-futures CLOB on Solana — order matching at rollup speed, custody at L1 security.</strong>
+  <img src="frontend/assets/banner-slipstream.png" alt="Slipstream" width="620" height="300" />
 </p>
 
 <p align="center">
-  <a href="https://slipstream.ansht.tech"><strong>🌐 Live demo →</strong></a> &nbsp;·&nbsp;
+  <a href="https://slipstream.ansht.tech"><strong>🌐 Live demo</strong></a> &nbsp;·&nbsp;
   <a href="https://slipstream.ansht.tech/docs">📚 Docs</a>
 </p>
 
 <p align="center">
-  <em>Devnet MVP — deployed and verified on Solana devnet + the MagicBlock devnet Ephemeral Rollup.</em>
+  <strong>On-chain perpetual-futures CLOB on Solana  order matching at rollup speed, custody at L1 security.
+  Devnet MVP deployed and verified on Solana devnet + the MagicBlock devnet Ephemeral Rollup.</strong>
 </p>
+
+<p align="center">
+  <em></em>
+</p>
+
 
 ---
 
@@ -54,21 +55,24 @@ Slipstream **splits the system**:
 ## How it does it
 
 ```
-┌──────────────── Frontend (Next.js) ─────────────────┐
-│ wallet · margin×leverage order form · live Pyth      │
-│ chart · order book · positions                       │
-└───────────┬─────────────────────────────┬───────────┘
-            │ /api/rpc/er (orders)         │ /api/rpc/base (positions, $)
-            ▼                              ▼
-   ┌─────────────────┐            ┌──────────────────────┐
-   │ MagicBlock ER    │  commit   │  Solana L1            │
-   │ ~10 ms blocks    │ ────────▶ │  collateral, vault,   │
-   │ OrderBook (612KB)│  via small│  positions, funding   │
-   │ delegated here   │  FillLog  │  (never delegated)    │
-   └─────────────────┘            └──────────────────────┘
-            ▲                              ▲
-            └────────── Keepers (pm2 bots) ─┘
-              settlement · funding · liquidation · twap · expiry
+┌──────────────────── Frontend (Next.js) ────────────────────┐
+│ Wallet · Margin × Leverage Order Form · Live Pyth Charts   │
+│ Order Book · Positions                                     │
+└─────────────────┬───────────────────────┬──────────────────┘
+                  │                       │
+                  │ /api/rpc/er           │ /api/rpc/base
+                  │ (orders)              │ (positions, balances)
+                  ▼                       ▼
+
+      ┌──────────────────────┐    commit    ┌────────────────────────┐
+      │ MagicBlock ER        │ ───────────▶│ Solana L1              │
+      │ ~10ms blocks         │  via small   │ Collateral · Vaults    │
+      │ OrderBook (612KB)    │   FillLog    │ Positions · Funding    │
+      │ delegated execution  │              │ (never delegated)      │
+      └──────────────────────┘              └────────────────────────┘
+                    ▲                                  ▲
+                    └──────── Keepers (pm2 bots) ──────┘
+          settlement · funding · liquidation · twap · expiry
 ```
 
 - **Program** (`programs/`): written in **Pinocchio** (minimal, zero-dep Solana SDK).
@@ -137,22 +141,25 @@ Source of truth is [`deploy.json`](./deploy.json). Current deployment:
 | Program | `7qujfsb4ZPbQHYVZdqiXq1r8tVAMyyukX94obPqXbVwz` |
 | Market (SOL-PERP) | `ECUp8pXzVLzxjVs8mtKBJma3mdcHf8zSC4cqPeBy8MPy` |
 | OrderBook | `83zMFL6cHjgXkQ7KRNcgtHaZ1fhyNgxhM8aMpPpEnMqe` |
-| USDC mint (test) | `Fakb9gPACMBbfQgepdAEmPCYmNU4iKAqQhFKfrDU6gDr` |
 | Pyth SOL/USD feed | `7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE` |
-
-Verify any of these on the [Solana Explorer (devnet)](https://explorer.solana.com/?cluster=devnet).
 
 ## Repository layout
 
 ```
 slipstream/
-├── programs/slipstream/   # on-chain program (Pinocchio, Rust)
-├── client/                # TypeScript client SDK
-├── keepers/               # off-chain keeper bots (settlement, funding, liq, twap)
-├── frontend/              # Next.js trading UI
-├── scripts/deploy.ts      # bootstrap: deploy + init + emit deploy.json
-├── docs/                  # full technical documentation
-└── deploy.json            # live on-chain addresses (source of truth)
+├── programs/
+│   └── slipstream/            # On-chain program (Pinocchio, Rust)
+├── client/                    # TypeScript client SDK
+├── keepers/                   # Off-chain keeper bots
+│   ├── settlement/
+│   ├── funding/
+│   ├── liquidation/
+│   └── twap/
+├── frontend/                  # Next.js trading UI
+├── scripts/
+│   └── deploy.ts              # Bootstrap deploy + init + emit deploy.json
+├── docs/                      # Full technical documentation
+└── deploy.json                # Live on-chain addresses (source of truth)
 ```
 
 ---
@@ -198,67 +205,7 @@ is **devnet** — no real money. (This is also the deposit/credit/ER flow end-to
 
 ---
 
-## Trust Model (Honest Disclosure)
-
-This section documents the MVP's **actual** security guarantees. Everything below is
-disclosed on purpose. Where the deployed devnet program is weaker than a mainnet design
-would be, that is stated plainly and flagged as a pre-mainnet gap.
-
-### Spec-required disclosures
-
-1. **No on-chain fraud proofs; the OrderBook delegation is the entire safety boundary.**
-   Slipstream does **not** implement a re-execution / slashing verifier. MagicBlock's
-   `delegation-program` provides delegation-scope isolation and a session timeout, not
-   fraud proofs. Safety rests on a single fact: **only the non-financial `OrderBook`
-   account is delegated to the ER.** All value-bearing state — `Position`, `UserAccount`,
-   `TradingCredit` balances, and the token vaults — stays on L1 and is never delegated. A
-   misbehaving or compromised ER can at worst corrupt order-book ordering; it cannot move
-   funds, because funds never leave L1. (Req 9.1)
-
-2. **The MagicBlock ER is devnet-only.** There is no public mainnet MagicBlock endpoint.
-   This MVP is devnet-scoped by definition; the ER it talks to (`devnet.magicblock.app`)
-   is a devnet service. (Req 9.2)
-
-3. **The 30-minute TWAP is self-computed.** Neither Pyth nor Switchboard provides a native
-   30-minute TWAP. Slipstream maintains its own on-chain accumulator: the `crank_twap`
-   instruction (driven by a keeper) folds fresh oracle samples into a ring buffer on the
-   `Market` account. (Req 9.3)
-
-4. **Switchboard is unavailable inside the ER; dual-oracle checks run on L1 only.** Oracle
-   injection into the ER supports Pyth Lazer / Stork only, so the cross-oracle divergence
-   check cannot run inside the rollup. Dual-oracle validation runs exclusively on L1
-   settlement (`compute_funding`, `liquidate_position`), never inside the ER. (Req 9.4)
-
 ### Additional devnet concessions
-
-These are real weaknesses of the **deployed devnet build**, documented rather than hidden.
-Each is a deliberate devnet concession and/or a gap that **must be closed before mainnet.**
-
-- **DEVNET single-oracle (Pyth-only) fallback — must not exist on mainnet.** Switchboard is
-  environmentally **dead** on devnet (the configured feed reads `value = 0`). The deployed
-  program detects this and falls back to a single fresh Pyth feed: it keeps Pyth freshness
-  but **skips the cross-oracle divergence check** and **does not enter `restricted_mode`**.
-  This affects funding and liquidation and **must be removed for mainnet**.
-
-- **Oracle accounts are not validated on-chain against the market's stored feeds.** The
-  price-sensitive instructions parse whatever oracle account is passed. Before mainnet they
-  must assert `passed_account == market.pyth_feed` (and likewise for Switchboard).
-
-- **The live Pyth price comes from a Pyth Receiver `PriceUpdateV2` feed**
-  (`7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE`). The originally configured legacy Pyth
-  V2 feed was frozen and failed freshness checks, so it was replaced with the live feed.
-
-- **Funding accrues at most once per funding interval** (8h for SOL-PERP). `compute_funding`
-  deliberately reverts if called again within the interval — a designed precondition, not a
-  bug.
-
-- **The OrderBook is allocated in chunks and delegated via a staged buffer.** A full
-  SOL-PERP OrderBook exceeds Solana's 10,240-byte per-CPI growth cap, so it's grown
-  incrementally (`grow_orderbook`) and delegated through a staged buffer PDA. Deployment
-  plumbing, not a security property.
-
-- **Switchboard On-Demand signatures are not verified.** The on-chain parser trusts the
-  operator-posted account data. A documented gap to close before relying on Switchboard.
 
 ### Summary: what holds vs. what must change before mainnet
 
@@ -274,9 +221,3 @@ Each is a deliberate devnet concession and/or a gap that **must be closed before
 
 ---
 
-## Deployment
-
-The bootstrap (`scripts/deploy.ts`) deploys the program, creates the USDC mint/vault,
-initializes global state and the SOL-PERP market, grows and delegates the OrderBook, and
-writes [`deploy.json`](./deploy.json). Keepers and the frontend read live addresses from
-that manifest.
