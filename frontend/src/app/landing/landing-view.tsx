@@ -99,7 +99,7 @@ export function LandingView() {
           <Link href="/">
             <LiquidButton
               size="xl"
-              className="font-semibold text-emerald-50 bg-emerald-500/25 hover:bg-emerald-500/35 shadow-[0_4px_30px_rgba(16,185,129,0.4)] rounded-xl"
+              className="font-semibold text-emerald-950 dark:text-emerald-50 bg-emerald-500/40 dark:bg-emerald-500/25 hover:bg-emerald-500/50 dark:hover:bg-emerald-500/35 shadow-[0_4px_30px_rgba(16,185,129,0.4)] rounded-xl"
             >
               Launch the app →
             </LiquidButton>
@@ -107,7 +107,7 @@ export function LandingView() {
           <Link href="/docs">
             <LiquidButton
               size="xl"
-              className="font-semibold text-white/90 bg-white/[0.06] hover:bg-white/[0.12] rounded-xl border border-white/10"
+              className="font-semibold text-zinc-800 dark:text-white/90 bg-black/[0.06] dark:bg-white/[0.06] hover:bg-black/[0.1] dark:hover:bg-white/[0.12] rounded-xl border border-black/10 dark:border-white/10"
             >
               Read the docs
             </LiquidButton>
@@ -200,7 +200,7 @@ export function LandingView() {
             <Link href="/">
               <LiquidButton
                 size="xl"
-                className="font-semibold text-emerald-50 bg-emerald-500/25 hover:bg-emerald-500/35 shadow-[0_4px_30px_rgba(16,185,129,0.4)] rounded-xl"
+                className="font-semibold text-emerald-950 dark:text-emerald-50 bg-emerald-500/40 dark:bg-emerald-500/25 hover:bg-emerald-500/50 dark:hover:bg-emerald-500/35 shadow-[0_4px_30px_rgba(16,185,129,0.4)] rounded-xl"
               >
                 Launch the app →
               </LiquidButton>

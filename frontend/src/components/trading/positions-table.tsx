@@ -217,7 +217,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                     );
                   })()}
                   <td className={`text-right font-mono tnum font-bold text-xs px-2 ${erPosition.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                    {erPosition.unrealizedPnl >= 0 ? "+" : ""}${erPosition.unrealizedPnl.toFixed(2)}
+                    {fmtSignedUsd(erPosition.unrealizedPnl)}
                   </td>
                   <td className="text-right px-2 py-2">
                     <button
@@ -268,7 +268,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       );
                     })()}
                     <td className={`text-right font-mono tnum font-bold text-xs px-2 ${pos.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-                      {pos.unrealizedPnl >= 0 ? "+" : ""}${pos.unrealizedPnl.toFixed(2)}
+                      {fmtSignedUsd(pos.unrealizedPnl)}
                     </td>
                     <td className="text-right px-2 py-2">
                       <button
@@ -290,6 +290,13 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       </div>
     </div>
   );
+}
+
+/** Format a signed USD value with the sign BEFORE the dollar sign, e.g.
+ *  -$0.44 / +$1.20 (not "$-0.44"). */
+function fmtSignedUsd(v: number): string {
+  const sign = v < 0 ? "-" : "+";
+  return `${sign}$${Math.abs(v).toFixed(2)}`;
 }
 
 function SideBadge({ isLong }: { isLong: boolean }) {

@@ -336,8 +336,8 @@ export function OrderForm() {
           disabled={!publicKey || !session.delegated || submitting || insufficient || belowOneLot || !derived || derived.sizeSol <= 0 || (orderType !== "market" && (!price || parseFloat(price) <= 0))}
           className={`w-full font-semibold mt-1 rounded-xl backdrop-blur-md ${
             side === "long"
-              ? "bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-50 shadow-[0_4px_24px_rgba(16,185,129,0.35)]"
-              : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-50 shadow-[0_4px_24px_rgba(244,63,94,0.3)]"
+              ? "bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-950 dark:text-emerald-50 shadow-[0_4px_24px_rgba(16,185,129,0.35)]"
+              : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-950 dark:text-rose-50 shadow-[0_4px_24px_rgba(244,63,94,0.3)]"
           }`}
         >
           {submitting ? "Placing…" : `${side === "long" ? "Long" : "Short"}${derived && derived.sizeSol > 0 ? ` ${derived.sizeSol.toFixed(1)} SOL` : ""}`}
