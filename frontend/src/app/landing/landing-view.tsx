@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Zap, ShieldCheck, TrendingUp, KeyRound } from "lucide-react";
 import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -9,22 +10,22 @@ const FEATURES = [
   {
     title: "Rollup-speed matching",
     body: "Orders place, cancel, and match inside a MagicBlock Ephemeral Rollup at ~10 ms — the speed a real order book needs, without leaving Solana.",
-    icon: "⚡",
+    Icon: Zap,
   },
   {
     title: "L1 custody, always",
     body: "Only the order book is delegated to the rollup. Collateral, positions, and the vault never leave Solana L1 — funds can't be moved by the ER.",
-    icon: "🛡️",
+    Icon: ShieldCheck,
   },
   {
     title: "Real perps mechanics",
     body: "Up to 20× leverage, live Pyth pricing, funding, and liquidations — settled into real on-chain positions through the fill-log pipeline.",
-    icon: "📈",
+    Icon: TrendingUp,
   },
   {
     title: "Sign once, trade many",
     body: "A scoped, expiring session key signs your orders locally — no wallet popup per trade, and it can never move your funds.",
-    icon: "🔑",
+    Icon: KeyRound,
   },
 ];
 
@@ -151,7 +152,9 @@ export function LandingView() {
               borderRadius="20px"
               className="glass-surface p-6"
             >
-              <div className="text-2xl mb-3">{f.icon}</div>
+              <div className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-500/15 border border-emerald-400/20 text-emerald-400">
+                <f.Icon className="h-5 w-5" strokeWidth={2} />
+              </div>
               <h3 className="text-lg font-semibold text-white mb-1.5">{f.title}</h3>
               <p className="text-sm text-white/60 leading-relaxed">{f.body}</p>
             </LiquidGlassCard>
