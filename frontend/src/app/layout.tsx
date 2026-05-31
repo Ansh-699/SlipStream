@@ -16,12 +16,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://slipstream.ansht.tech"),
-  title: "Slipstream — On-chain Perpetual Futures on Solana",
+  title: "Slipstream",
   description:
     "On-chain perpetual-futures CLOB on Solana. Sub-second order matching on MagicBlock Ephemeral Rollups; collateral and settlement on Solana L1.",
   applicationName: "Slipstream",
   openGraph: {
-    title: "Slipstream — On-chain Perpetual Futures on Solana",
+    title: "Slipstream",
     description:
       "Sub-second perps CLOB on MagicBlock Ephemeral Rollups, settled on Solana L1.",
     url: "https://slipstream.ansht.tech",
@@ -30,7 +30,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Slipstream — On-chain Perpetual Futures on Solana",
+    title: "Slipstream",
     description:
       "Sub-second perps CLOB on MagicBlock Ephemeral Rollups, settled on Solana L1.",
   },

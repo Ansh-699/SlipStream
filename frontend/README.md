@@ -49,5 +49,6 @@ npm start          # serve the production build
 
 ## Deploy
 
-See [`../DEPLOYMENT.md`](../DEPLOYMENT.md) for the full deployment guide (Vercel
-for this frontend + a VM for the keepers).
+The live deployment runs the Next.js app under pm2 behind nginx on the project
+server. `npm run build && npm start` produces the production server; point a
+reverse proxy at port 3000.

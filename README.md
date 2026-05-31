@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="frontend/assets/banner-slipstream.png" alt="Slipstream" width="100%" />
+  <img src="frontend/assets/banner-slipstream.png" alt="Slipstream" width="520" />
 </p>
 
 <h1 align="center">Slipstream</h1>
@@ -10,8 +10,7 @@
 
 <p align="center">
   <a href="https://slipstream.ansht.tech"><strong>🌐 Live demo →</strong></a> &nbsp;·&nbsp;
-  <a href="./docs/README.md">📚 Docs</a> &nbsp;·&nbsp;
-  <a href="./DEPLOYMENT.md">🚀 Deployment</a>
+  <a href="https://slipstream.ansht.tech/docs">📚 Docs</a>
 </p>
 
 <p align="center">
@@ -153,8 +152,7 @@ slipstream/
 ├── frontend/              # Next.js trading UI
 ├── scripts/deploy.ts      # bootstrap: deploy + init + emit deploy.json
 ├── docs/                  # full technical documentation
-├── deploy.json            # live on-chain addresses (source of truth)
-└── DEPLOYMENT.md          # production deployment guide (Vercel / AWS / DO)
+└── deploy.json            # live on-chain addresses (source of truth)
 ```
 
 ---
@@ -281,5 +279,4 @@ Each is a deliberate devnet concession and/or a gap that **must be closed before
 The bootstrap (`scripts/deploy.ts`) deploys the program, creates the USDC mint/vault,
 initializes global state and the SOL-PERP market, grows and delegates the OrderBook, and
 writes [`deploy.json`](./deploy.json). Keepers and the frontend read live addresses from
-that manifest. For hosting the frontend + keepers (Vercel / AWS / DigitalOcean), see
-[**DEPLOYMENT.md**](./DEPLOYMENT.md).
+that manifest.

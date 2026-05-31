@@ -4,9 +4,10 @@
   "private": true,
   "scripts": {
     "copy-manifest": "node scripts/copy-manifest.mjs",
-    "predev": "node scripts/copy-manifest.mjs",
+    "copy-docs": "node scripts/copy-docs.mjs",
+    "predev": "node scripts/copy-manifest.mjs && node scripts/copy-docs.mjs",
     "dev": "next dev",
-    "prebuild": "node scripts/copy-manifest.mjs",
+    "prebuild": "node scripts/copy-manifest.mjs && node scripts/copy-docs.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
@@ -25,6 +26,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.17.0",
+    "marked": "^14.1.4",
     "motion": "^12.40.0",
     "next": "16.2.4",
     "react": "19.2.4",

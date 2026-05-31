@@ -16,7 +16,7 @@ export function TradingDashboard() {
   const markPrice = market?.lastMarkPrice ?? null;
 
   return (
-    <div className="flex flex-col app-bg text-foreground overflow-x-hidden relative">
+    <div className="min-h-screen flex flex-col app-bg text-foreground overflow-x-hidden relative">
       {manifestError && (
         <div
           role="alert"
@@ -27,34 +27,35 @@ export function TradingDashboard() {
       )}
 
       {/* ── Trading screen ───────────────────────────────────────────────
-          The single-viewport lock (lg:h-screen) only applies on large screens
-          where everything fits. On smaller/shorter screens the section grows to
-          its natural height and the PAGE scrolls, so the order-form + session
-          controls (Deposit + Init / Delegate to ER) are always reachable. */}
-      <section className="lg:h-screen lg:min-h-[680px] flex flex-col px-3 md:px-4 lg:px-6 pt-3 pb-3 gap-3 max-w-[1700px] mx-auto w-full relative z-10">
+          Normal scrolling document (NO viewport height-lock). Columns have
+          explicit heights only on large screens so the desktop layout stays
+          tidy; the order-form + session column flows at its natural height and
+          `items-start` stops it being stretched/clipped, so the whole page can
+          always scroll to reach the Trading Session controls and the activity
+          section below. */}
+      <section className="flex flex-col px-3 md:px-4 lg:px-6 pt-3 pb-3 gap-3 max-w-[1700px] mx-auto w-full relative z-10">
         <div className="shrink-0">
           <MarketInfo />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 lg:min-h-0">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
           {/* Chart */}
-          <div className="lg:col-span-6 min-h-[360px] lg:min-h-0 rise-in">
+          <div className="lg:col-span-6 h-[440px] lg:h-[620px] rise-in">
             <PriceChart />
           </div>
 
           {/* Order Book + Recent Trades */}
-          <div className="lg:col-span-3 flex flex-col gap-3 lg:min-h-0 rise-in" style={{ animationDelay: "60ms" }}>
-            <div className="min-h-[280px] lg:flex-[7] lg:min-h-0">
+          <div className="lg:col-span-3 flex flex-col gap-3 rise-in" style={{ animationDelay: "60ms" }}>
+            <div className="h-[360px] lg:h-[400px]">
               <OrderBookDisplay />
             </div>
-            <div className="min-h-[200px] lg:flex-[4] lg:min-h-0">
+            <div className="h-[260px] lg:h-[208px]">
               <RecentTrades />
             </div>
           </div>
 
-          {/* Order Form + Session — scrolls within the column on large screens,
-              flows naturally (page scroll) on smaller ones. */}
-          <div className="lg:col-span-3 flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto pr-1 pb-1 rise-in slim-scroll" style={{ animationDelay: "120ms" }}>
+          {/* Order Form + Session — natural height, flows with the page. */}
+          <div className="lg:col-span-3 flex flex-col gap-3 rise-in" style={{ animationDelay: "120ms" }}>
             <OrderForm />
             <SessionPanel />
           </div>

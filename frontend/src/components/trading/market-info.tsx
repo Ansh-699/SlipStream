@@ -30,6 +30,12 @@ export function MarketInfo() {
         <div className="h-9 w-px bg-white/10 hidden sm:block" />
         <div className="flex items-center gap-5 flex-wrap flex-1 min-w-0">{children}</div>
         <div className="flex items-center gap-2 shrink-0 ml-auto">
+          <a
+            href="/docs"
+            className="text-xs font-medium text-white/55 hover:text-white transition-colors hidden sm:inline"
+          >
+            Docs
+          </a>
           <ConnectButton />
         </div>
       </div>
