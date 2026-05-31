@@ -197,15 +197,20 @@ export async function ensureMinSol(
 // Margin helper (mirror of place_order.rs / fixed_point.rs)
 // --------------------------------------------------------------------------
 
-/** Margin (credit atoms) reserved per resting `lots` at `price6`, at `maxLeverage`. */
+/** Margin (credit atoms) reserved per resting `lots` at `price6`, at `maxLeverage`.
+ *  MUST match on-chain `compute_notional` (math/fixed_point.rs): size carries 9
+ *  base decimals, so notional = size*price / BASE_SCALE (1e9) — NOT PRICE_SCALE.
+ *  (Dividing by PRICE_SCALE was the old 1000x-too-high estimate that, post the
+ *  on-chain decimal fix, made the bot drastically under-quote depth.) */
 export function marginForOrder(
   lotSize: bigint,
   lots: number,
   price6: bigint,
   maxLeverage: number
 ): bigint {
+  const BASE_SCALE = 1_000_000_000n; // 1e9, base-asset (size) scale
   const size = lotSize * BigInt(lots);
-  const notional = (size * price6) / BigInt(PRICE_SCALE);
+  const notional = (size * price6) / BASE_SCALE;
   return notional / BigInt(maxLeverage);
 }
 
