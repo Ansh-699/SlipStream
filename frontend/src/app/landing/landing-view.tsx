@@ -59,7 +59,7 @@ export function LandingView() {
           <ThemeToggle />
           <Link
             href="/"
-            className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 px-4 py-1.5 transition-colors border border-emerald-400/20"
+            className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-800 dark:text-emerald-100 px-4 py-1.5 transition-colors border border-emerald-500/30 dark:border-emerald-400/20 font-semibold"
           >
             Launch App
           </Link>
