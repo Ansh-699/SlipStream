@@ -138,6 +138,14 @@ function CandleCanvas({
   const [view, setView] = useState({ count: 80, offset: 0 });
   const [hover, setHover] = useState<{ x: number; y: number; i: number } | null>(null);
   const drag = useRef<{ x: number; startOffset: number } | null>(null);
+  // Track the active theme so the canvas grid/axis ink flips with light/dark.
+  const [isDark, setIsDark] = useState(true);
+  useEffect(() => {
+    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
+    read();
+    window.addEventListener("themechange", read);
+    return () => window.removeEventListener("themechange", read);
+  }, []);
 
   // Clamp the view to the data.
   const total = candles.length;
@@ -168,6 +176,11 @@ function CandleCanvas({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
+    // Theme-aware ink: dark text on light bg, light text on dark bg.
+    const ink = (a: number) =>
+      isDark ? `rgba(255,255,255,${a})` : `rgba(15,23,23,${a})`;
+    const priceTagText = isDark ? "#000" : "#fff";
+
     const padR = 56; // price axis
     const padB = 22; // time axis
     const padT = 8;
@@ -196,18 +209,18 @@ function CandleCanvas({
     for (let g = 0; g <= lines; g++) {
       const price = min + ((max - min) * g) / lines;
       const y = yOf(price);
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      ctx.strokeStyle = ink(0.05);
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(plotW, y);
       ctx.stroke();
-      ctx.fillStyle = "rgba(255,255,255,0.4)";
+      ctx.fillStyle = ink(0.4);
       ctx.textAlign = "left";
       ctx.fillText(`$${price.toFixed(3)}`, plotW + 6, y);
     }
 
     // Time axis labels (a handful)
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
+    ctx.fillStyle = ink(0.35);
     ctx.textAlign = "center";
     const labelEvery = Math.ceil(n / 6);
     for (let i = 0; i < n; i += labelEvery) {
@@ -281,7 +294,7 @@ function CandleCanvas({
     // Last-price line across the plot
     const lastC = visible[n - 1].c;
     const ly = yOf(lastC);
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
+    ctx.strokeStyle = ink(0.25);
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
     ctx.moveTo(0, ly);
@@ -290,14 +303,14 @@ function CandleCanvas({
     ctx.setLineDash([]);
     ctx.fillStyle = lastC >= visible[n - 1].o ? "rgb(16,185,129)" : "rgb(244,63,94)";
     ctx.fillRect(plotW, ly - 8, padR, 16);
-    ctx.fillStyle = "#000";
+    ctx.fillStyle = priceTagText;
     ctx.textAlign = "center";
     ctx.fillText(`$${lastC.toFixed(3)}`, plotW + padR / 2, ly);
 
     // Crosshair
     if (hover && hover.i >= 0 && hover.i < n) {
       const hx = xOf(hover.i);
-      ctx.strokeStyle = "rgba(255,255,255,0.2)";
+      ctx.strokeStyle = ink(0.2);
       ctx.setLineDash([2, 2]);
       ctx.beginPath();
       ctx.moveTo(hx, padT);
@@ -307,7 +320,7 @@ function CandleCanvas({
       ctx.stroke();
       ctx.setLineDash([]);
     }
-  }, [visible, chartType, hover, resolution.seconds]);
+  }, [visible, chartType, hover, resolution.seconds, isDark]);
 
   // Wheel zoom via a NATIVE non-passive listener so preventDefault is allowed
   // (React's onWheel is passive and warns/no-ops on preventDefault).

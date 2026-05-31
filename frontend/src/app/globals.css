@@ -551,3 +551,92 @@ input[type="number"] {
   max-width: 100%;
   border-radius: 0.5rem;
 }
+
+/* ════════════════════════════════════════════════════════════════════════
+   LIGHT MODE COMPATIBILITY
+   The trading UI was built dark-first with many hardcoded `text-white` /
+   `bg-white/…` / `border-white/…` utilities. Rather than touch every component,
+   we REMAP those exact utilities to dark-ink equivalents when NOT in dark mode.
+   This keeps dark mode byte-identical (these rules only apply under
+   :root:not(.dark)) while making light mode readable.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* Solid text colors → near-black, scaled by the original opacity step. */
+:root:not(.dark) .text-white { color: rgba(15, 23, 23, 0.95) !important; }
+:root:not(.dark) .text-white\/90 { color: rgba(15, 23, 23, 0.92) !important; }
+:root:not(.dark) .text-white\/85 { color: rgba(15, 23, 23, 0.88) !important; }
+:root:not(.dark) .text-white\/80 { color: rgba(15, 23, 23, 0.82) !important; }
+:root:not(.dark) .text-white\/75 { color: rgba(15, 23, 23, 0.78) !important; }
+:root:not(.dark) .text-white\/70 { color: rgba(15, 23, 23, 0.7) !important; }
+:root:not(.dark) .text-white\/60 { color: rgba(15, 23, 23, 0.62) !important; }
+:root:not(.dark) .text-white\/55 { color: rgba(15, 23, 23, 0.58) !important; }
+:root:not(.dark) .text-white\/50 { color: rgba(15, 23, 23, 0.5) !important; }
+:root:not(.dark) .text-white\/45 { color: rgba(15, 23, 23, 0.5) !important; }
+:root:not(.dark) .text-white\/40 { color: rgba(15, 23, 23, 0.45) !important; }
+:root:not(.dark) .text-white\/35 { color: rgba(15, 23, 23, 0.42) !important; }
+:root:not(.dark) .text-white\/30 { color: rgba(15, 23, 23, 0.38) !important; }
+
+/* White fills (chips, hover rows, segmented controls) → subtle dark tints. */
+:root:not(.dark) .bg-white\/20 { background-color: rgba(15, 23, 23, 0.14) !important; }
+:root:not(.dark) .bg-white\/10 { background-color: rgba(15, 23, 23, 0.08) !important; }
+:root:not(.dark) .bg-white\/5 { background-color: rgba(15, 23, 23, 0.05) !important; }
+:root:not(.dark) .bg-white\/\[0\.12\] { background-color: rgba(15, 23, 23, 0.1) !important; }
+:root:not(.dark) .bg-white\/\[0\.06\] { background-color: rgba(15, 23, 23, 0.05) !important; }
+:root:not(.dark) .bg-white\/\[0\.04\] { background-color: rgba(15, 23, 23, 0.04) !important; }
+:root:not(.dark) .bg-white\/\[0\.03\] { background-color: rgba(15, 23, 23, 0.035) !important; }
+:root:not(.dark) .bg-white\/\[0\.02\] { background-color: rgba(15, 23, 23, 0.025) !important; }
+
+/* White borders/dividers → dark hairlines. */
+:root:not(.dark) .border-white\/15 { border-color: rgba(15, 23, 23, 0.14) !important; }
+:root:not(.dark) .border-white\/10 { border-color: rgba(15, 23, 23, 0.1) !important; }
+:root:not(.dark) .border-white\/\[0\.08\] { border-color: rgba(15, 23, 23, 0.09) !important; }
+:root:not(.dark) .border-white\/\[0\.07\] { border-color: rgba(15, 23, 23, 0.08) !important; }
+:root:not(.dark) .border-white\/\[0\.06\] { border-color: rgba(15, 23, 23, 0.08) !important; }
+:root:not(.dark) .border-white\/\[0\.05\] { border-color: rgba(15, 23, 23, 0.07) !important; }
+
+/* Hover variants used on rows/buttons. */
+:root:not(.dark) .hover\:bg-white\/10:hover { background-color: rgba(15, 23, 23, 0.08) !important; }
+:root:not(.dark) .hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(15, 23, 23, 0.05) !important; }
+:root:not(.dark) .hover\:bg-white\/\[0\.02\]:hover { background-color: rgba(15, 23, 23, 0.035) !important; }
+
+/* The glass-surface in light mode (order form / landing cards). */
+:root:not(.dark) .glass-surface {
+  background: rgba(255, 255, 255, 0.75) !important;
+}
+
+/* Docs sidebar/back-link contrast in light mode (the header uses bg-black/40). */
+:root:not(.dark) .doc-prose {
+  color: rgba(15, 23, 23, 0.82);
+}
+:root:not(.dark) .bg-black\/40 {
+  background-color: rgba(255, 255, 255, 0.7) !important;
+}
+:root:not(.dark) .bg-black\/60 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Doc prose elements that hardcode #fff / light text → dark ink in light mode. */
+:root:not(.dark) .doc-prose h1,
+:root:not(.dark) .doc-prose h2,
+:root:not(.dark) .doc-prose h3,
+:root:not(.dark) .doc-prose h4,
+:root:not(.dark) .doc-prose strong { color: rgba(10, 15, 15, 0.95); }
+:root:not(.dark) .doc-prose th { color: rgba(10, 15, 15, 0.95); }
+:root:not(.dark) .doc-prose code {
+  background: rgba(15, 23, 23, 0.06);
+  border-color: rgba(15, 23, 23, 0.1);
+  color: #0f766e;
+}
+:root:not(.dark) .doc-prose pre {
+  background: rgba(15, 23, 23, 0.04);
+  border-color: rgba(15, 23, 23, 0.1);
+}
+:root:not(.dark) .doc-prose pre code { color: rgba(15, 23, 23, 0.85); }
+:root:not(.dark) .doc-prose a { color: #0f766e; }
+:root:not(.dark) .doc-prose blockquote { color: rgba(15, 23, 23, 0.8); }
+:root:not(.dark) .doc-prose th,
+:root:not(.dark) .doc-prose td { border-color: rgba(15, 23, 23, 0.12); }
+:root:not(.dark) .doc-prose hr { border-color: rgba(15, 23, 23, 0.1); }
+
+/* The emerald accent tints used for badges read fine on both themes; only the
+   neutral whites needed remapping above. */

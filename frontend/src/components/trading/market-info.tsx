@@ -3,6 +3,7 @@
 import { Badge } from "@/components/ui/badge";
 import { useMarket } from "@/hooks/use-market";
 import { ConnectButton } from "@/components/wallet/connect-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const PRICE_SCALE = 1_000_000;
 
@@ -36,6 +37,7 @@ export function MarketInfo() {
           >
             Docs
           </a>
+          <ThemeToggle />
           <ConnectButton />
         </div>
       </div>

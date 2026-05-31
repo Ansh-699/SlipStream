@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 export interface NavItem {
   slug: string;
@@ -42,6 +43,7 @@ export function DocsShell({
             >
               ← Back to app
             </Link>
+            <ThemeToggle />
             <button
               onClick={() => setOpen((v) => !v)}
               className="lg:hidden text-xs font-medium px-2.5 py-1 rounded-md border border-white/15 text-white/70"

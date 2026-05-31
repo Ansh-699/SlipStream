@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 const FEATURES = [
   {
@@ -54,6 +55,7 @@ export function LandingView() {
         </Link>
         <nav className="ml-auto flex items-center gap-5 text-sm font-medium text-white/70">
           <Link href="/docs" className="hover:text-white transition-colors hidden sm:inline">Docs</Link>
+          <ThemeToggle />
           <Link
             href="/"
             className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-100 px-4 py-1.5 transition-colors border border-emerald-400/20"
