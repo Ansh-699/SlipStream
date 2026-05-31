@@ -1,0 +1,26 @@
+{
+  "name": "@slipstream/integration-tests",
+  "version": "0.1.0",
+  "description": "Integration tests for Slipstream on devnet + ER",
+  "scripts": {
+    "test": "tsx full_flow.test.ts",
+    "test:er": "tsx er_orderbook.test.ts",
+    "test:funding": "tsx funding.test.ts",
+    "test:liquidation": "tsx liquidation.test.ts",
+    "test:idempotence": "tsx bootstrap_idempotence.test.ts",
+    "test:manifest": "tsx manifest_wellformedness.test.ts",
+    "test:all": "tsx full_flow.test.ts && tsx er_orderbook.test.ts && tsx funding.test.ts && tsx liquidation.test.ts"
+  },
+  "dependencies": {
+    "@magicblock-labs/ephemeral-rollups-sdk": "^0.6.5",
+    "@solana/spl-token": "^0.4.12",
+    "@solana/web3.js": "^1.98.0",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.6",
+    "fast-check": "^4.8.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

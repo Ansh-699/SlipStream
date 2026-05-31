@@ -1,0 +1,12 @@
+target/
+node_modules/
+dist/
+.next/
+.env
+.env.local
+*.so
+*.log
+.test-keys/
+.DS_Store
+*.swp
+*.swo

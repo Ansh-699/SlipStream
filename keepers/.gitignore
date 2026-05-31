@@ -1,0 +1,13 @@
+# Persistent, REUSED simulation bot keypairs (SOL hygiene). Funded to a tiny
+# fixed SOL balance and reused across runs so re-runs don't strand SOL. These
+# are devnet simulation wallets, but secret keys must NEVER be committed.
+.bot-keys/
+
+# Throwaway live-verification keypairs (devnet session-key e2e). Never commit.
+.verify-keys/
+
+# Build output
+dist/
+
+# Logs
+*.log

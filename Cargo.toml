@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = [
+    "programs/slipstream",
+    "tests/unit",
+]
+
+[workspace.dependencies]
+pinocchio = "0.9"
+pinocchio-system = "0.4"
+pinocchio-token = "0.4"
+pinocchio-pubkey = { version = "0.3", features = ["const"] }
+bytemuck = { version = "1.14", features = ["derive", "min_const_generics"] }

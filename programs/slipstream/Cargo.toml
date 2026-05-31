@@ -1,0 +1,26 @@
+[package]
+name = "slipstream"
+version = "0.1.0"
+edition = "2021"
+description = "On-chain perpetual futures CLOB with MagicBlock Ephemeral Rollup matching"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+bpf-entrypoint = []
+no-entrypoint = []
+
+[dependencies]
+pinocchio = { workspace = true }
+pinocchio-system = { workspace = true }
+pinocchio-token = { workspace = true }
+pinocchio-pubkey = { workspace = true }
+bytemuck = { workspace = true }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = 3

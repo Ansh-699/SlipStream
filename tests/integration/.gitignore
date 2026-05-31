@@ -1,0 +1,7 @@
+# Persistent, REUSED throwaway test keypairs (SOL hygiene). These are funded to
+# a tiny fixed balance and reused across live runs so re-runs don't strand SOL.
+# Never commit secret keys.
+.test-keys/
+
+# Per-run log files emitted by the live test scripts.
+_*.log

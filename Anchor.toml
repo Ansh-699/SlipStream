@@ -1,0 +1,15 @@
+[toolchain]
+
+[features]
+seeds = false
+skip-lint = false
+
+[programs.devnet]
+slipstream = "7qujfsb4ZPbQHYVZdqiXq1r8tVAMyyukX94obPqXbVwz"
+
+[registry]
+url = "https://api.apr.dev"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"

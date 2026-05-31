@@ -1,0 +1,31 @@
+{
+  "name": "@slipstream/keepers",
+  "version": "0.1.0",
+  "description": "Keeper bots for Slipstream perpetual futures exchange",
+  "scripts": {
+    "build": "tsc",
+    "settlement": "tsx src/settlement-keeper.ts",
+    "fill-log-keeper": "tsx src/fill-log-keeper.ts",
+    "fill-log-setup": "tsx src/fill-log-setup.ts",
+    "funding": "tsx src/funding-keeper.ts",
+    "liquidation": "tsx src/liquidation-keeper.ts",
+    "twap": "tsx src/twap-keeper.ts",
+    "expiry": "tsx src/expiry-keeper.ts",
+    "all": "concurrently \"npm:settlement\" \"npm:funding\" \"npm:liquidation\" \"npm:twap\" \"npm:expiry\"",
+    "bot-setup": "tsx src/bot-setup.ts",
+    "market-maker": "tsx src/market-maker-bot.ts",
+    "taker": "tsx src/taker-bot.ts",
+    "bots": "concurrently \"npm:market-maker\" \"npm:taker\""
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0",
+    "@solana/spl-token": "^0.4.12",
+    "bn.js": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.1.6",
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
