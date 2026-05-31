@@ -75,6 +75,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
           size: sizeVal,
           expiryTs: 0n,
           maxSlippageBps: 0,
+          reduceOnly: true, // closing a position — skip margin gate, no new credit
         },
         PROGRAM_ID,
         signerPk

@@ -328,6 +328,10 @@ export interface PlaceOrderParams {
   expiryTs?: bigint;
   /** Only enforced for MARKET orders. 0 = disabled. */
   maxSlippageBps?: number;
+  /** When true, marks the order as position-reducing (a close/flatten): the
+   *  program skips the upfront margin gate, charges the taker zero new credit,
+   *  and never rests a remainder. Used by the Close button. */
+  reduceOnly?: boolean;
 }
 
 export function createPlaceOrderInstruction(
@@ -343,8 +347,8 @@ export function createPlaceOrderInstruction(
   // session signer — the session key is only an authorized SIGNER (account [3]).
   const [tradingCredit] = findTradingCreditPda(owner, marketIndex, programId);
 
-  // disc(1) + side(1) + type(1) + price(8) + size(8) + expiry(8) + slippage(2) = 29
-  const data = Buffer.alloc(29);
+  // disc(1)+side(1)+type(1)+price(8)+size(8)+expiry(8)+slippage(2)+reduce_only(1) = 30
+  const data = Buffer.alloc(30);
   data[0] = IX_PLACE_ORDER;
   data[1] = params.side;
   data[2] = params.orderType;
@@ -352,6 +356,7 @@ export function createPlaceOrderInstruction(
   writeU64LE(data, params.size, 11);
   writeI64LE(data, params.expiryTs ?? 0n, 19);
   writeU16LE(data, params.maxSlippageBps ?? 0, 27);
+  data[29] = params.reduceOnly ? 1 : 0;
 
   return new TransactionInstruction({
     keys: [

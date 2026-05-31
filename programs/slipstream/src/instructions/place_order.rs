@@ -31,6 +31,13 @@ use crate::state::{
 ///   size:             u64   (base atoms, must be multiple of market.lot_size)
 ///   expiry_ts:        i64   (0 = never)
 ///   max_slippage_bps: u16   (only enforced for MARKET orders; 0 = disabled)
+///   reduce_only:      u8    (optional 29th byte; 1 = closing/reducing an existing
+///                            position — skips the upfront margin gate, costs the
+///                            taker zero new credit, and never rests a remainder.
+///                            DEVNET NOTE: the ER cannot read the L1 Position, so
+///                            this trusts the caller that it is a reduce. Before
+///                            mainnet this MUST be gated by an on-chain position
+///                            check; see the Trust Model.)
 const IX_DATA_LEN: usize = 1 + 1 + 8 + 8 + 8 + 2;
 
 pub fn process(
@@ -61,6 +68,8 @@ pub fn process(
     let size = u64::from_le_bytes(data[10..18].try_into().unwrap());
     let expiry_ts = i64::from_le_bytes(data[18..26].try_into().unwrap());
     let max_slippage_bps = u16::from_le_bytes([data[26], data[27]]);
+    // Optional 29th byte: reduce_only flag (backward compatible — absent => 0).
+    let reduce_only = data.get(28).copied().unwrap_or(0) != 0;
 
     if side != SIDE_BID && side != SIDE_ASK {
         return Err(SlipstreamError::InvalidOrderSide.into());
@@ -141,10 +150,14 @@ pub fn process(
         reconcile_credit(&ob, credit);
     }
 
-    // Check credit availability before any side effects
+    // Check credit availability before any side effects.
+    // reduce_only orders SKIP the margin gate: a position-reducing order should
+    // not have to reserve fresh margin (settlement realizes PnL and releases the
+    // original collateral). They also cost the taker zero new credit below and
+    // never rest a remainder, so they cannot over-reserve credit.
     {
         let credit = TradingCredit::from_account_info(trading_credit_acc)?;
-        if credit.available() < margin_required {
+        if !reduce_only && credit.available() < margin_required {
             return Err(SlipstreamError::InsufficientCredit.into());
         }
         if (credit.active_orders as u8) >= orders_per_user {
@@ -198,9 +211,12 @@ pub fn process(
         return Err(SlipstreamError::FokCannotFill.into());
     }
 
-    // Rest any remainder as a resting order
+    // Rest any remainder as a resting order.
+    // reduce_only never rests (IOC-like): a close should flatten, not leave a new
+    // resting order that would reserve margin.
     let mut rest_margin: u64 = 0;
     if remaining_size > 0
+        && !reduce_only
         && (order_type == ORDER_TYPE_LIMIT || order_type == ORDER_TYPE_POST_ONLY)
     {
         let rest_notional = compute_notional(remaining_size, price)?;
@@ -251,7 +267,10 @@ pub fn process(
     //     via settlement).
     //   - rest_margin: committed (held against the new resting slot).
     let credit = TradingCredit::from_account_info_mut(trading_credit_acc)?;
-    if taker_margin_spent > 0 {
+    if taker_margin_spent > 0 && !reduce_only {
+        // reduce_only closes do NOT spend new credit — the position's original
+        // collateral is released at settlement, so charging fresh margin here
+        // would double-count and re-trigger InsufficientCredit.
         credit.credit = credit
             .credit
             .checked_sub(taker_margin_spent)
