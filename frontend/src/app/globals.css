@@ -640,3 +640,22 @@ input[type="number"] {
 
 /* The emerald accent tints used for badges read fine on both themes; only the
    neutral whites needed remapping above. */
+
+/* Mermaid diagram blocks in the docs web view. Before the client runtime swaps
+   the source for SVG, keep the raw graph text hidden so users don't see code. */
+.doc-prose pre.mermaid {
+  background: transparent;
+  border: none;
+  padding: 0.5rem 0;
+  margin: 1.25rem 0;
+  text-align: center;
+  color: transparent; /* hide raw source until rendered */
+  overflow-x: auto;
+}
+.doc-prose pre.mermaid svg {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
+/* Once mermaid processes a node it sets data-processed="true". */
+.doc-prose pre.mermaid[data-processed="true"] { color: inherit; }

@@ -1,5 +1,6 @@
 import { getDoc, listDocs } from "@/lib/docs";
 import { notFound } from "next/navigation";
+import { MermaidRunner } from "../mermaid-runner";
 
 // Pre-render every doc slug at build time.
 export function generateStaticParams() {
@@ -17,9 +18,12 @@ export default async function DocPage({
   const doc = getDoc(slug);
   if (!doc) notFound();
   return (
-    <article
-      className="doc-prose"
-      dangerouslySetInnerHTML={{ __html: doc.html }}
-    />
+    <>
+      <article
+        className="doc-prose"
+        dangerouslySetInnerHTML={{ __html: doc.html }}
+      />
+      <MermaidRunner />
+    </>
   );
 }

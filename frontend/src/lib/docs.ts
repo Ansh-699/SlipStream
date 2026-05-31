@@ -79,7 +79,22 @@ export function getDoc(slug: string): RenderedDoc | null {
   if (!file) return null;
   const raw = readFileSync(join(DOCS_DIR, file), "utf-8");
   marked.setOptions({ gfm: true, breaks: false });
-  const parsed = marked.parse(raw) as string;
+  // Render ```mermaid blocks as <pre class="mermaid"> (raw graph source) so the
+  // client-side mermaid runtime can turn them into SVG. Everything else uses the
+  // default renderer.
+  const renderer = new marked.Renderer();
+  const defaultCode = renderer.code.bind(renderer);
+  renderer.code = function (token: Parameters<typeof defaultCode>[0]) {
+    if ((token.lang || "").trim().toLowerCase() === "mermaid") {
+      const escaped = token.text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+      return `<pre class="mermaid">${escaped}</pre>`;
+    }
+    return defaultCode(token);
+  };
+  const parsed = marked.parse(raw, { renderer }) as string;
   return {
     title: firstHeading(raw, file.replace(/\.md$/i, "")),
     html: rewriteLinks(parsed),

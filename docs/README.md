@@ -19,6 +19,7 @@ Start at the top and go down — each builds on the previous.
 
 | # | Doc | What it answers |
 |---|-----|-----------------|
+| 0 | [Architecture Diagrams](./00-architecture-diagrams.md) | **The whole system in pictures** — layer cake, Mermaid system/sequence/state diagrams, settlement pipeline, margin flow, state map, instruction map, deployment topology. |
 | 1 | [Architecture Overview](./01-architecture-overview.md) | The whole system at a glance: ER vs L1, the four layers, data flow of an order. |
 | 2 | [The OrderBook & PDA Storage](./02-orderbook-and-pda-storage.md) | **How does a PDA hold a ~612 KB order book?** Account size limits, the 10,240-byte CPI growth cap, chunked allocation, zero-copy, ring buffers. |
 | 3 | [Ephemeral Rollups & Delegation](./03-ephemeral-rollups-and-delegation.md) | What an ER is, what delegation/commit/undelegate mean, the sponsored-commit cap, why only the OrderBook is delegated. |
