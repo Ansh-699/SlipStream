@@ -86,9 +86,8 @@ export function LandingView() {
           </LiquidGlassCard>
         </div>
 
-        <h1 className="mt-9 text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight leading-[1.05]">
-          On-chain perps at
-          <span className="bg-gradient-to-r from-emerald-300 via-teal-300 to-emerald-400 bg-clip-text text-transparent"> rollup speed</span>
+        <h1 className="mt-9 text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.05]">
+          <span className="bg-gradient-to-r from-emerald-300 via-teal-300 to-emerald-400 bg-clip-text text-transparent">Slipstream</span>
         </h1>
         <p className="mt-5 mx-auto max-w-[620px] text-base sm:text-lg text-white/60 leading-relaxed">
           A perpetual-futures central-limit order book on Solana. Matching runs in a
