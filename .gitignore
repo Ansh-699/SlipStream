@@ -3,6 +3,8 @@ node_modules/
 dist/
 .next/
 .env
+.env.*
+!.env.example
 .env.local
 *.so
 *.log
@@ -10,3 +12,9 @@ dist/
 .DS_Store
 *.swp
 *.swo
+
+# Deployment secrets — NEVER commit signing keys
+secrets/
+*keypair*.json
+*-id.json
+id.json

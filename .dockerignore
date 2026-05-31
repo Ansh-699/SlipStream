@@ -1,0 +1,16 @@
+# Keep the keeper image lean and never ship secrets.
+**/node_modules
+**/dist
+**/.next
+**/target
+frontend
+tests
+docs
+.git
+.superstack
+secrets
+**/.env
+**/.env.*
+!**/.env.example
+*.log
+*.so

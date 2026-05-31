@@ -1,0 +1,68 @@
+# Slipstream keepers on a VM (DigitalOcean droplet / AWS Lightsail / EC2).
+#
+# Usage (from the repo root, slipstream/):
+#   cp keepers/.env.example keepers/.env   # then edit
+#   # place your signing keypair at ./secrets/keeper-id.json (chmod 600)
+#   docker compose up -d
+#   docker compose logs -f
+#
+# Each service is one long-running bot. They share the same image and keypair;
+# only the command differs. Split out so one crashing bot restarts independently.
+services:
+  fill-log:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
+    image: slipstream-keepers
+    command: ["npm", "run", "fill-log-keeper"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+
+  funding:
+    image: slipstream-keepers
+    command: ["npm", "run", "funding"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+    depends_on: [fill-log]
+
+  liquidation:
+    image: slipstream-keepers
+    command: ["npm", "run", "liquidation"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+    depends_on: [fill-log]
+
+  twap:
+    image: slipstream-keepers
+    command: ["npm", "run", "twap"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+    depends_on: [fill-log]
+
+  # Demo liquidity. Disable (comment out) if you don't want bot order flow.
+  market-maker:
+    image: slipstream-keepers
+    command: ["npm", "run", "bots"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+    depends_on: [fill-log]

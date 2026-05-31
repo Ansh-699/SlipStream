@@ -1,0 +1,19 @@
+{
+  "network": "https://api.devnet.solana.com",
+  "erRpc": "https://devnet.magicblock.app",
+  "programId": "7qujfsb4ZPbQHYVZdqiXq1r8tVAMyyukX94obPqXbVwz",
+  "authority": "A5sV4PkkVM4gm3rejACvKFgxEMmj8ouGsffSKT5qYVc8",
+  "globalState": "hyPv4sWbkHPyrVa5zFHkiuqBLCmZdAiZeupieXrEEcL",
+  "market": "ECUp8pXzVLzxjVs8mtKBJma3mdcHf8zSC4cqPeBy8MPy",
+  "orderBook": "83zMFL6cHjgXkQ7KRNcgtHaZ1fhyNgxhM8aMpPpEnMqe",
+  "usdcMint": "Fakb9gPACMBbfQgepdAEmPCYmNU4iKAqQhFKfrDU6gDr",
+  "usdcVault": "BTWVG5oDmomaMkpdX4xYgfjr1gpEGodW5oPe3k5P71qr",
+  "pythFeed": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+  "switchboardFeed": "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR",
+  "marketIndex": 0,
+  "tickSize": "1000",
+  "lotSize": "100000000",
+  "maxLeverage": 20,
+  "deployedAt": "2026-05-30T09:00:00.000Z",
+  "lastUpgradeSignature": "41hwsME9KYzrNzgtCMbgmZr4wfwRBm3DDnZ5Z8TcakwJXFAjf62hLRh1reEH2WDp5Fb8NbkbTwEdSVpsQP37RcD6"
+}

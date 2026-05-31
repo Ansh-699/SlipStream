@@ -21,8 +21,20 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// frontend/scripts -> frontend -> slipstream -> repo root
-const MANIFEST_SRC = join(__dirname, "..", "..", "..", "deploy.json");
+// Resolve deploy.json from the first location that exists. Ordered so a hosted
+// build (e.g. Vercel) that only checks out the `slipstream/` repo still finds a
+// committed copy, while a full local monorepo checkout keeps working too:
+//   1. DEPLOY_MANIFEST env var (explicit override)
+//   2. frontend/scripts -> frontend -> slipstream/deploy.json  (committed, in-repo)
+//   3. frontend/scripts -> frontend -> slipstream -> repo-root/deploy.json (local monorepo)
+const MANIFEST_CANDIDATES = [
+  process.env.DEPLOY_MANIFEST,
+  join(__dirname, "..", "..", "deploy.json"),
+  join(__dirname, "..", "..", "..", "deploy.json"),
+].filter(Boolean);
+
+const MANIFEST_SRC =
+  MANIFEST_CANDIDATES.find((p) => existsSync(p)) || MANIFEST_CANDIDATES[1];
 const OUT_DIR = join(__dirname, "..", "src", "lib");
 const OUT_FILE = join(OUT_DIR, "deploy-manifest.generated.json");
 
