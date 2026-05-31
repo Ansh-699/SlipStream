@@ -9,9 +9,11 @@ import { useSession } from "@/hooks/use-session";
 const PRICE_SCALE = 1_000_000;
 
 export function SessionPanel() {
-  const { state, busy, initialize, fund, delegate, rotate, closeLegacyCredit } = useSession(0);
+  const { state, busy, step, error, notice, initialize, requestFaucet, fund, delegate, rotate, closeLegacyCredit } = useSession(0);
   const [depositAmt, setDepositAmt] = useState("1000");
   const [amount, setAmount] = useState("500");
+
+  const usdcBal = Number(state.usdcBalance) / PRICE_SCALE;
 
   const status = !state.initialized
     ? "uninitialized"
@@ -92,9 +94,55 @@ export function SessionPanel() {
           </div>
         )}
 
+        {/* Live status: loading step / error / success — so the user always
+            knows whether deposit/ER succeeded or why it didn't. */}
+        {step && (
+          <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-200">
+            <span className="h-3 w-3 rounded-full border-2 border-emerald-300/40 border-t-emerald-300 animate-spin" />
+            {step}
+          </div>
+        )}
+        {error && (
+          <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-2 text-[11px] text-rose-200 break-words">
+            {error}
+          </div>
+        )}
+        {notice && !error && !step && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-200 break-words">
+            {notice}
+          </div>
+        )}
+
         {/* Step 1: deposit collateral + create credit account (one click). */}
         {!state.initialized && (
-          <div className="space-y-1.5">
+          <div className="space-y-2">
+            {/* Wallet USDC balance + faucet for new wallets. */}
+            <div className="flex items-center justify-between rounded-md bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
+              <div className="flex flex-col">
+                <span className="text-[9px] uppercase tracking-wider text-white/40 font-semibold">
+                  Wallet USDC
+                </span>
+                <span className="font-mono font-bold text-sm tnum text-white">
+                  ${usdcBal.toFixed(2)}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs"
+                onClick={requestFaucet}
+                disabled={busy}
+              >
+                {busy && step?.includes("USDC") ? "…" : "Get test USDC"}
+              </Button>
+            </div>
+            {usdcBal <= 0 && (
+              <div className="text-[10px] leading-tight text-amber-400">
+                New wallet detected with no test USDC. Click “Get test USDC” to
+                mint some (devnet test tokens), then deposit.
+              </div>
+            )}
+
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
               Deposit collateral (USDC)
             </label>
@@ -111,9 +159,9 @@ export function SessionPanel() {
                 size="lg"
                 variant="outline"
                 onClick={() => initialize(parseFloat(depositAmt || "0"))}
-                disabled={busy || !depositAmt || parseFloat(depositAmt) <= 0}
+                disabled={busy || !depositAmt || parseFloat(depositAmt) <= 0 || usdcBal <= 0}
               >
-                {busy ? "…" : "Deposit + Init"}
+                {busy && !step?.includes("USDC") ? "…" : "Deposit + Init"}
               </Button>
             </div>
             <div className="text-[10px] text-muted-foreground">
@@ -135,7 +183,7 @@ export function SessionPanel() {
                 className="h-9 text-sm"
               />
               <Button size="lg" onClick={() => fund(parseFloat(amount || "0"))} disabled={busy}>
-                Fund credit
+                {busy ? "…" : "Fund credit"}
               </Button>
             </div>
             <div className="text-[10px] text-muted-foreground">

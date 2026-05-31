@@ -9,7 +9,7 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
-import { getAssociatedTokenAddress } from "@solana/spl-token";
+import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import { PROGRAM_ID, USDC_MINT, USDC_VAULT, ER_RPC } from "@/lib/manifest";
 import {
   DELEGATION_PROGRAM_ID,
@@ -53,6 +53,43 @@ const SESSION_FUND_SOL = Number(
   process.env.NEXT_PUBLIC_SESSION_FUND_SOL ?? "0"
 );
 
+/** Lightweight namespaced console logger so each step of the deposit/ER flow is
+ *  visible in the browser console with timing — makes "did it work?" answerable. */
+function slog(step: string, msg: string, extra?: unknown): void {
+  const ts = new Date().toISOString().split("T")[1].replace("Z", "");
+  if (extra !== undefined) {
+    // eslint-disable-next-line no-console
+    console.log(`%c[session ${ts}] ${step}: ${msg}`, "color:#34d399", extra);
+  } else {
+    // eslint-disable-next-line no-console
+    console.log(`%c[session ${ts}] ${step}: ${msg}`, "color:#34d399");
+  }
+}
+
+/** Turn an on-chain / wallet error into a short, human, actionable message. */
+function humanizeError(err: unknown): string {
+  const anyErr = err as { message?: string; logs?: string[]; name?: string } | null;
+  const logs = Array.isArray(anyErr?.logs) ? anyErr!.logs! : [];
+  const hay = [anyErr?.message ?? String(err), ...logs].join("\n");
+
+  if (/insufficient (lamports|funds for rent|funds)/i.test(hay)) {
+    return "Not enough devnet SOL to pay fees/rent. Airdrop some SOL to your wallet and retry.";
+  }
+  if (/could not find account|account does not exist|invalid account owner|TokenAccountNotFound/i.test(hay)) {
+    return "You have no test USDC yet. Click “Get test USDC” first, then deposit.";
+  }
+  if (/0x1|insufficient/i.test(hay) && /transfer/i.test(hay)) {
+    return "USDC transfer failed — your balance is lower than the deposit amount.";
+  }
+  if (/User rejected|rejected the request|cancelled/i.test(hay)) {
+    return "You rejected the transaction in your wallet.";
+  }
+  if (/blockhash|expired|timed out/i.test(hay)) {
+    return "Network was slow and the transaction expired. Please retry.";
+  }
+  return anyErr?.message ?? String(err);
+}
+
 export interface SessionState {
   initialized: boolean;
   delegated: boolean;
@@ -62,6 +99,8 @@ export interface SessionState {
   activeOrders: number;
   /** Free collateral deposited in the on-chain UserAccount (not yet in credit). */
   freeCollateral: bigint;
+  /** The wallet's SPL USDC balance (atoms, 6-dp). 0n if no ATA / no balance. */
+  usdcBalance: bigint;
   userInitialized: boolean;
   /** The persisted session key's pubkey (base58), or null if none stored. */
   sessionPublicKey: string | null;
@@ -134,6 +173,7 @@ export function useSession(marketIndex: number = 0) {
     available: 0n,
     activeOrders: 0,
     freeCollateral: 0n,
+    usdcBalance: 0n,
     userInitialized: false,
     sessionPublicKey: null,
     sessionActive: false,
@@ -142,6 +182,12 @@ export function useSession(marketIndex: number = 0) {
     legacyDelegated: false,
   });
   const [busy, setBusy] = useState(false);
+  /** Human label for the in-flight step (drives the loading text), or null. */
+  const [step, setStep] = useState<string | null>(null);
+  /** Last error message (human-readable), or null. */
+  const [error, setError] = useState<string | null>(null);
+  /** Last success message (e.g. "Deposited $1000"), or null. */
+  const [notice, setNotice] = useState<string | null>(null);
 
   /**
    * Return the locally-stored session Keypair IFF it is still valid: it exists,
@@ -175,6 +221,18 @@ export function useSession(marketIndex: number = 0) {
         /* ignore */
       }
 
+      // Wallet SPL USDC balance (so the UI can prompt the faucet when it's 0).
+      let usdcBalance = 0n;
+      if (USDC_MINT) {
+        try {
+          const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+          const acct = await getAccount(connection, ata);
+          usdcBalance = acct.amount;
+        } catch {
+          usdcBalance = 0n; // no ATA / no balance yet
+        }
+      }
+
       const stored = loadStoredSession(publicKey, marketIndex);
       const sessionPublicKey = stored ? stored.keypair.publicKey.toBase58() : null;
 
@@ -185,6 +243,7 @@ export function useSession(marketIndex: number = 0) {
           ...s,
           initialized: false,
           freeCollateral,
+          usdcBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -201,6 +260,7 @@ export function useSession(marketIndex: number = 0) {
           ...s,
           initialized: false,
           freeCollateral,
+          usdcBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -236,6 +296,7 @@ export function useSession(marketIndex: number = 0) {
           available: 0n,
           activeOrders: 0,
           freeCollateral,
+          usdcBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -276,6 +337,7 @@ export function useSession(marketIndex: number = 0) {
         available: credit.available,
         activeOrders: credit.activeOrders,
         freeCollateral,
+        usdcBalance,
         userInitialized,
         sessionPublicKey,
         sessionActive,
@@ -300,21 +362,62 @@ export function useSession(marketIndex: number = 0) {
     async (depositUsdc: number) => {
       if (!publicKey) return;
       if (!USDC_MINT || !USDC_VAULT) {
+        setError("USDC mint/vault missing from deploy manifest.");
         throw new Error("USDC mint/vault missing from deploy manifest");
       }
       setBusy(true);
+      setError(null);
+      setNotice(null);
       try {
-        const ixs = [];
+        const depositAmount = BigInt(Math.round(depositUsdc * PRICE_SCALE));
+        slog("init", `requested deposit of $${depositUsdc} (${depositAmount} atoms)`);
 
+        // ── PREFLIGHT: a brand-new wallet typically has no USDC ATA / balance.
+        // Catch that here with a clear, actionable message instead of letting
+        // the wallet throw a generic "Unexpected error" at simulate time.
+        const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+        if (depositAmount > 0n) {
+          let bal = 0n;
+          try {
+            const acct = await getAccount(connection, ata);
+            bal = acct.amount;
+          } catch {
+            bal = 0n; // ATA doesn't exist yet
+          }
+          slog("init", `wallet USDC balance = ${Number(bal) / PRICE_SCALE}`);
+          if (bal < depositAmount) {
+            const msg =
+              bal === 0n
+                ? "You have no test USDC. Click “Get test USDC” first, then deposit."
+                : `Deposit ($${depositUsdc}) exceeds your USDC balance ($${(Number(bal) / PRICE_SCALE).toFixed(2)}). Lower the amount or get more test USDC.`;
+            setError(msg);
+            slog("init", `BLOCKED: ${msg}`);
+            return;
+          }
+        }
+
+        // Also ensure the wallet has a little SOL for fees/rent.
+        try {
+          const lamports = await connection.getBalance(publicKey);
+          slog("init", `wallet SOL = ${(lamports / 1e9).toFixed(4)}`);
+          if (lamports < 3_000_000) {
+            setError("Your wallet has almost no devnet SOL — airdrop some SOL (for fees/rent) and retry.");
+            return;
+          }
+        } catch {
+          /* non-fatal */
+        }
+
+        const ixs = [];
         const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
         const uInfo = await connection.getAccountInfo(userPda);
         if (!(uInfo && uInfo.data[0] === DISC_USER_ACCOUNT)) {
+          slog("init", "will create UserAccount");
           ixs.push(createInitializeUserInstruction(publicKey, PROGRAM_ID));
         }
 
-        const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-        const depositAmount = BigInt(Math.round(depositUsdc * PRICE_SCALE));
         if (depositAmount > 0n) {
+          slog("init", "will deposit collateral");
           ixs.push(
             createDepositCollateralInstruction(publicKey, ata, USDC_VAULT, depositAmount, PROGRAM_ID)
           );
@@ -323,56 +426,127 @@ export function useSession(marketIndex: number = 0) {
         const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
         const cInfo = await connection.getAccountInfo(creditPda);
         if (!(cInfo && cInfo.data[0] === DISC_TRADING_CREDIT)) {
+          slog("init", "will create TradingCredit");
           ixs.push(createInitializeTradingCreditInstruction(publicKey, marketIndex, PROGRAM_ID));
         }
 
         // Create the L1 Position account too, so settled fills have somewhere to
-        // land (settle_from_log skips fills whose owner has no Position). Without
-        // this, a user's ER fills would never finalize to an L1 position.
+        // land (settle_from_log skips fills whose owner has no Position).
         const [positionPda] = findPositionPda(publicKey, marketIndex, PROGRAM_ID);
         const pInfo = await connection.getAccountInfo(positionPda);
         if (!pInfo) {
+          slog("init", "will create Position");
           ixs.push(createInitializePositionInstruction(publicKey, marketIndex, PROGRAM_ID));
         }
 
         if (ixs.length === 0) {
+          slog("init", "nothing to do (already set up)");
+          setNotice("Already initialized.");
           await refresh();
           return;
         }
 
+        setStep("Awaiting wallet signature…");
         const tx = new Transaction().add(...ixs);
+        slog("init", `sending tx with ${ixs.length} instruction(s)`);
         const sig = await sendTransaction(tx, connection);
+        slog("init", `submitted: ${sig}`);
+        setStep("Confirming on Solana…");
         await confirmSignature(connection, sig, { timeoutMs: 45_000 });
+        slog("init", `CONFIRMED: ${sig}`);
+        setNotice(depositAmount > 0n ? `Deposited $${depositUsdc} and initialized.` : "Initialized.");
         await refresh();
+      } catch (err) {
+        const msg = humanizeError(err);
+        setError(msg);
+        slog("init", `FAILED: ${msg}`, err);
+        // eslint-disable-next-line no-console
+        console.error("[session] initialize failed:", err);
       } finally {
+        setStep(null);
         setBusy(false);
       }
     },
     [publicKey, sendTransaction, connection, marketIndex, refresh]
   );
 
+  // Request test USDC from the server faucet (operator mints to the wallet's ATA).
+  const requestFaucet = useCallback(async () => {
+    if (!publicKey) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    setStep("Requesting test USDC…");
+    try {
+      slog("faucet", `requesting test USDC for ${publicKey.toBase58()}`);
+      const res = await fetch("/api/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: publicKey.toBase58() }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.ok) {
+        const msg = body?.error ?? `Faucet failed (HTTP ${res.status}).`;
+        setError(msg);
+        slog("faucet", `FAILED: ${msg}`);
+        return;
+      }
+      slog("faucet", `minted ${body.amount} USDC, sig=${body.signature}`);
+      setNotice(`Received ${body.amount} test USDC. You can deposit now.`);
+      // Give the RPC a moment to reflect the mint, then refresh balances.
+      await new Promise((r) => setTimeout(r, 1500));
+      await refresh();
+    } catch (err) {
+      const msg = humanizeError(err);
+      setError(msg);
+      slog("faucet", `FAILED: ${msg}`, err);
+    } finally {
+      setStep(null);
+      setBusy(false);
+    }
+  }, [publicKey, refresh]);
+
   // fund_trading_credit (0x0e) — base layer.
   const fund = useCallback(
     async (amountUsdc: number) => {
       if (!publicKey) return;
       setBusy(true);
+      setError(null);
+      setNotice(null);
       try {
         const amount = BigInt(Math.round(amountUsdc * PRICE_SCALE));
+        slog("fund", `funding credit with $${amountUsdc}`);
+        if (amount > state.freeCollateral) {
+          const msg = `Not enough deposited collateral: have $${(Number(state.freeCollateral) / PRICE_SCALE).toFixed(2)}, need $${amountUsdc}.`;
+          setError(msg);
+          slog("fund", `BLOCKED: ${msg}`);
+          return;
+        }
         const ix = createFundTradingCreditInstruction(
           publicKey,
           marketIndex,
           amount,
           PROGRAM_ID
         );
+        setStep("Awaiting wallet signature…");
         const tx = new Transaction().add(ix);
         const sig = await sendTransaction(tx, connection);
+        slog("fund", `submitted: ${sig}`);
+        setStep("Confirming on Solana…");
         await confirmSignature(connection, sig, { timeoutMs: 45_000 });
+        slog("fund", `CONFIRMED: ${sig}`);
+        setNotice(`Funded $${amountUsdc} into trading credit.`);
         await refresh();
+      } catch (err) {
+        const msg = humanizeError(err);
+        setError(msg);
+        slog("fund", `FAILED: ${msg}`, err);
       } finally {
+        setStep(null);
         setBusy(false);
       }
     },
-    [publicKey, sendTransaction, connection, marketIndex, refresh]
+    [publicKey, sendTransaction, connection, marketIndex, refresh, state.freeCollateral]
   );
 
   // delegate_trading_credit (0x0f) — BASE layer. THE ONE SIGNATURE.
@@ -389,11 +563,15 @@ export function useSession(marketIndex: number = 0) {
   const delegate = useCallback(async () => {
     if (!publicKey) return;
     setBusy(true);
+    setError(null);
+    setNotice(null);
     try {
+      slog("delegate", "starting ER delegation + session authorize");
       // 1+2: generate + persist the session key with a TTL.
       const sessionKp = Keypair.generate();
       const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL_SECS;
       storeSession(publicKey, marketIndex, sessionKp, expiry);
+      slog("delegate", `session key ${sessionKp.publicKey.toBase58()} (expires ${new Date(expiry * 1000).toISOString()})`);
 
       // 3: delegate + authorize the session in ONE instruction/signature.
       const ix = createDelegateTradingCreditInstruction(
@@ -416,10 +594,20 @@ export function useSession(marketIndex: number = 0) {
         );
       }
 
+      setStep("Awaiting wallet signature…");
       const sig = await sendTransaction(tx, connection);
+      slog("delegate", `submitted: ${sig}`);
+      setStep("Delegating to the rollup…");
       await confirmSignature(connection, sig, { timeoutMs: 45_000 });
+      slog("delegate", `CONFIRMED: ${sig}`);
+      setNotice("Trading session active — you can place orders now.");
       await refresh();
+    } catch (err) {
+      const msg = humanizeError(err);
+      setError(msg);
+      slog("delegate", `FAILED: ${msg}`, err);
     } finally {
+      setStep(null);
       setBusy(false);
     }
   }, [publicKey, sendTransaction, connection, marketIndex, refresh]);
@@ -507,7 +695,13 @@ export function useSession(marketIndex: number = 0) {
   return {
     state,
     busy,
+    step,
+    error,
+    notice,
+    clearError: () => setError(null),
+    clearNotice: () => setNotice(null),
     initialize,
+    requestFaucet,
     fund,
     delegate,
     rotate,
