@@ -18,6 +18,8 @@ function computeHealthFactor(
   markPrice: bigint,
   maxLeverage: number
 ): number {
+  if (maxLeverage <= 0) return Infinity; // corrupt/unset market — treat as not liquidatable
+
   const absSize = pos.size < 0n ? -pos.size : pos.size;
   const notional = (absSize * markPrice) / BigInt(PRICE_SCALE);
   const initialMargin = notional / BigInt(maxLeverage);
@@ -120,6 +122,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Liquidation keeper crashed:", err);
+  log("LIQUIDATION", `crashed: ${err?.message ?? err}`);
   process.exit(1);
 });

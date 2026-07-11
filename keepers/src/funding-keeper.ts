@@ -67,6 +67,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Funding keeper crashed:", err);
+  log("FUNDING", `crashed: ${err?.message ?? err}`);
   process.exit(1);
 });

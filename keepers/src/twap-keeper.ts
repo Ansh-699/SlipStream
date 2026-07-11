@@ -58,6 +58,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("TWAP keeper crashed:", err);
+  log("TWAP", `crashed: ${err?.message ?? err}`);
   process.exit(1);
 });

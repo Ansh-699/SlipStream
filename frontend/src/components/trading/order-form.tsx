@@ -12,11 +12,18 @@ import { useMarket } from "@/hooks/use-market";
 import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import { PROGRAM_ID, MARKET_INDEX, ER_RPC, explorerTx } from "@/lib/manifest";
-import { createPlaceOrderInstruction, PRICE_SCALE } from "@/lib/slipstream";
+import {
+  createPlaceOrderInstruction,
+  PRICE_SCALE,
+  SIDE_BID,
+  SIDE_ASK,
+  ORDER_TYPE_LIMIT,
+  ORDER_TYPE_MARKET,
+} from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
 type OrderType = "limit" | "market";
-const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: 0, market: 4 };
+const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: ORDER_TYPE_LIMIT, market: ORDER_TYPE_MARKET };
 
 // SOL-PERP market params (must match deploy.json / initialize_market).
 const TICK_SIZE = 1_000n; // $0.001 in 6-dp price scale
@@ -112,24 +119,24 @@ export function OrderForm() {
     setLastErr(null);
     setLastSig(null);
     try {
-      const sideVal = side === "long" ? 0 : 1;
+      const sideVal = side === "long" ? SIDE_BID : SIDE_ASK;
       const typeVal = ORDER_TYPE_VALUES[orderType];
       const sizeVal = BigInt(Math.round(derived.sizeSol * 1e9));
       const priceVal =
-        typeVal === 4 ? 0n : BigInt(Math.round(parseFloat(price) * PRICE_SCALE));
-      const slippageVal = typeVal === 4 ? parseInt(slippageBps || "0", 10) : 0;
+        typeVal === ORDER_TYPE_MARKET ? 0n : BigInt(Math.round(parseFloat(price) * PRICE_SCALE));
+      const slippageVal = typeVal === ORDER_TYPE_MARKET ? parseInt(slippageBps || "0", 10) : 0;
 
       if (sizeVal <= 0n || sizeVal % LOT_SIZE !== 0n) {
         setLastErr("Size must round to at least one 0.1 SOL lot — increase margin or leverage.");
         setSubmitting(false);
         return;
       }
-      if (typeVal !== 4 && (priceVal <= 0n || priceVal % TICK_SIZE !== 0n)) {
+      if (typeVal !== ORDER_TYPE_MARKET && (priceVal <= 0n || priceVal % TICK_SIZE !== 0n)) {
         setLastErr("Price must be a positive multiple of $0.001 (tick size).");
         setSubmitting(false);
         return;
       }
-      if (typeVal !== 4) {
+      if (typeVal !== ORDER_TYPE_MARKET) {
         const required = requiredMarginAtoms(sizeVal, priceVal);
         if (session.initialized && required > session.available) {
           setLastErr(
@@ -220,7 +227,7 @@ export function OrderForm() {
         <div className="inline-flex h-9 w-full rounded-md bg-black/5 dark:bg-black/20 p-0.5 border border-black/10 dark:border-white/10 shadow-inner">
           <RadioGroup
             value={side}
-            onValueChange={(v) => setSide(v as any)}
+            onValueChange={(v) => setSide(v as "long" | "short")}
             className="group w-full relative inline-grid grid-cols-[1fr_1fr] items-center gap-0 text-sm font-medium after:absolute after:inset-y-0 after:w-1/2 after:rounded-[4px] after:bg-black/10 dark:after:bg-white/20 after:backdrop-blur-md after:shadow-sm after:transition-transform after:duration-300 after:[transition-timing-function:cubic-bezier(0.16,1,0.3,1)] data-[state=short]:after:translate-x-full data-[state=long]:after:translate-x-0"
             data-state={side}
           >

@@ -54,25 +54,27 @@ Slipstream **splits the system**:
 
 ## How it does it
 
-```
-┌──────────────────── Frontend (Next.js) ────────────────────┐
-│ Wallet · Margin × Leverage Order Form · Live Pyth Charts   │
-│ Order Book · Positions                                     │
-└─────────────────┬───────────────────────┬──────────────────┘
-                  │                       │
-                  │ /api/rpc/er           │ /api/rpc/base
-                  │ (orders)              │ (positions, balances)
-                  ▼                       ▼
+```mermaid
+flowchart TB
+  subgraph FE["Frontend · Next.js"]
+    UI["Wallet · Margin × Leverage Order Form<br/>Live Pyth Charts · Order Book · Positions"]
+  end
 
-      ┌──────────────────────┐    commit    ┌────────────────────────┐
-      │ MagicBlock ER        │ ───────────▶│ Solana L1              │
-      │ ~10ms blocks         │  via small   │ Collateral · Vaults    │
-      │ OrderBook (612KB)    │   FillLog    │ Positions · Funding    │
-      │ delegated execution  │              │ (never delegated)      │
-      └──────────────────────┘              └────────────────────────┘
-                    ▲                                  ▲
-                    └──────── Keepers (pm2 bots) ──────┘
-          settlement · funding · liquidation · twap · expiry
+  subgraph ER["MagicBlock ER · ~10ms blocks"]
+    OB["OrderBook (612KB)<br/>delegated execution"]
+  end
+
+  subgraph L1["Solana L1"]
+    BASE["Collateral · Vaults<br/>Positions · Funding<br/>(never delegated)"]
+  end
+
+  KEEP["Keepers (pm2 bots)<br/>settlement · funding · liquidation · twap · expiry"]
+
+  UI -->|"/api/rpc/er (orders)"| OB
+  UI -->|"/api/rpc/base (positions, balances)"| BASE
+  OB -->|"commit via small FillLog"| BASE
+  KEEP --> OB
+  KEEP --> BASE
 ```
 
 - **Program** (`programs/`): written in **Pinocchio** (minimal, zero-dep Solana SDK).

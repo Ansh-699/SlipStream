@@ -66,6 +66,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("expiry keeper crashed:", err);
+  log("EXPIRY", `crashed: ${err?.message ?? err}`);
   process.exit(1);
 });

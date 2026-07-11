@@ -1,4 +1,4 @@
-import { Connection, PublicKey } from "@solana/web3.js";
+import { Connection, GetProgramAccountsFilter, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import {
   decodeMarket,
@@ -88,7 +88,7 @@ export async function fetchAllPositions(
   connection: Connection,
   marketIndex?: number
 ): Promise<{ pubkey: PublicKey; account: Position }[]> {
-  const filters = [
+  const filters: GetProgramAccountsFilter[] = [
     { memcmp: { offset: 0, bytes: bs58.encode(Buffer.from([4])) } },
   ];
   if (marketIndex !== undefined) {
@@ -100,7 +100,7 @@ export async function fetchAllPositions(
   }
 
   const accounts = await connection.getProgramAccounts(getKeeperAddresses().programId, {
-    filters: filters as any,
+    filters,
   });
 
   return accounts.map((a) => ({

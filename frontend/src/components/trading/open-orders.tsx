@@ -19,10 +19,12 @@ export function OpenOrders() {
   const { state: session, getSessionKeypair } = useSession(0);
   const { orders, refresh } = useOpenOrders(publicKey ?? null, 0);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelErr, setCancelErr] = useState<string | null>(null);
 
   const handleCancel = async (orderId: bigint) => {
     if (!publicKey) return;
     setCancelling(orderId.toString());
+    setCancelErr(null);
     try {
       const sessionKp = getSessionKeypair();
       const useSessionKey = session.sessionActive && sessionKp !== null;
@@ -54,6 +56,7 @@ export function OpenOrders() {
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
       refresh();
     } catch (err) {
+      setCancelErr(err instanceof Error ? err.message : String(err));
       console.error("cancel failed:", err);
     } finally {
       setCancelling(null);
@@ -114,6 +117,9 @@ export function OpenOrders() {
               ))}
             </tbody>
           </table>
+        )}
+        {cancelErr && (
+          <div className="px-2 pt-2 text-[11px] text-rose-400 break-all">{cancelErr}</div>
         )}
       </div>
     </div>

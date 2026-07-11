@@ -9,7 +9,7 @@ TypeScript SDK, keeper bots, and a Next.js frontend.
 
 > This is a **devnet MVP**. Several mechanisms are deliberately weaker than a
 > mainnet design would require; every such concession is called out explicitly
-> in the relevant doc and in the root `slipstream/README.md` Trust Model.
+> in the relevant doc and in the root `SlipStream/README.md` Trust Model.
 
 ---
 
