@@ -140,8 +140,8 @@ pub fn process(
     // If we get here, either pending_fills == 0, OR the grace window expired and the
     // caller already cleared the intent in a prior call. Either way, proceed.
 
-    // --- Compute liquidator bonus: max(50bps notional, 20% remaining collateral),
-    // capped at the smaller of those, per §16.
+    // --- Compute liquidator bonus: 50bps of notional, capped at 20% of the
+    // position's remaining net collateral, per §16.
     let bonus_bps = apply_bps(notional, 50)?;
     let net_collateral = (pos.collateral as i128 + unrealized_pnl as i128 + funding_payment as i128)
         .max(0) as u64;

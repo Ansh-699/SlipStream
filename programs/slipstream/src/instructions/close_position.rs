@@ -39,8 +39,17 @@ pub fn process(
         return Err(SlipstreamError::PositionNotFound.into());
     }
 
-    // Use mark price for close-at-market
-    let mark_price = market.get_twap().ok_or(SlipstreamError::OracleStale)?;
+    // Use mark price for close-at-market. Prefer `last_mark_price` (refreshed
+    // every crank_twap, same cadence as the circuit breaker) over the 30-min
+    // TWAP: the TWAP lags fast moves, letting a losing trader close against a
+    // stale average for a better price than the live market (liquidations
+    // already price off the live oracle — see liquidate_position.rs). Falls
+    // back to TWAP only if the market hasn't been cranked yet.
+    let mark_price = if market.last_mark_price > 0 {
+        market.last_mark_price
+    } else {
+        market.get_twap().ok_or(SlipstreamError::OracleStale)?
+    };
 
     // Compute unrealized PnL
     let unrealized_pnl = compute_unrealized_pnl(pos.size, pos.entry_price, mark_price)?;
