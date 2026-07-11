@@ -102,6 +102,19 @@ impl Market {
         Some((sum / count as u128) as u64)
     }
 
+    /// Mark price used to settle a close-at-market: prefer `last_mark_price`
+    /// (refreshed every `crank_twap`, the same cadence liquidation's live-oracle
+    /// read effectively tracks) over the lagging 30-min TWAP, which would let a
+    /// losing trader close at a stale, more favorable price during a fast move.
+    /// Falls back to the TWAP only before the market has ever been cranked.
+    pub fn mark_price_for_close(&self) -> Option<u64> {
+        if self.last_mark_price > 0 {
+            Some(self.last_mark_price)
+        } else {
+            self.get_twap()
+        }
+    }
+
     pub fn is_restricted(&self) -> bool {
         self.restricted_mode != 0
     }

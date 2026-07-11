@@ -96,6 +96,33 @@ fn test_market_twap_wraparound() {
 }
 
 #[test]
+fn test_mark_price_for_close_prefers_last_mark_price() {
+    let mut market = Market::zeroed();
+    market.push_twap_price(100_000_000);
+    market.push_twap_price(102_000_000);
+    market.last_mark_price = 150_000_000;
+
+    // A cranked market uses the live last_mark_price, not the lagging TWAP.
+    assert_eq!(market.mark_price_for_close(), Some(150_000_000));
+}
+
+#[test]
+fn test_mark_price_for_close_falls_back_to_twap() {
+    let mut market = Market::zeroed();
+    market.push_twap_price(100_000_000);
+    market.push_twap_price(102_000_000);
+    market.last_mark_price = 0; // never cranked
+
+    assert_eq!(market.mark_price_for_close(), Some(101_000_000));
+}
+
+#[test]
+fn test_mark_price_for_close_none_when_uncranked_and_no_twap() {
+    let market = Market::zeroed();
+    assert_eq!(market.mark_price_for_close(), None);
+}
+
+#[test]
 fn test_user_account_size() {
     assert_eq!(UserAccount::LEN, 56);
 }
