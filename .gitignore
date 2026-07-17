@@ -18,3 +18,6 @@ secrets/
 *keypair*.json
 *-id.json
 id.json
+
+# Fills indexer SQLite DB (keepers/src/shared/fill-db.ts)
+keepers/data/

@@ -9,6 +9,7 @@ import {
 } from "./shared/connection";
 import { getKeeperAddresses } from "./shared/manifest";
 import { sendErTx, classifyTxError, errText } from "./shared/ertx";
+import { recordSettledFills } from "./shared/fill-db";
 import {
   createInitializeFillLogInstruction,
   createDelegateFillLogInstruction,
@@ -225,6 +226,7 @@ async function main() {
       progressed = false;
 
       const window: { sequence: bigint; maker: PublicKey; taker: PublicKey }[] = [];
+      const windowFills: typeof fills = [];
       let maxSeq: bigint | null = null;
       for (const f of fills) {
         if (lastSettledSeq !== null && f.sequence <= lastSettledSeq) continue;
@@ -233,6 +235,7 @@ async function main() {
           maker: new PublicKey(f.maker),
           taker: new PublicKey(f.taker),
         });
+        windowFills.push(f);
         if (maxSeq === null || f.sequence > maxSeq) maxSeq = f.sequence;
         if (window.length >= MAX_FILLS_PER_TX) break;
       }
@@ -272,6 +275,21 @@ async function main() {
         );
         if (maxSeq !== null) lastSettledSeq = maxSeq;
         progressed = true;
+        // Index the settled fills (best-effort; never breaks settlement).
+        recordSettledFills(
+          windowFills.map((f) => ({
+            sequence: f.sequence,
+            marketIndex: MARKET_INDEX,
+            price: f.price,
+            quantity: f.quantity,
+            maker: new PublicKey(f.maker).toBase58(),
+            taker: new PublicKey(f.taker).toBase58(),
+            makerSide: f.makerSide,
+            filledMargin: f.filledMargin,
+            takerFeeBps: f.takerFeeBpsSnapshot,
+            makerRebateBps: f.makerRebateBpsSnapshot,
+          }))
+        );
       } catch (e: any) {
         const c = classifyTxError(e);
         if (c.code === ERR_FILL_QUEUE_EMPTY) {

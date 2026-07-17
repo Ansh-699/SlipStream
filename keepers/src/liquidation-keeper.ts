@@ -1,9 +1,14 @@
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./shared/connection";
 import { fetchMarket, fetchAllPositions } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
-import { createLiquidatePositionInstruction } from "../../client/src/instructions";
-import { PRICE_SCALE } from "../../client/src/constants";
+import {
+  createLiquidatePositionInstruction,
+  createExecuteTriggerInstruction,
+} from "../../client/src/instructions";
+import { PRICE_SCALE, DISC_TRIGGER_ORDER } from "../../client/src/constants";
+import { decodeTriggerOrder, TRIGGER_ORDER_SIZE } from "../../client/src/accounts";
+import bs58 from "bs58";
 
 const SWITCHBOARD_SOL_USD = new PublicKey(
   process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
@@ -33,6 +38,63 @@ function computeHealthFactor(
 
   const equity = BigInt(pos.collateral) + unrealizedPnl;
   return Number(equity * 1_000_000n / maintenanceMargin) / 1_000_000;
+}
+
+/**
+ * Scan and execute SL/TP TriggerOrders. Permissionless: execute_trigger closes
+ * the owner's position once the mark price crosses the trigger, and pays the
+ * trigger account's rent to this keeper. Stale triggers (position already flat)
+ * are also fired — the program garbage-collects them, rent back to the owner.
+ */
+async function executeTriggers(
+  connection: Connection,
+  keeper: Keypair,
+  programId: PublicKey,
+  markPrice: bigint
+): Promise<void> {
+  const accounts = await connection.getProgramAccounts(programId, {
+    filters: [
+      { dataSize: TRIGGER_ORDER_SIZE },
+      { memcmp: { offset: 0, bytes: bs58.encode([DISC_TRIGGER_ORDER]) } },
+    ],
+  });
+
+  for (const { pubkey, account } of accounts) {
+    let trig;
+    try {
+      trig = decodeTriggerOrder(account.data as Buffer);
+    } catch {
+      continue;
+    }
+    if (trig.marketIndex !== MARKET_INDEX) continue;
+
+    const met = trig.triggerAbove
+      ? markPrice >= trig.triggerPrice
+      : markPrice <= trig.triggerPrice;
+    if (!met) continue;
+
+    try {
+      const ix = createExecuteTriggerInstruction(
+        trig.owner,
+        trig.marketIndex,
+        trig.kind,
+        keeper.publicKey,
+        programId
+      );
+      const sig = await sendAndConfirm(connection, new Transaction().add(ix), [keeper]);
+      log(
+        "LIQUIDATION",
+        `Executed ${trig.kind === 0 ? "SL" : "TP"} trigger ${pubkey.toBase58()} ` +
+          `(owner ${trig.owner.toBase58()}, price ${trig.triggerPrice}), sig=${sig}`
+      );
+    } catch (err: any) {
+      // TriggerConditionNotMet (0x135) just means the on-chain mark (crank
+      // cadence) hasn't crossed yet — quiet retry next cycle.
+      if (!String(err?.message ?? err).includes("0x135")) {
+        log("LIQUIDATION", `Trigger ${pubkey.toBase58()} failed: ${err?.message ?? err}`);
+      }
+    }
+  }
 }
 
 async function main() {
@@ -105,6 +167,17 @@ async function main() {
       if (liquidated > 0) {
         log("LIQUIDATION", `Liquidated ${liquidated} positions this cycle`);
       }
+
+      // SL/TP triggers evaluate against the same price the program uses for
+      // close-at-market (last_mark_price, falling back to TWAP).
+      const closePrice =
+        market.lastMarkPrice > 0n ? market.lastMarkPrice : markPriceBigint;
+      await executeTriggers(
+        connection,
+        keeper,
+        getKeeperAddresses().programId,
+        closePrice
+      );
 
       consecutiveErrors = 0;
     } catch (err: any) {
