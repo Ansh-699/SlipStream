@@ -9,6 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Ansh-699/SlipStream/actions/workflows/ci.yml"><img src="https://github.com/Ansh-699/SlipStream/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT" />
+  <img src="https://img.shields.io/badge/Solana-devnet-14F195.svg" alt="Solana devnet" />
+</p>
+
+<p align="center">
   <strong>On-chain perpetual-futures CLOB on Solana  order matching at rollup speed, custody at L1 security.
   Devnet MVP deployed and verified on Solana devnet + the MagicBlock devnet Ephemeral Rollup.</strong>
 </p>
@@ -46,11 +52,15 @@ Slipstream **splits the system**:
 | Limit + market orders, price-time-priority matching in the ER | ✅ live |
 | Margin × leverage (up to 20×), real notional/PnL accounting | ✅ live |
 | ER → L1 settlement into real `Position` accounts (FillLog pipeline) | ✅ live |
+| Partial close + slippage-bounded close-at-market | ✅ live |
+| Stop-loss / take-profit trigger orders (keeper-executed on-chain) | ✅ live, keeper-cranked |
 | Funding rate (8h interval, self-computed 30-min TWAP) | ✅ live, keeper-cranked |
 | Liquidations (health factor, liq price) | ✅ live, keeper-cranked |
 | Session keys (sign once, trade many — no popup per order) | ✅ live |
 | Live Pyth price chart (SSE stream + real OHLC history) | ✅ live |
+| Settled-trade history + system-status panel (SQLite fills indexer) | ✅ live |
 | On-chain order book held in a single ~612 KB PDA | ✅ live |
+| CI (clippy `-D warnings`, mollusk program tests, tsc + eslint) | ✅ green |
 
 ## How it does it
 
@@ -79,7 +89,9 @@ flowchart TB
 
 - **Program** (`programs/`): written in **Pinocchio** (minimal, zero-dep Solana SDK).
   The 612 KB order book is one flat `#[repr(C)]`/`Pod` account read via **zero-copy**
-  slices and grown in 10 KB chunks (Solana's per-CPI growth cap). 34 instructions.
+  slices and grown in 10 KB chunks (Solana's per-CPI growth cap). 37 instructions,
+  including keeper-executed SL/TP triggers and a mark-price freshness gate that
+  refuses to settle closes off a stale/dead price feed.
 - **Settlement** (`FillLog` pipeline): because the 612 KB book can't be committed to L1
   (size cap + a verified 10-commit-per-account limit), a tiny ~8 KB epoch-rotatable
   FillLog carries fills L1-ward: `mirror_fills` (ER) → `commit_fill_log` (ER→L1) →
@@ -120,8 +132,11 @@ devnet deployment. To point at a different RPC, set `BASE_RPC_UPSTREAM` / `ER_RP
 
 ### Verify functionality
 ```bash
-# Program unit tests (math, state, settlement helpers)
-cargo test --manifest-path programs/slipstream/Cargo.toml
+# Program: lint + unit/mollusk tests (build the .so first — the mollusk tests
+# execute the real compiled program). This is exactly what CI runs.
+cargo clippy -p slipstream -- -D warnings
+cargo build-sbf --manifest-path programs/slipstream/Cargo.toml
+cargo test --manifest-path tests/unit/Cargo.toml
 
 # Frontend production build (type-checks + compiles)
 cd frontend && npm run build
@@ -149,18 +164,16 @@ Source of truth is [`deploy.json`](./deploy.json). Current deployment:
 
 ```
 slipstream/
-├── programs/
-│   └── slipstream/            # On-chain program (Pinocchio, Rust)
-├── client/                    # TypeScript client SDK
-├── keepers/                   # Off-chain keeper bots
-│   ├── settlement/
-│   ├── funding/
-│   ├── liquidation/
-│   └── twap/
-├── frontend/                  # Next.js trading UI
-├── scripts/
-│   └── deploy.ts              # Bootstrap deploy + init + emit deploy.json
-├── docs/                      # Full technical documentation
+├── programs/slipstream/       # On-chain program (Pinocchio, Rust) — 37 instructions
+├── client/                    # TypeScript client SDK (PDAs, decoders, ix builders)
+├── keepers/                   # Off-chain bots (flat src/*.ts): fill-log, funding,
+│   │                          #   liquidation+triggers, twap, expiry, market-maker, taker
+│   ├── ecosystem.config.js    # pm2 process definitions
+│   └── data/fills.db          # SQLite fills indexer (gitignored, keeper-written)
+├── frontend/                  # Next.js trading UI (+ /api/rpc, /api/trades, /api/status)
+├── tests/unit/                # Rust unit + mollusk (in-SVM) program tests
+├── docs/                      # 8 technical docs + architecture diagrams
+├── .github/workflows/ci.yml   # clippy + mollusk tests + tsc/eslint
 └── deploy.json                # Live on-chain addresses (source of truth)
 ```
 
