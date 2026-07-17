@@ -58,11 +58,22 @@ const MIRROR_CU_LIMIT = 600_000;
 // (full log + spent commit budget) and rotating to a fresh one.
 const MIRROR_ERRORS_BEFORE_ROTATE = 3;
 
+// Market::_padding2[0..4] holds the L1 settlement cursor (little-endian u32);
+// see programs/slipstream/src/state/market.rs last_settled_sequence().
+const MARKET_CURSOR_OFFSET = 2058;
+
 async function main() {
   const base = getBaseConnection();
   const er = getErConnection();
   const keeper = loadKeypair();
-  const { programId, marketIndex } = getKeeperAddresses();
+  const { programId, marketIndex, market } = getKeeperAddresses();
+
+  /** Read Market.last_settled_sequence from L1 (0 if the account is unreadable). */
+  async function readMarketCursor(): Promise<bigint> {
+    const info = await base.getAccountInfo(market);
+    if (!info || info.data.length < MARKET_CURSOR_OFFSET + 4) return 0n;
+    return BigInt(info.data.readUInt32LE(MARKET_CURSOR_OFFSET));
+  }
 
   log("FILLLOG-KEEPER", `keeper ${keeper.publicKey.toBase58()} market=${marketIndex}`);
 
@@ -147,6 +158,15 @@ async function main() {
     if (!erInfo) return false;
     const erHeader = decodeFillLogHeader(erInfo.data as Buffer);
     if (erHeader.count === 0) return false;
+
+    // Fast-forward guard: a fresh epoch's FillLog re-mirrors the ring from
+    // sequence 0, so right after a rotation everything mirrored may already be
+    // settled on L1. Committing those burns the epoch's 10-commit budget on
+    // no-op settles and forces an endless rotate loop. Keep mirroring (which
+    // advances last_mirrored_sequence) but skip the commit until the mirror
+    // passes the market's settlement cursor.
+    const cursor = await readMarketCursor();
+    if (erHeader.lastMirroredSequence <= cursor) return false;
 
     try {
       const ix = createCommitFillLogInstruction(keeper.publicKey, marketIndex, epoch, programId);
@@ -292,6 +312,14 @@ async function main() {
   }
 
   epoch = await discoverEpoch(epoch);
+  // Seed the local settle cursor from chain so restart doesn't re-send settle
+  // windows for fills the program will just report as already settled.
+  try {
+    lastSettledSeq = await readMarketCursor();
+    log("FILLLOG-KEEPER", `L1 settlement cursor: ${lastSettledSeq}`);
+  } catch {
+    /* base may be unreachable at boot; settle() copes with a null cursor */
+  }
   // Startup needs base-RPC writes (init/delegate). Retry with backoff instead
   // of crashing: the old exit(1)-into-pm2-restart loop burned RPC quota on
   // every relaunch (33k restarts observed).
