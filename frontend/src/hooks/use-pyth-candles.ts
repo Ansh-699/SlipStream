@@ -67,9 +67,9 @@ export function usePythCandles(resolution: Resolution) {
         c: data.c[i],
       }));
       setCandles(out);
-    } catch (e: any) {
+    } catch (e) {
       if (id === reqId.current) {
-        setError(e?.message ?? String(e));
+        setError(e instanceof Error ? e.message : String(e));
         setCandles([]);
       }
     } finally {

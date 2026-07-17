@@ -186,7 +186,8 @@ export function OrderForm() {
       // same-origin proxy and would hang forever).
       try {
         await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
-      } catch (confErr: any) {
+      } catch (confErr) {
+        const confMsg = confErr instanceof Error ? confErr.message : String(confErr);
         let logs: string[] = [];
         try {
           const t = await erConn.getTransaction(sig, {
@@ -197,16 +198,22 @@ export function OrderForm() {
         } catch {
           /* ignore */
         }
-        const name = decodeProgramError({ message: confErr?.message ?? String(confErr), logs });
-        setLastErr(name ? `Order rejected on-chain: ${name}` : confErr?.message ?? "Confirmation failed");
+        const name = decodeProgramError({ message: confMsg, logs });
+        setLastErr(name ? `Order rejected on-chain: ${name}` : confMsg || "Confirmation failed");
         return;
       }
 
       setLastSig(sig);
       setMargin("");
-    } catch (err: any) {
+    } catch (err) {
       const name = decodeProgramError(err);
-      setLastErr(name ? `Order rejected: ${name}` : err.message ?? String(err));
+      setLastErr(
+        name
+          ? `Order rejected: ${name}`
+          : err instanceof Error
+            ? err.message
+            : String(err)
+      );
       console.error("order failed:", err);
     } finally {
       setSubmitting(false);

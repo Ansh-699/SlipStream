@@ -193,7 +193,7 @@ export function LandingView() {
         >
           <h2 className="text-2xl sm:text-3xl font-bold tracking-tight">Ready to trade?</h2>
           <p className="mt-3 text-white/60 max-w-[480px] mx-auto">
-            It's free on devnet — grab test USDC from the in-app faucet and place your
+            It&apos;s free on devnet — grab test USDC from the in-app faucet and place your
             first leveraged order in under a minute.
           </p>
           <div className="mt-7 flex items-center justify-center gap-3 flex-wrap">

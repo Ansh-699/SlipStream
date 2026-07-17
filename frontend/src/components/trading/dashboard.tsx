@@ -8,6 +8,9 @@ import { OpenOrders } from "./open-orders";
 import { SessionPanel } from "./session-panel";
 import { PriceChart } from "./price-chart";
 import { RecentTrades } from "./recent-trades";
+import { TradeHistory } from "./trade-history";
+import { StatusPanel } from "./status-panel";
+import { FillToasts } from "./fill-toasts";
 import { useMarket } from "@/hooks/use-market";
 import { manifestError } from "@/lib/manifest";
 
@@ -68,15 +71,24 @@ export function TradingDashboard() {
               <OpenOrders />
               <PositionsTable markPrice={markPrice} />
             </div>
+
+            {/* Settled trade history (from the fills indexer). */}
+            <div className="rise-in" style={{ animationDelay: "200ms" }}>
+              <TradeHistory />
+            </div>
           </div>
 
-          {/* RIGHT 3 cols: Order Form + Trading Session. */}
+          {/* RIGHT 3 cols: Order Form + Trading Session + System Status. */}
           <div className="lg:col-span-3 flex flex-col gap-3 rise-in" style={{ animationDelay: "120ms" }}>
             <OrderForm />
             <SessionPanel />
+            <StatusPanel />
           </div>
         </div>
       </section>
+
+      {/* Fill notifications for the connected wallet. */}
+      <FillToasts />
     </div>
   );
 }

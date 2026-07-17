@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,19 @@ export function SessionPanel() {
       ? "active"
       : "idle";
 
+  // Clock state (30s tick) so the countdown re-renders and render stays pure.
+  const [nowSec, setNowSec] = useState(0);
+  useEffect(() => {
+    const tick = () => setNowSec(Math.floor(Date.now() / 1000));
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Human "expires in …" string from the on-chain session expiry.
   const expiresIn = (() => {
-    if (!state.sessionActive || state.sessionExpiry === 0n) return null;
-    const secs = Number(state.sessionExpiry) - Math.floor(Date.now() / 1000);
+    if (!state.sessionActive || state.sessionExpiry === 0n || nowSec === 0) return null;
+    const secs = Number(state.sessionExpiry) - nowSec;
     if (secs <= 0) return "expired";
     const h = Math.floor(secs / 3600);
     const m = Math.floor((secs % 3600) / 60);

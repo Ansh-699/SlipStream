@@ -16,19 +16,17 @@ export function OrderBookDisplay() {
     const b = bids.slice(0, DEPTH);
 
     // Cumulative totals (sum from best price outward).
-    let cum = 0;
-    const askCum = a.map((l) => {
-      cum += l.size;
-      return { ...l, total: cum };
-    });
-    const askTotal = cum;
-
-    cum = 0;
-    const bidCum = b.map((l) => {
-      cum += l.size;
-      return { ...l, total: cum };
-    });
-    const bidTotal = cum;
+    const cumulate = <T extends { size: number }>(levels: T[]) => {
+      const out: (T & { total: number })[] = [];
+      let total = 0;
+      for (const l of levels) {
+        total += l.size;
+        out.push({ ...l, total });
+      }
+      return { rows: out, total };
+    };
+    const { rows: askCum, total: askTotal } = cumulate(a);
+    const { rows: bidCum, total: bidTotal } = cumulate(b);
 
     const maxCum = Math.max(askTotal, bidTotal, 0.0001);
     const mid = b.length && a.length ? (b[0].price + a[0].price) / 2 : b[0]?.price ?? a[0]?.price ?? null;

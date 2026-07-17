@@ -33,9 +33,17 @@ export interface OrderBookData {
   asks: OrderBookLevel[];
   spread: number | null;
   trades: RecentTrade[];
+  /** Matching engine's next fill sequence (settlement-lag numerator). */
+  nextFillSequence: number;
 }
 
-const EMPTY: OrderBookData = { bids: [], asks: [], spread: null, trades: [] };
+const EMPTY: OrderBookData = {
+  bids: [],
+  asks: [],
+  spread: null,
+  trades: [],
+  nextFillSequence: 0,
+};
 
 export function useOrderBook(marketIndex: number = 0) {
   const [data, setData] = useState<OrderBookData>(EMPTY);
@@ -84,7 +92,13 @@ export function useOrderBook(marketIndex: number = 0) {
         maker: fe.maker.toBase58(),
       }));
 
-      setData({ bids, asks, spread, trades });
+      setData({
+        bids,
+        asks,
+        spread,
+        trades,
+        nextFillSequence: Number(book.header.nextFillSequence),
+      });
     } catch {
       // Transient RPC/decoding error — keep last good state and retry.
     }
