@@ -157,6 +157,9 @@ pub fn process(
     market.open_interest_short = 0;
     market.insurance_fund_balance = 0;
     market.last_mark_price = 0;
+    // Holds the mark-price freshness stamp (see Market::mark_price_minute);
+    // 0 = never stamped, consistent with last_mark_price = 0.
+    market._padding1 = [0u8; 2];
     market.set_cumulative_funding_index(0);
     market.switchboard_feed = *switchboard_feed_acc.key();
     market.restricted_mode = 0;

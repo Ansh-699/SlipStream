@@ -2,6 +2,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvars::{clock::Clock, Sysvar},
     ProgramResult,
 };
 
@@ -85,7 +86,12 @@ pub(crate) fn do_close(
     }
 
     // Use mark price for close-at-market (see Market::mark_price_for_close).
-    let mark_price = market.mark_price_for_close().ok_or(SlipstreamError::OracleStale)?;
+    // OracleStale here also covers a mark whose refresh stamp aged out — a dead
+    // crank must not silently settle closes at a stale price.
+    let now_ts = Clock::get()?.unix_timestamp;
+    let mark_price = market
+        .mark_price_for_close(now_ts)
+        .ok_or(SlipstreamError::OracleStale)?;
 
     // Slippage bound: closing a long sells (mark must not be below the limit);
     // closing a short buys back (mark must not be above it).
@@ -169,13 +175,25 @@ pub(crate) fn do_close(
             .checked_add(settlement as u64)
             .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
     } else {
-        // Loss exceeds released collateral - absorbed by the insurance fund
+        // Loss exceeds released collateral - absorbed by the insurance fund.
+        // Log it: this is a socialized loss, and a silent one is unauditable.
+        // sol_log_64 args: [deficit, fund_before, fund_after, bankrupt?, 0].
         let deficit = (-settlement) as u64;
-        if market_mut.insurance_fund_balance >= deficit {
+        let fund_before = market_mut.insurance_fund_balance;
+        let bankrupt = fund_before < deficit;
+        if !bankrupt {
             market_mut.insurance_fund_balance -= deficit;
         } else {
             market_mut.insurance_fund_balance = 0;
         }
+        pinocchio::log::sol_log("slipstream: close deficit absorbed by insurance fund");
+        pinocchio::log::sol_log_64(
+            deficit,
+            fund_before,
+            market_mut.insurance_fund_balance,
+            bankrupt as u64,
+            0,
+        );
     }
 
     Ok(())

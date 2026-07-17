@@ -201,6 +201,9 @@ pub fn process(
                 .checked_add(insurance_cut)
                 .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
             market.last_mark_price = fill.price;
+            // A settled fill is a fresh mark observation — stamp it so closes
+            // stay available during active trading even if the crank stalls.
+            market.set_mark_price_minute(((clock.unix_timestamp / 60) as u64 % 65536) as u16);
         }
 
         if fill.sequence > max_seq {

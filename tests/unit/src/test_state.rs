@@ -95,15 +95,20 @@ fn test_market_twap_wraparound() {
     assert_eq!(market.twap_prices[0], 999_000_000);
 }
 
+// A fixed "now": minute 1000 * 60 = 60_000s. Stamps are (ts/60) mod 2^16.
+const NOW_TS: i64 = 60_000;
+const NOW_MIN: u16 = 1000;
+
 #[test]
 fn test_mark_price_for_close_prefers_last_mark_price() {
     let mut market = Market::zeroed();
     market.push_twap_price(100_000_000);
     market.push_twap_price(102_000_000);
     market.last_mark_price = 150_000_000;
+    market.set_mark_price_minute(NOW_MIN); // freshly stamped
 
     // A cranked market uses the live last_mark_price, not the lagging TWAP.
-    assert_eq!(market.mark_price_for_close(), Some(150_000_000));
+    assert_eq!(market.mark_price_for_close(NOW_TS), Some(150_000_000));
 }
 
 #[test]
@@ -113,13 +118,58 @@ fn test_mark_price_for_close_falls_back_to_twap() {
     market.push_twap_price(102_000_000);
     market.last_mark_price = 0; // never cranked
 
-    assert_eq!(market.mark_price_for_close(), Some(101_000_000));
+    assert_eq!(market.mark_price_for_close(NOW_TS), Some(101_000_000));
 }
 
 #[test]
 fn test_mark_price_for_close_none_when_uncranked_and_no_twap() {
     let market = Market::zeroed();
-    assert_eq!(market.mark_price_for_close(), None);
+    assert_eq!(market.mark_price_for_close(NOW_TS), None);
+}
+
+#[test]
+fn test_mark_price_for_close_rejects_stale_mark() {
+    let mut market = Market::zeroed();
+    market.push_twap_price(100_000_000);
+    market.last_mark_price = 150_000_000;
+    // Stamped 31 minutes ago — just past the 30-minute window.
+    market.set_mark_price_minute(NOW_MIN - 31);
+
+    // Stale mark must NOT silently fall back to TWAP; it errors (None).
+    assert!(!market.is_mark_price_fresh(NOW_TS));
+    assert_eq!(market.mark_price_for_close(NOW_TS), None);
+
+    // Exactly at the window edge is still fresh.
+    market.set_mark_price_minute(NOW_MIN - 30);
+    assert_eq!(market.mark_price_for_close(NOW_TS), Some(150_000_000));
+}
+
+#[test]
+fn test_mark_price_minute_roundtrip_and_unstamped_is_fresh() {
+    let mut market = Market::zeroed();
+    market.set_mark_price_minute(54_321);
+    assert_eq!(market.mark_price_minute(), 54_321);
+
+    // An unstamped (pre-upgrade) market is treated as fresh so closes never
+    // break in the window between upgrade and the next crank.
+    let mut m2 = Market::zeroed();
+    m2.last_mark_price = 150_000_000;
+    assert_eq!(m2.mark_price_minute(), 0);
+    assert!(m2.is_mark_price_fresh(NOW_TS));
+    assert_eq!(m2.mark_price_for_close(NOW_TS), Some(150_000_000));
+}
+
+#[test]
+fn test_mark_price_fresh_across_u16_wraparound() {
+    let mut market = Market::zeroed();
+    market.last_mark_price = 150_000_000;
+    // Stamp near the top of the u16 range; "now" has wrapped past 0.
+    // now_min = 5, stamp = 65534 -> age = 5 - 65534 (wrapping) = 7 minutes.
+    let now_ts: i64 = 5 * 60;
+    market.set_mark_price_minute(65_534);
+    assert!(market.is_mark_price_fresh(now_ts)); // 7 min < 30
+    market.set_mark_price_minute(65_500); // age ~41 min > 30
+    assert!(!market.is_mark_price_fresh(now_ts));
 }
 
 #[test]

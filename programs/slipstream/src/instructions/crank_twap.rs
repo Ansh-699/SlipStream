@@ -2,6 +2,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvars::{clock::Clock, Sysvar},
     ProgramResult,
 };
 
@@ -55,6 +56,10 @@ pub fn process(
 
     market.push_twap_price(price);
     market.last_mark_price = price;
+    // Stamp the refresh time so `mark_price_for_close` can reject a stale mark
+    // if this crank (and settlement) stops running.
+    let now_min = ((Clock::get()?.unix_timestamp / 60) as u64 % 65536) as u16;
+    market.set_mark_price_minute(now_min);
 
     Ok(())
 }

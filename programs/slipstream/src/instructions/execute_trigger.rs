@@ -2,6 +2,7 @@ use pinocchio::{
     account_info::AccountInfo,
     program_error::ProgramError,
     pubkey::Pubkey,
+    sysvars::{clock::Clock, Sysvar},
     ProgramResult,
 };
 
@@ -74,7 +75,12 @@ pub fn process(
     if market.market_index != trigger.market_index {
         return Err(SlipstreamError::InvalidMarketIndex.into());
     }
-    let mark = market.mark_price_for_close().ok_or(SlipstreamError::OracleStale)?;
+    // A stale mark must not fire triggers either — settling an SL/TP off a dead
+    // feed is exactly the scenario the freshness gate exists to prevent.
+    let now_ts = Clock::get()?.unix_timestamp;
+    let mark = market
+        .mark_price_for_close(now_ts)
+        .ok_or(SlipstreamError::OracleStale)?;
     if !trigger.is_met(mark) {
         return Err(SlipstreamError::TriggerConditionNotMet.into());
     }
