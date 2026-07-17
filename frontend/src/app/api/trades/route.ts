@@ -28,9 +28,11 @@ function defaultDbPath(): string | null {
   return null;
 }
 
-const DB_PATH = process.env.INDEXER_DB
-  ? resolve(process.env.INDEXER_DB)
-  : defaultDbPath();
+// Resolved per-request: the keeper creates the DB lazily on its first settled
+// fill, which can be after this server process started.
+function dbPath(): string | null {
+  return process.env.INDEXER_DB ? resolve(process.env.INDEXER_DB) : defaultDbPath();
+}
 
 interface FillRow {
   sequence: number;
@@ -52,6 +54,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     500
   );
 
+  const DB_PATH = dbPath();
   if (!DB_PATH || !existsSync(DB_PATH)) {
     return Response.json({ fills: [], indexed: false });
   }
