@@ -113,6 +113,12 @@ async function main() {
   log("LIQUIDATION", `Using Pyth feed ${pythFeed.toBase58()}`);
 
   let consecutiveErrors = 0;
+  // The program is the health authority. When it rejects a liquidation with
+  // HealthFactorAboveThreshold (0x11a), our local estimate disagrees (e.g.
+  // legacy positions whose stored collateral predates the margin-scale fix) —
+  // pause that position instead of re-sending a failing tx every cycle.
+  const REJECT_COOLDOWN_MS = 10 * 60_000;
+  const rejectedUntil = new Map<string, number>();
 
   while (true) {
     try {
@@ -147,6 +153,9 @@ async function main() {
         const health = computeHealthFactor(pos, markPriceBigint, market.maxLeverage);
         if (health >= 1.0) continue;
 
+        const pausedUntil = rejectedUntil.get(pubkey.toBase58());
+        if (pausedUntil !== undefined && Date.now() < pausedUntil) continue;
+
         log(
           "LIQUIDATION",
           `Liquidatable position found: ${pubkey.toBase58()}, health=${health.toFixed(4)}`
@@ -166,7 +175,15 @@ async function main() {
           log("LIQUIDATION", `Liquidated ${pubkey.toBase58()}, sig=${sig}`);
           liquidated++;
         } catch (err: any) {
-          log("LIQUIDATION", `Failed to liquidate ${pubkey.toBase58()}: ${err.message}`);
+          if (String(err?.message ?? err).includes("0x11a")) {
+            rejectedUntil.set(pubkey.toBase58(), Date.now() + REJECT_COOLDOWN_MS);
+            log(
+              "LIQUIDATION",
+              `${pubkey.toBase58()} rejected on-chain (health above threshold); pausing 10m`
+            );
+          } else {
+            log("LIQUIDATION", `Failed to liquidate ${pubkey.toBase58()}: ${err.message}`);
+          }
         }
       }
 
