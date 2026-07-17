@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  rust:
+    name: Program (clippy + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Solana CLI
+        id: solana-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/solana
+          key: solana-cli-v3.1.14
+
+      - name: Install Solana CLI
+        if: steps.solana-cache.outputs.cache-hit != 'true'
+        run: sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.14/install)"
+
+      - name: Add Solana to PATH
+        run: echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - name: Clippy
+        run: cargo clippy -p slipstream -- -D warnings -A clippy::too-many-arguments -A unexpected_cfgs
+
+      # The mollusk tests execute the real compiled program, so build the SBF
+      # binary first (must target the program package directly — a bare
+      # workspace build feature-unifies no-entrypoint from the test crate).
+      - name: Build program (SBF)
+        run: cargo build-sbf --manifest-path programs/slipstream/Cargo.toml
+
+      - name: Unit + mollusk tests
+        run: cargo test
+        working-directory: tests/unit
+
+  frontend:
+    name: Frontend (tsc + eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run copy-manifest
+        working-directory: frontend
+      - run: npx tsc --noEmit
+        working-directory: frontend
+      - run: npm run lint
+        working-directory: frontend
+
+  keepers:
+    name: Keepers (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            keepers/package-lock.json
+            client/package.json
+      # keepers imports ../client/src directly, so the client package's deps
+      # must be installed too.
+      - run: npm install --no-audit --no-fund
+        working-directory: client
+      - run: npm ci
+        working-directory: keepers
+      - run: npx tsc --noEmit
+        working-directory: keepers
