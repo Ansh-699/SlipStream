@@ -21,11 +21,6 @@ export function RecentTrades() {
           <span className="panel-title">Recent Trades</span>
           <span className="text-[9px] text-white/35 font-medium">On-chain fills · click to verify</span>
         </div>
-        {trades.length > 0 && (
-          <span className="inline-flex items-center gap-1.5 text-[9px] font-semibold text-emerald-300/70 uppercase tracking-wider">
-            <span className="live-dot" /> Live
-          </span>
-        )}
       </div>
 
       <div className="px-3 pt-2 pb-2 flex-1 flex flex-col min-h-0">

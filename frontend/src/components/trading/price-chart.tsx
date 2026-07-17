@@ -10,7 +10,7 @@ export function PriceChart() {
   const [resIdx, setResIdx] = useState(1); // default 5m
   const resolution = RESOLUTIONS[resIdx];
   const { candles: history, loading, error } = usePythCandles(resolution);
-  const { live, connected } = useLivePrice();
+  const { live } = useLivePrice();
   const [chartType, setChartType] = useState<ChartType>("candles");
 
   // Merge the live streamed price into a "forming" candle for the current bucket,
@@ -61,15 +61,6 @@ export function PriceChart() {
               {up ? "▲" : "▼"} {Math.abs(change).toFixed(2)}%
             </span>
           )}
-          <span
-            className={`inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider ${
-              connected ? "text-emerald-300/80" : "text-white/30"
-            }`}
-            title="MagicBlock Pyth-Lazer feed · 50ms"
-          >
-            <span className={connected ? "live-dot" : "h-[7px] w-[7px] rounded-full bg-white/20"} />
-            MagicBlock {connected ? "Live" : "…"}
-          </span>
         </div>
 
         <div className="flex items-center gap-2">
