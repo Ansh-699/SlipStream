@@ -16,6 +16,7 @@ import {
   DISC_ORDER_BOOK,
   DISC_TRADING_CREDIT,
   DISC_LIQUIDATION_INTENT,
+  DISC_TRIGGER_ORDER,
   PRICE_SCALE,
   GLOBAL_STATE_SIZE,
   USER_ACCOUNT_SIZE,
@@ -112,6 +113,9 @@ export interface Market {
   lastMarkPrice: bigint;
   cumulativeFundingIndex: bigint;
   twapPrices: bigint[];
+  /** L1 settlement cursor (highest settled FillEvent.sequence) — LE u32 stored
+   *  in the Round-3 trailing padding at byte 2058; 0 on pre-Round-3 layouts. */
+  lastSettledSequence: number;
 }
 
 export const MARKET_SIZE = 224 + TWAP_BUFFER_SIZE * 8;
@@ -149,6 +153,7 @@ export function decodeMarket(data: Buffer): Market {
     lastMarkPrice: readU64LE(data, 200),
     cumulativeFundingIndex: readI128FromSplitI64(data, 208),
     twapPrices,
+    lastSettledSequence: data.length >= 2062 ? data.readUInt32LE(2058) : 0,
   };
 }
 
@@ -283,6 +288,39 @@ export function decodeLiquidationIntent(data: Buffer): LiquidationIntent {
     createdTs: readI64LE(data, 40),
     deadlineTs: readI64LE(data, 48),
     initialHealthFactor: readU64LE(data, 56),
+  };
+}
+
+// ---- TriggerOrder (56 bytes) ----
+export interface TriggerOrder {
+  discriminator: number;
+  bump: number;
+  /** 0 = stop-loss, 1 = take-profit */
+  kind: number;
+  /** true: fire when mark >= triggerPrice; false: when mark <= it */
+  triggerAbove: boolean;
+  marketIndex: number;
+  owner: PublicKey;
+  triggerPrice: bigint;
+  createdTs: bigint;
+}
+
+export const TRIGGER_ORDER_SIZE = 56;
+
+export function decodeTriggerOrder(data: Buffer): TriggerOrder {
+  if (data.length < TRIGGER_ORDER_SIZE)
+    throw new Error("TriggerOrder buffer too small");
+  if (data[0] !== DISC_TRIGGER_ORDER)
+    throw new Error("Invalid TriggerOrder discriminator");
+  return {
+    discriminator: readU8(data, 0),
+    bump: readU8(data, 1),
+    kind: readU8(data, 2),
+    triggerAbove: readU8(data, 3) !== 0,
+    marketIndex: readU16LE(data, 4),
+    owner: readPubkey(data, 8),
+    triggerPrice: readU64LE(data, 40),
+    createdTs: readI64LE(data, 48),
   };
 }
 

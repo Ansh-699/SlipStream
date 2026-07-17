@@ -53,6 +53,9 @@ import {
   IX_COMMIT_ORDERBOOK,
   IX_AUTHORIZE_SESSION,
   IX_CLOSE_TRADING_CREDIT,
+  IX_PLACE_TRIGGER,
+  IX_CANCEL_TRIGGER,
+  IX_EXECUTE_TRIGGER,
   DELEGATION_PROGRAM_ID,
   MAGIC_PROGRAM_ID,
   MAGIC_CONTEXT_ID,
@@ -66,6 +69,7 @@ import {
   findVaultAuthorityPda,
   findTradingCreditPda,
   findLiquidationIntentPda,
+  findTriggerPda,
   findDelegateBufferPda,
   findDelegationRecordPda,
   findDelegationMetadataPda,
@@ -754,17 +758,34 @@ export function createClaimFundingInstruction(
 
 // ---- Close Position ----
 
+/**
+ * Close a settled L1 position at the mark price.
+ *
+ * Optional `opts` appends `close_size: u64` (base atoms; 0 = full close) and
+ * `limit_price: u64` (slippage bound on the settle price; 0 = unbounded —
+ * closing a long requires mark >= limit, closing a short requires mark <= limit).
+ * Omitting `opts` keeps the original 1-byte wire format (full close, no bound).
+ */
 export function createClosePositionInstruction(
   owner: PublicKey,
   marketIndex: number,
-  programId: PublicKey = PROGRAM_ID
+  programId: PublicKey = PROGRAM_ID,
+  opts?: { closeSize?: bigint; limitPrice?: bigint }
 ): TransactionInstruction {
   const [market] = findMarketPda(marketIndex, programId);
   const [position] = findPositionPda(owner, marketIndex, programId);
   const [userAccount] = findUserAccountPda(owner, programId);
 
-  const data = Buffer.alloc(1);
-  data[0] = IX_CLOSE_POSITION;
+  let data: Buffer;
+  if (opts && (opts.closeSize !== undefined || opts.limitPrice !== undefined)) {
+    data = Buffer.alloc(17);
+    data[0] = IX_CLOSE_POSITION;
+    data.writeBigUInt64LE(opts.closeSize ?? 0n, 1);
+    data.writeBigUInt64LE(opts.limitPrice ?? 0n, 9);
+  } else {
+    data = Buffer.alloc(1);
+    data[0] = IX_CLOSE_POSITION;
+  }
 
   return new TransactionInstruction({
     keys: [
@@ -775,6 +796,91 @@ export function createClosePositionInstruction(
     ],
     programId,
     data,
+  });
+}
+
+// ---- SL/TP trigger orders ----
+
+/**
+ * place_trigger (0x22): create or replace the owner's SL/TP trigger for a
+ * market. `triggerAbove` = true fires when mark >= price (e.g. long TP /
+ * short SL), false when mark <= price (long SL / short TP).
+ */
+export function createPlaceTriggerInstruction(
+  owner: PublicKey,
+  marketIndex: number,
+  kind: number,
+  triggerAbove: boolean,
+  triggerPrice: bigint,
+  programId: PublicKey = PROGRAM_ID
+): TransactionInstruction {
+  const [trigger] = findTriggerPda(owner, marketIndex, kind, programId);
+  const [position] = findPositionPda(owner, marketIndex, programId);
+
+  const data = Buffer.alloc(13);
+  data[0] = IX_PLACE_TRIGGER;
+  data.writeUInt16LE(marketIndex, 1);
+  data[3] = kind;
+  data[4] = triggerAbove ? 1 : 0;
+  data.writeBigUInt64LE(triggerPrice, 5);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: trigger, isSigner: false, isWritable: true },
+      { pubkey: position, isSigner: false, isWritable: false },
+      { pubkey: owner, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ],
+    programId,
+    data,
+  });
+}
+
+/** cancel_trigger (0x23): owner removes a trigger; rent returns to the owner. */
+export function createCancelTriggerInstruction(
+  owner: PublicKey,
+  marketIndex: number,
+  kind: number,
+  programId: PublicKey = PROGRAM_ID
+): TransactionInstruction {
+  const [trigger] = findTriggerPda(owner, marketIndex, kind, programId);
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: trigger, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: Buffer.from([IX_CANCEL_TRIGGER]),
+  });
+}
+
+/**
+ * execute_trigger (0x24): permissionless SL/TP execution once the mark price
+ * satisfies the trigger; the trigger account's rent pays the executor.
+ */
+export function createExecuteTriggerInstruction(
+  owner: PublicKey,
+  marketIndex: number,
+  kind: number,
+  executor: PublicKey,
+  programId: PublicKey = PROGRAM_ID
+): TransactionInstruction {
+  const [market] = findMarketPda(marketIndex, programId);
+  const [position] = findPositionPda(owner, marketIndex, programId);
+  const [userAccount] = findUserAccountPda(owner, programId);
+  const [trigger] = findTriggerPda(owner, marketIndex, kind, programId);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: market, isSigner: false, isWritable: true },
+      { pubkey: position, isSigner: false, isWritable: true },
+      { pubkey: userAccount, isSigner: false, isWritable: true },
+      { pubkey: trigger, isSigner: false, isWritable: true },
+      { pubkey: owner, isSigner: false, isWritable: true },
+      { pubkey: executor, isSigner: true, isWritable: true },
+    ],
+    programId,
+    data: Buffer.from([IX_EXECUTE_TRIGGER]),
   });
 }
 

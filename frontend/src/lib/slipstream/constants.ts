@@ -47,6 +47,7 @@ export const SEED_ORDERBOOK = Buffer.from("orderbook");
 export const SEED_VAULT_AUTHORITY = Buffer.from("vault_authority");
 export const SEED_CREDIT = Buffer.from("credit");
 export const SEED_LIQ_INTENT = Buffer.from("liq_intent");
+export const SEED_TRIGGER = Buffer.from("trigger");
 
 export const SEED_DELEGATE_BUFFER = Buffer.from("buffer");
 export const SEED_DELEGATION_RECORD = Buffer.from("delegation");
@@ -60,6 +61,8 @@ export const DISC_POSITION = 4;
 export const DISC_ORDER_BOOK = 5;
 export const DISC_TRADING_CREDIT = 6;
 export const DISC_LIQUIDATION_INTENT = 7;
+export const DISC_FILL_LOG = 8;
+export const DISC_TRIGGER_ORDER = 9;
 
 // Instruction discriminators
 export const IX_INITIALIZE_MARKET = 0x00;
@@ -91,6 +94,13 @@ export const IX_INITIALIZE_POSITION = 0x19;
 export const IX_COMMIT_ORDERBOOK = 0x1a;
 export const IX_AUTHORIZE_SESSION = 0x1b;
 export const IX_CLOSE_TRADING_CREDIT = 0x1c;
+export const IX_PLACE_TRIGGER = 0x22;
+export const IX_CANCEL_TRIGGER = 0x23;
+export const IX_EXECUTE_TRIGGER = 0x24;
+
+// Trigger kinds (SL/TP; also the last TriggerOrder PDA seed byte)
+export const TRIGGER_KIND_STOP_LOSS = 0;
+export const TRIGGER_KIND_TAKE_PROFIT = 1;
 
 // Order sides
 export const SIDE_BID = 0;

@@ -10,6 +10,7 @@ import {
   SEED_CREDIT,
   SEED_LIQ_INTENT,
   SEED_FILL_LOG,
+  SEED_TRIGGER,
   SEED_DELEGATE_BUFFER,
   SEED_DELEGATION_RECORD,
   SEED_DELEGATION_METADATA,
@@ -82,6 +83,20 @@ export function findTradingCreditPda(
 ): [PublicKey, number] {
   return PublicKey.findProgramAddressSync(
     [SEED_CREDIT, owner.toBuffer(), u16leBuf(marketIndex)],
+    programId
+  );
+}
+
+/** TriggerOrder PDA: `[b"trigger", owner, u16le(marketIndex), [kind]]` —
+ *  one stop-loss (kind 0) and one take-profit (kind 1) per owner+market. */
+export function findTriggerPda(
+  owner: PublicKey,
+  marketIndex: number,
+  kind: number,
+  programId: PublicKey = PROGRAM_ID
+): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [SEED_TRIGGER, owner.toBuffer(), u16leBuf(marketIndex), Buffer.from([kind])],
     programId
   );
 }

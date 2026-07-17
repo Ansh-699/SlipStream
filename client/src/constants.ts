@@ -34,6 +34,7 @@ export const SEED_VAULT_AUTHORITY = Buffer.from("vault_authority");
 export const SEED_CREDIT = Buffer.from("credit");
 export const SEED_LIQ_INTENT = Buffer.from("liq_intent");
 export const SEED_FILL_LOG = Buffer.from("fill_log");
+export const SEED_TRIGGER = Buffer.from("trigger");
 
 // MagicBlock delegation PDA seed tags (match the on-chain delegation program +
 // @magicblock-labs/ephemeral-rollups-sdk). The delegate buffer is derived under
@@ -51,6 +52,7 @@ export const DISC_ORDER_BOOK = 5;
 export const DISC_TRADING_CREDIT = 6;
 export const DISC_LIQUIDATION_INTENT = 7;
 export const DISC_FILL_LOG = 8;
+export const DISC_TRIGGER_ORDER = 9;
 
 // Instruction discriminators
 export const IX_INITIALIZE_MARKET = 0x00;
@@ -87,6 +89,13 @@ export const IX_DELEGATE_FILL_LOG = 0x1e;
 export const IX_MIRROR_FILLS = 0x1f;
 export const IX_COMMIT_FILL_LOG = 0x20;
 export const IX_SETTLE_FROM_LOG = 0x21;
+export const IX_PLACE_TRIGGER = 0x22;
+export const IX_CANCEL_TRIGGER = 0x23;
+export const IX_EXECUTE_TRIGGER = 0x24;
+
+// Trigger kinds (SL/TP; also the last TriggerOrder PDA seed byte)
+export const TRIGGER_KIND_STOP_LOSS = 0;
+export const TRIGGER_KIND_TAKE_PROFIT = 1;
 
 // Order sides
 export const SIDE_BID = 0;
