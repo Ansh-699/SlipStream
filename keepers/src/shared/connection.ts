@@ -42,7 +42,13 @@ export async function sendAndConfirm(
     skipPreflight,
     preflightCommitment: "confirmed",
   });
-  await connection.confirmTransaction(sig, "confirmed");
+  const conf = await connection.confirmTransaction(sig, "confirmed");
+  // A tx can LAND and still fail on-chain (custom program error); confirm's
+  // result carries that. Without this check every caller treated a reverted
+  // tx as success — masking real failures on skip-preflight paths.
+  if (conf.value.err) {
+    throw new Error(`tx ${sig} failed on-chain: ${JSON.stringify(conf.value.err)}`);
+  }
   return sig;
 }
 

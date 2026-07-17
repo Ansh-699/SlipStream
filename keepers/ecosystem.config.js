@@ -49,5 +49,15 @@ module.exports = {
       BOT_MM_INTERVAL_MS: "2000",
       BOT_MM_REFRESH_BPS: "8",
     }),
+    // Taker: continuously crosses the MM's book so the demo shows live fills
+    // (Recent Trades / Trade History / toasts / the fills indexer all need real
+    // fills to move). Idles harmlessly when its trading credit runs low —
+    // topup-takers refills it. Modest cadence to keep base-RPC load in check.
+    keeper("taker", "taker-bot.ts", {
+      BOT_TAKER_INTERVAL_MS: "15000",
+      BOT_TAKER_JITTER_MS: "8000",
+      BOT_TAKER_CROSS_PROB: "0.8",
+      BOT_TAKER_SIZE_LOTS: "2",
+    }),
   ],
 };

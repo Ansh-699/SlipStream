@@ -114,11 +114,19 @@ async function main() {
 
   let consecutiveErrors = 0;
   // The program is the health authority. When it rejects a liquidation with
-  // HealthFactorAboveThreshold (0x11a), our local estimate disagrees (e.g.
-  // legacy positions whose stored collateral predates the margin-scale fix) —
-  // pause that position instead of re-sending a failing tx every cycle.
+  // HealthFactorAboveThreshold (0x11a), our local estimate disagrees. Two cases:
+  //  - a real position momentarily on the edge (worth re-checking soon), or
+  //  - an ORPHANED corrupt position from early testing (entry=$1, ×1000-scaled
+  //    collateral) whose owner key is gone, so it can never be closed AND the
+  //    program's own math on the corrupt data always reads "healthy".
+  // Back off with escalation: first few rejects pause 10m (catch the edge case);
+  // after REJECT_GIVE_UP_COUNT it's certainly corrupt — skip it for the session
+  // so it stops re-logging forever.
   const REJECT_COOLDOWN_MS = 10 * 60_000;
+  const REJECT_GIVE_UP_COUNT = 3;
+  const GIVE_UP_MS = 30 * 24 * 60 * 60_000; // effectively "this session"
   const rejectedUntil = new Map<string, number>();
+  const rejectCount = new Map<string, number>();
 
   while (true) {
     try {
@@ -176,11 +184,22 @@ async function main() {
           liquidated++;
         } catch (err: any) {
           if (String(err?.message ?? err).includes("0x11a")) {
-            rejectedUntil.set(pubkey.toBase58(), Date.now() + REJECT_COOLDOWN_MS);
-            log(
-              "LIQUIDATION",
-              `${pubkey.toBase58()} rejected on-chain (health above threshold); pausing 10m`
-            );
+            const key = pubkey.toBase58();
+            const n = (rejectCount.get(key) ?? 0) + 1;
+            rejectCount.set(key, n);
+            if (n >= REJECT_GIVE_UP_COUNT) {
+              rejectedUntil.set(key, Date.now() + GIVE_UP_MS);
+              log(
+                "LIQUIDATION",
+                `${key} rejected ${n}x — treating as orphaned/corrupt, skipping for the session`
+              );
+            } else {
+              rejectedUntil.set(key, Date.now() + REJECT_COOLDOWN_MS);
+              log(
+                "LIQUIDATION",
+                `${key} rejected on-chain (health above threshold); pausing 10m (${n}/${REJECT_GIVE_UP_COUNT})`
+              );
+            }
           } else {
             log("LIQUIDATION", `Failed to liquidate ${pubkey.toBase58()}: ${err.message}`);
           }
