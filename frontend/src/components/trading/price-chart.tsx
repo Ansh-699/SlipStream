@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePythStream } from "@/hooks/use-pyth-stream";
+import { useLivePrice } from "@/hooks/use-live-price";
 import { usePythCandles, RESOLUTIONS, type Resolution, type Candle } from "@/hooks/use-pyth-candles";
 
 type ChartType = "candles" | "line" | "area";
@@ -10,7 +10,7 @@ export function PriceChart() {
   const [resIdx, setResIdx] = useState(1); // default 5m
   const resolution = RESOLUTIONS[resIdx];
   const { candles: history, loading, error } = usePythCandles(resolution);
-  const { live, connected } = usePythStream();
+  const { live, connected } = useLivePrice();
   const [chartType, setChartType] = useState<ChartType>("candles");
 
   // Merge the live streamed price into a "forming" candle for the current bucket,
@@ -65,10 +65,10 @@ export function PriceChart() {
             className={`inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wider ${
               connected ? "text-emerald-300/80" : "text-white/30"
             }`}
-            title="Pyth Hermes live stream"
+            title="MagicBlock Pyth-Lazer feed · 50ms"
           >
             <span className={connected ? "live-dot" : "h-[7px] w-[7px] rounded-full bg-white/20"} />
-            Pyth {connected ? "Live" : "…"}
+            MagicBlock {connected ? "Live" : "…"}
           </span>
         </div>
 
@@ -116,7 +116,7 @@ export function PriceChart() {
 
       <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.06] text-[10px] text-white/45">
         <span>Scroll to zoom · drag to pan</span>
-        <span>{resolution.label} candles · Pyth Benchmarks + Hermes</span>
+        <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
       </div>
     </div>
   );
