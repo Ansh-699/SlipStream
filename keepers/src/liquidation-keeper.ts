@@ -26,7 +26,11 @@ function computeHealthFactor(
   if (maxLeverage <= 0) return Infinity; // corrupt/unset market — treat as not liquidatable
 
   const absSize = pos.size < 0n ? -pos.size : pos.size;
-  const notional = (absSize * markPrice) / BigInt(PRICE_SCALE);
+  // size is 9-dp base atoms: divide by BASE_SCALE (1e9), matching on-chain
+  // compute_notional. The previous PRICE_SCALE (1e6) divisor inflated notional
+  // x1000, flagging every healthy position as liquidatable — the program
+  // rejected each attempt with HealthFactorAboveThreshold (8k+ failed txs).
+  const notional = (absSize * markPrice) / 1_000_000_000n;
   const initialMargin = notional / BigInt(maxLeverage);
   const maintenanceMargin = initialMargin / 2n;
 
@@ -34,7 +38,9 @@ function computeHealthFactor(
 
   const priceDiff = markPrice - pos.entryPrice;
   const signedSize = pos.size;
-  const unrealizedPnl = (signedSize * priceDiff) / BigInt(PRICE_SCALE);
+  // Same 9-dp size scale: /1e9 keeps uPnL in 6-dp USD like collateral
+  // (mirrors on-chain compute_unrealized_pnl).
+  const unrealizedPnl = (signedSize * priceDiff) / 1_000_000_000n;
 
   const equity = BigInt(pos.collateral) + unrealizedPnl;
   return Number(equity * 1_000_000n / maintenanceMargin) / 1_000_000;
