@@ -5,11 +5,11 @@ import { explorerAddress } from "@/lib/manifest";
 
 /**
  * Live "tape" of executed trades, read from the OrderBook PDA's on-chain
- * fill-event ring (newest first). Each row links the TAKER account to the
- * explorer for verification.
+ * fill-event ring (newest first). Each row links the MAKER account (the
+ * resting order that provided the liquidity) to the explorer for verification.
  *
  * Note: a FillEvent stores maker/taker/price/qty/fees but NOT the tx signature,
- * so we link the verifiable taker ACCOUNT (not a per-trade tx hash).
+ * so we link the verifiable maker ACCOUNT (not a per-trade tx hash).
  */
 export function RecentTrades() {
   const { trades } = useOrderBook(0);
@@ -32,7 +32,7 @@ export function RecentTrades() {
         <div className="grid grid-cols-[1.1fr_1fr_0.8fr_0.7fr] gap-2 text-[9px] text-white/45 font-semibold pb-1.5 uppercase tracking-wider border-b border-white/[0.05] shrink-0 px-1">
           <span>Price</span>
           <span className="text-right">Size (SOL)</span>
-          <span className="text-right">Taker</span>
+          <span className="text-right">Maker</span>
           <span className="text-right">Seq</span>
         </div>
 
@@ -45,11 +45,11 @@ export function RecentTrades() {
             trades.map((t) => (
               <a
                 key={t.sequence}
-                href={explorerAddress(t.taker, "er")}
+                href={explorerAddress(t.maker, "er")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="grid grid-cols-[1.1fr_1fr_0.8fr_0.7fr] gap-2 text-xs py-[3px] px-1 rounded-sm hover:bg-white/[0.04] transition-colors group"
-                title={`Verify taker ${t.taker} on Explorer`}
+                title={`Verify maker ${t.maker} on Explorer`}
               >
                 <span className={`font-mono font-semibold tnum ${t.side === "buy" ? "text-emerald-400" : "text-rose-400"}`}>
                   {t.price.toFixed(3)}
@@ -58,7 +58,7 @@ export function RecentTrades() {
                   {t.size.toFixed(2)}
                 </span>
                 <span className="text-right font-mono tnum text-sky-400/80 group-hover:text-sky-300 underline decoration-dotted underline-offset-2">
-                  {t.taker.slice(0, 4)}…
+                  {t.maker.slice(0, 4)}…
                 </span>
                 <span className="text-right font-mono tnum text-white/30">
                   #{t.sequence}

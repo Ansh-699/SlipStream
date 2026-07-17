@@ -49,11 +49,15 @@ async function forward(upstream: string, body: string): Promise<Response> {
       await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
     }
   }
+  // Log the real error server-side only: fetch failures can embed the upstream
+  // URL, and the base upstream carries a private API key that must never reach
+  // the browser.
+  console.error("[rpc-proxy] upstream failed:", lastErr);
   return new Response(
     JSON.stringify({
       jsonrpc: "2.0",
       id: null,
-      error: { code: -32603, message: `RPC proxy failed: ${String(lastErr)}` },
+      error: { code: -32603, message: "RPC proxy failed: upstream unreachable" },
     }),
     { status: 502, headers: { "Content-Type": "application/json" } }
   );
