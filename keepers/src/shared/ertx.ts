@@ -70,7 +70,10 @@ export function classifyTxError(e: any): ClassifiedError {
     const code = parseInt(hex[1], 16);
     return { code, name: errName(code), raw: hay };
   }
-  const dec = hay.match(/Custom\((\d+)\)/);
+  // Both the Rust debug format Custom(285) and the JSON-RPC form {"Custom":285}
+  // (the latter is what sendErTx embeds via JSON.stringify(conf.value.err), and
+  // is all we have when the ER hasn't indexed the tx logs yet).
+  const dec = hay.match(/Custom\((\d+)\)/) ?? hay.match(/"Custom"\s*:\s*(\d+)/);
   if (dec) {
     const code = parseInt(dec[1], 10);
     return { code, name: errName(code), raw: hay };
