@@ -7,7 +7,7 @@ import { usePositions } from "@/hooks/use-positions";
 import { useErPosition } from "@/hooks/use-er-position";
 import { useSession } from "@/hooks/use-session";
 import { useTriggers } from "@/hooks/use-triggers";
-import { PROGRAM_ID, MARKET_INDEX, ER_RPC } from "@/lib/manifest";
+import { PROGRAM_ID, MARKET_INDEX, ER_RPC, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
   createClosePositionInstruction,
@@ -19,7 +19,7 @@ import {
 import { confirmSignature } from "@/lib/confirm";
 
 const PRICE_SCALE = 1_000_000;
-const LOT_SIZE = 100_000_000n; // 0.1 SOL in 9-dp base atoms
+// LOT_SIZE / MAX_LEVERAGE come from the Deploy_Manifest (see @/lib/manifest).
 // Slippage bound on close-at-market: reject settling >1% through the current mark.
 const CLOSE_SLIPPAGE_BPS = 100n;
 
@@ -497,8 +497,6 @@ function SideBadge({ isLong }: { isLong: boolean }) {
     </span>
   );
 }
-
-const MAX_LEVERAGE = 20;
 
 /**
  * Liquidation price + health factor.

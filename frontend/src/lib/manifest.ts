@@ -28,6 +28,10 @@ interface GeneratedManifest {
   usdcMint?: string;
   usdcVault?: string;
   marketIndex?: number;
+  /** Market params — string bigints for tick/lot, number for leverage. */
+  tickSize?: string;
+  lotSize?: string;
+  maxLeverage?: number;
   /** false when scripts/copy-manifest.mjs fell back because deploy.json was absent. */
   __manifestPresent__?: boolean;
 }
@@ -129,6 +133,16 @@ export const USDC_VAULT: PublicKey | null = manifest.usdcVault
   : null;
 
 export const MARKET_INDEX: number = manifest.marketIndex ?? 0;
+
+/** SOL-PERP market params, sourced from the Deploy_Manifest (initialize_market
+ *  wrote these). Fall back to the known SOL-PERP defaults so the UI still
+ *  renders if a partial manifest omits them. Keep these authoritative — do NOT
+ *  hardcode tick/lot/leverage in components. */
+export const TICK_SIZE: bigint = manifest.tickSize ? BigInt(manifest.tickSize) : 1_000n;
+export const LOT_SIZE: bigint = manifest.lotSize ? BigInt(manifest.lotSize) : 100_000_000n;
+export const MAX_LEVERAGE: number = manifest.maxLeverage ?? 20;
+/** Human lot size in SOL (LOT_SIZE is 9-dp base atoms). */
+export const LOT_SOL: number = Number(LOT_SIZE) / 1e9;
 
 /** Direct upstream RPC URLs (used server-side, and as the source the API proxy
  *  forwards to). The BROWSER does NOT call these directly — calling the

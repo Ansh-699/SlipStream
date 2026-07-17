@@ -11,7 +11,16 @@ import { useSession } from "@/hooks/use-session";
 import { useMarket } from "@/hooks/use-market";
 import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
 import { LiquidButton } from "@/components/ui/liquid-glass-button";
-import { PROGRAM_ID, MARKET_INDEX, ER_RPC, explorerTx } from "@/lib/manifest";
+import {
+  PROGRAM_ID,
+  MARKET_INDEX,
+  ER_RPC,
+  explorerTx,
+  TICK_SIZE,
+  LOT_SIZE,
+  LOT_SOL,
+  MAX_LEVERAGE,
+} from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
   PRICE_SCALE,
@@ -25,11 +34,9 @@ import { confirmSignature } from "@/lib/confirm";
 type OrderType = "limit" | "market";
 const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: ORDER_TYPE_LIMIT, market: ORDER_TYPE_MARKET };
 
-// SOL-PERP market params (must match deploy.json / initialize_market).
-const TICK_SIZE = 1_000n; // $0.001 in 6-dp price scale
-const LOT_SIZE = 100_000_000n; // 0.1 SOL in 9-dp base atoms
-const LOT_SOL = 0.1; // human lot
-const MAX_LEVERAGE = 20;
+// Market params (TICK_SIZE / LOT_SIZE / LOT_SOL / MAX_LEVERAGE) now come from
+// the Deploy_Manifest via @/lib/manifest — single source of truth with the
+// on-chain market, so re-initializing at different params can't drift the UI.
 
 // Required initial margin in 6-dp credit terms, mirroring the (now FIXED)
 // on-chain math: notional = size_atoms * price_6dp / 1e9 ; margin = notional / lev.
