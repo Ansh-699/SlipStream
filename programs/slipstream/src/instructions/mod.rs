@@ -32,6 +32,9 @@ pub mod delegate_fill_log;
 pub mod mirror_fills;
 pub mod commit_fill_log;
 pub mod settle_from_log;
+pub mod place_trigger;
+pub mod cancel_trigger;
+pub mod execute_trigger;
 
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult};
 
@@ -80,6 +83,11 @@ pub const IX_DELEGATE_FILL_LOG: u8 = 0x1E;
 pub const IX_MIRROR_FILLS: u8 = 0x1F;
 pub const IX_COMMIT_FILL_LOG: u8 = 0x20;
 pub const IX_SETTLE_FROM_LOG: u8 = 0x21;
+
+// Round 6 — keeper-executed SL/TP trigger orders
+pub const IX_PLACE_TRIGGER: u8 = 0x22;
+pub const IX_CANCEL_TRIGGER: u8 = 0x23;
+pub const IX_EXECUTE_TRIGGER: u8 = 0x24;
 
 pub fn process(
     program_id: &Pubkey,
@@ -137,6 +145,9 @@ pub fn process(
         IX_MIRROR_FILLS => mirror_fills::process(program_id, accounts, data),
         IX_COMMIT_FILL_LOG => commit_fill_log::process(program_id, accounts, data),
         IX_SETTLE_FROM_LOG => settle_from_log::process(program_id, accounts, data),
+        IX_PLACE_TRIGGER => place_trigger::process(program_id, accounts, data),
+        IX_CANCEL_TRIGGER => cancel_trigger::process(program_id, accounts, data),
+        IX_EXECUTE_TRIGGER => execute_trigger::process(program_id, accounts, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

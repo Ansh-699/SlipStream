@@ -32,12 +32,10 @@ use crate::state::TradingCredit;
 /// Accounts:
 ///   [0] trading_credit (writable) — the PDA to close
 ///   [1] owner          (signer, writable) — receives the rent refund
-const IX_DATA_LEN: usize = 0;
-
 pub fn process(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
-    data: &[u8],
+    _data: &[u8],
 ) -> ProgramResult {
     let [trading_credit_acc, owner, _remaining @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -45,9 +43,6 @@ pub fn process(
 
     if !owner.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
-    }
-    if data.len() < IX_DATA_LEN {
-        return Err(ProgramError::InvalidInstructionData);
     }
     // CRITICAL: a delegated credit is owned by the delegation program, not this
     // program. Refusing to operate on a non-program-owned account guarantees we

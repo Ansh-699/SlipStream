@@ -15,3 +15,7 @@ mod test_instructions_simple;
 
 #[cfg(test)]
 mod test_trading_credit;
+
+// Mollusk (in-process SVM) tests running the real compiled program.
+#[cfg(test)]
+mod test_close_position;

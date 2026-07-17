@@ -58,6 +58,8 @@ pub enum SlipstreamError {
     GlobalPaused,
     // Round 2: settlement
     FillMarginExceeded,
+    // Round 6: SL/TP trigger orders
+    TriggerConditionNotMet,
 }
 
 impl From<SlipstreamError> for ProgramError {

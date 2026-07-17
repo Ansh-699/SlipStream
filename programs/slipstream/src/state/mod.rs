@@ -8,6 +8,7 @@ pub mod order_slot;
 pub mod position;
 pub mod price_level;
 pub mod trading_credit;
+pub mod trigger_order;
 pub mod user_account;
 
 pub use fill_event::*;
@@ -20,6 +21,7 @@ pub use order_slot::*;
 pub use position::*;
 pub use price_level::*;
 pub use trading_credit::*;
+pub use trigger_order::*;
 pub use user_account::*;
 
 pub const DISC_GLOBAL_STATE: u8 = 1;
@@ -30,6 +32,7 @@ pub const DISC_ORDER_BOOK: u8 = 5;
 pub const DISC_TRADING_CREDIT: u8 = 6;
 pub const DISC_LIQUIDATION_INTENT: u8 = 7;
 pub const DISC_FILL_LOG: u8 = 8;
+pub const DISC_TRIGGER_ORDER: u8 = 9;
 
 pub const SEED_GLOBAL: &[u8] = b"global";
 pub const SEED_MARKET: &[u8] = b"market";
@@ -43,6 +46,8 @@ pub const SEED_LIQ_INTENT: &[u8] = b"liq_intent";
 /// Including the epoch lets the keeper rotate to a fresh delegated account
 /// (with a fresh sponsored-commit budget) without touching the orderbook.
 pub const SEED_FILL_LOG: &[u8] = b"fill_log";
+/// Seed tag for TriggerOrder PDAs: [b"trigger", owner, market_index_le, [kind]].
+pub const SEED_TRIGGER: &[u8] = b"trigger";
 
 /// Seed tag for the MagicBlock delegation **buffer** PDA. The delegation program
 /// derives this buffer as `[b"buffer", delegated_account]` under the OWNER (this)

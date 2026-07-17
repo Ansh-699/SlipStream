@@ -99,11 +99,10 @@ pub fn process(
     if market.lot_size == 0 || size % market.lot_size != 0 {
         return Err(SlipstreamError::LotSizeViolation.into());
     }
-    if order_type != ORDER_TYPE_MARKET {
-        if market.tick_size == 0 || price % market.tick_size != 0 {
+    if order_type != ORDER_TYPE_MARKET
+        && (market.tick_size == 0 || price % market.tick_size != 0) {
             return Err(SlipstreamError::TickSizeViolation.into());
         }
-    }
 
     // Validate trading credit authorization & market. The signer must be the
     // credit OWNER or a non-expired authorized SESSION key — but the order is
@@ -198,9 +197,9 @@ pub fn process(
         )?;
     } else {
         let would_cross = if side == SIDE_BID {
-            ob.best_ask_level().map_or(false, |ask| price >= ask.price)
+            ob.best_ask_level().is_some_and(|ask| price >= ask.price)
         } else {
-            ob.best_bid_level().map_or(false, |bid| price <= bid.price)
+            ob.best_bid_level().is_some_and(|bid| price <= bid.price)
         };
         if would_cross {
             return Err(SlipstreamError::PostOnlyWouldCross.into());

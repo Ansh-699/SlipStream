@@ -21,8 +21,7 @@ use crate::state::{
     DISC_LIQUIDATION_INTENT, SEED_LIQ_INTENT,
 };
 
-/// liquidate_position instruction data: empty (oracle prices come from accounts)
-const IX_DATA_LEN: usize = 0;
+// liquidate_position instruction data: empty (oracle prices come from accounts)
 
 /// Health factor threshold for liquidation (1.0 in 6-decimal fixed point).
 const HEALTH_FACTOR_LIQUIDATION_THRESHOLD: u64 = 1_000_000;
@@ -57,9 +56,6 @@ pub fn process(
 
     if !liquidator.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
-    }
-    if _data.len() < IX_DATA_LEN {
-        return Err(ProgramError::InvalidInstructionData);
     }
 
     let clock = Clock::get()?;

@@ -38,7 +38,7 @@ pub struct OracleReading {
 impl OracleReading {
     pub fn is_fresh(&self, now: i64) -> bool {
         let age = now.saturating_sub(self.publish_ts);
-        age >= 0 && age <= MAX_STALENESS_SECS
+        (0..=MAX_STALENESS_SECS).contains(&age)
     }
 }
 
@@ -47,23 +47,27 @@ impl OracleReading {
 /// Handles BOTH on-chain Pyth layouts so whichever feed account is passed works:
 ///
 /// 1. **Legacy Pyth V2 aggregate** (`PriceAccountV2`, len >= 248):
-///      price        i64 @ 208
-///      exponent     i32 @ 20
-///      agg.status   u32 @ 224   (1 = Trading)
-///      timestamp    i64 @ 96    (unix `timestamp` field)
+///    ```text
+///    price        i64 @ 208
+///    exponent     i32 @ 20
+///    agg.status   u32 @ 224   (1 = Trading)
+///    timestamp    i64 @ 96    (unix `timestamp` field)
+///    ```
 ///    The previously-deployed parser read these offsets wrong (exponent@224,
 ///    publish_time@232, status@240) — fixed here.
 ///
 /// 2. **Pyth Receiver `PriceUpdateV2`** (the live, actively-updated devnet feed
 ///    `7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE`, len ~= 134):
-///      8  disc (Anchor: [34,241,35,99,...])
-///      32 write_authority
-///      1  verification_level
-///      then `price_message { feed_id[32], price i64, conf u64, expo i32,
-///                            publish_time i64, prev_publish_time i64 }`
-///      => price        i64 @ 8+32+1+32 = 73
-///         expo         i32 @ 89
-///         publish_time i64 @ 93
+///    ```text
+///    8  disc (Anchor: [34,241,35,99,...])
+///    32 write_authority
+///    1  verification_level
+///    then price_message { feed_id[32], price i64, conf u64, expo i32,
+///                         publish_time i64, prev_publish_time i64 }
+///    => price        i64 @ 8+32+1+32 = 73
+///       expo         i32 @ 89
+///       publish_time i64 @ 93
+///    ```
 ///    PriceUpdateV2 carries no trading-status field; freshness is enforced by the
 ///    caller via `OracleReading::is_fresh`.
 ///

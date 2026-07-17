@@ -287,6 +287,45 @@ fn test_trading_credit_authorized_signer() {
 }
 
 #[test]
+fn test_trigger_order_size_and_roundtrip() {
+    assert_eq!(TriggerOrder::LEN, 56);
+    assert_eq!(std::mem::size_of::<TriggerOrder>(), 56);
+
+    let mut t = TriggerOrder::zeroed();
+    t.discriminator = DISC_TRIGGER_ORDER;
+    t.kind = TRIGGER_KIND_TAKE_PROFIT;
+    t.trigger_above = 1;
+    t.market_index = 3;
+    t.owner = [9u8; 32];
+    t.trigger_price = 75_000_000;
+    t.created_ts = 1_700_000_000;
+
+    let bytes = bytemuck::bytes_of(&t);
+    let back: &TriggerOrder = bytemuck::from_bytes(bytes);
+    assert_eq!(back.kind, TRIGGER_KIND_TAKE_PROFIT);
+    assert_eq!(back.trigger_price, 75_000_000);
+    assert_eq!(back.market_index, 3);
+}
+
+#[test]
+fn test_trigger_order_condition() {
+    let mut t = TriggerOrder::zeroed();
+    t.trigger_price = 70_000_000;
+
+    // trigger_above = 0: fire when mark <= price (e.g. long stop-loss)
+    t.trigger_above = 0;
+    assert!(t.is_met(70_000_000));
+    assert!(t.is_met(69_999_999));
+    assert!(!t.is_met(70_000_001));
+
+    // trigger_above = 1: fire when mark >= price (e.g. long take-profit)
+    t.trigger_above = 1;
+    assert!(t.is_met(70_000_000));
+    assert!(t.is_met(70_000_001));
+    assert!(!t.is_met(69_999_999));
+}
+
+#[test]
 fn test_liquidation_intent_size() {
     assert_eq!(LiquidationIntent::LEN, 64);
     let mut intent = LiquidationIntent::zeroed();

@@ -42,11 +42,7 @@ pub fn process(
     // 10% move from current TWAP triggers pause
     if let Some(current_twap) = market.get_twap() {
         if current_twap > 0 {
-            let diff = if price > current_twap {
-                price - current_twap
-            } else {
-                current_twap - price
-            };
+            let diff = price.abs_diff(current_twap);
             // 10% threshold: diff * 10 > current_twap
             if diff * 10 > current_twap {
                 market.circuit_breaker_active = 1;

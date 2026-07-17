@@ -40,7 +40,6 @@ const COMMIT_FREQUENCY_MS: u32 = u32::MAX;
 /// Backward compatible: any data shorter than 40 bytes (e.g. the legacy 8-byte
 /// `valid_until` the old builder passed) simply leaves the session fields at
 /// their current value, so older clients still delegate without a session.
-const IX_DATA_LEN: usize = 0;
 const SESSION_DATA_LEN: usize = 32 + 8;
 
 /// Finalize delegation of a user's `TradingCredit` PDA to the MagicBlock ER.
@@ -102,9 +101,6 @@ pub fn process(
     }
     if *delegation_program.key() != DELEGATION_PROGRAM_ID {
         return Err(SlipstreamError::InvalidProgramId.into());
-    }
-    if data.len() < IX_DATA_LEN {
-        return Err(ProgramError::InvalidInstructionData);
     }
 
     // Validate the credit account, owner, and PDA before any mutation.

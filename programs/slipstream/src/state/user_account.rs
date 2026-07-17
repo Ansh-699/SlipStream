@@ -29,6 +29,10 @@ impl UserAccount {
         Ok(bytemuck::from_bytes(&data[..Self::LEN]))
     }
 
+    // The unchecked borrow hands out &mut from &AccountInfo; sound because the
+    // runtime guarantees each writable account's data is exclusively borrowed
+    // per instruction.
+    #[allow(clippy::mut_from_ref)]
     pub fn from_account_info_mut(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
         let data = unsafe { account.borrow_mut_data_unchecked() };
         if data.len() < Self::LEN {

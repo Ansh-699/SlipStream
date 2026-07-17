@@ -20,8 +20,6 @@ use crate::state::UserAccount;
 /// (via `withdraw_trading_credit` to drain credit, then their rent stays in the
 /// PDA — closing them is a separate instruction we don't ship in MVP because
 /// re-creating costs the same rent and the trade-off isn't worth a new instruction).
-const IX_DATA_LEN: usize = 0;
-
 pub fn process(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -33,9 +31,6 @@ pub fn process(
 
     if !owner.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
-    }
-    if _data.len() < IX_DATA_LEN {
-        return Err(ProgramError::InvalidInstructionData);
     }
     if user_account_acc.owner() != program_id {
         return Err(ProgramError::IllegalOwner);
