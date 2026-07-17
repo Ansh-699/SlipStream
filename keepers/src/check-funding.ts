@@ -9,7 +9,7 @@ async function main() {
   const now = Math.floor(Date.now()/1000);
   console.log("lastFundingTs=", Number(m.lastFundingTs), "now=", now, "elapsed=", now - Number(m.lastFundingTs), "s");
   console.log("fundingIntervalSecs=", Number(m.fundingIntervalSecs));
-  console.log("cumulativeFundingIndex(lo,hi)=", m.cumulativeFundingIndexLo?.toString?.() ?? "?", m.cumulativeFundingIndexHi?.toString?.() ?? "?");
+  console.log("cumulativeFundingIndex=", m.cumulativeFundingIndex.toString());
   console.log("twapCount=", m.twapCount, "twap=", m.twapPrices ? "present" : "?");
 }
 main().catch(e=>{console.error(e?.message??e);process.exit(1)});

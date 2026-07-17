@@ -34,6 +34,7 @@ import * as fs from "fs";
 import * as path from "path";
 
 import { getOperator } from "./shared/bot-wallets";
+import { loadManifest, MANIFEST_PATH } from "./shared/manifest";
 import {
   PROGRAM_ID,
   DELEGATION_PROGRAM_ID,
@@ -62,13 +63,13 @@ const TICK_SIZE = 1_000n;
 const LOT_SIZE = 100_000_000n;
 
 function loadUsdcMint(): PublicKey {
-  const manifestPath = path.resolve(__dirname, "../../../deploy.json");
-  const m = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const m = loadManifest();
+  if (!m.usdcMint) throw new Error(`usdcMint missing from ${MANIFEST_PATH}`);
   return new PublicKey(m.usdcMint);
 }
 function loadUsdcVault(): PublicKey {
-  const manifestPath = path.resolve(__dirname, "../../../deploy.json");
-  const m = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const m = loadManifest();
+  if (!m.usdcVault) throw new Error(`usdcVault missing from ${MANIFEST_PATH}`);
   return new PublicKey(m.usdcVault);
 }
 

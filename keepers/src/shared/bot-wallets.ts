@@ -402,12 +402,9 @@ async function resolveUsdcMint(_base: Connection): Promise<PublicKey> {
   }
   // Read straight from the deploy manifest (the keeper-addresses resolver does
   // not carry the mint, only the vault).
-  const fsmod = await import("fs");
-  const pathmod = await import("path");
-  const manifestPath =
-    process.env.DEPLOY_MANIFEST || pathmod.resolve(__dirname, "../../../../deploy.json");
-  const m = JSON.parse(fsmod.readFileSync(manifestPath, "utf-8"));
-  if (!m.usdcMint) throw new Error(`usdcMint missing from ${manifestPath}`);
+  const { loadManifest, MANIFEST_PATH } = await import("./manifest");
+  const m = loadManifest();
+  if (!m.usdcMint) throw new Error(`usdcMint missing from ${MANIFEST_PATH}`);
   cachedMint = new PublicKey(m.usdcMint);
   return cachedMint;
 }

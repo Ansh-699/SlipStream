@@ -1,4 +1,5 @@
 import {
+  ComputeBudgetProgram,
   Connection,
   Keypair,
   Transaction,
@@ -47,10 +48,23 @@ export function errName(code: number): string {
   return i >= 0 && i < ERR_NAMES.length ? ERR_NAMES[i] : `unknown(0x${code.toString(16)})`;
 }
 
+/** Readable text for any thrown value. `String(plainObject)` is "[object
+ *  Object]", which is what the keepers were logging for non-Error throws. */
+export function errText(e: any): string {
+  if (e == null) return String(e);
+  if (typeof e === "string") return e;
+  if (typeof e.message === "string" && e.message.length > 0) return e.message;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
 /** Extract the custom program error code (if any) from a thrown send error. */
 export function classifyTxError(e: any): ClassifiedError {
   const logs: string[] = Array.isArray(e?.logs) ? e.logs : [];
-  const hay = [e?.message ?? String(e), ...logs].join("\n");
+  const hay = [errText(e), ...logs].join("\n");
   const hex = hay.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
   if (hex) {
     const code = parseInt(hex[1], 16);
@@ -72,9 +86,17 @@ export function classifyTxError(e: any): ClassifiedError {
 export async function sendErTx(
   er: Connection,
   ix: TransactionInstruction,
-  payer: Keypair
+  payer: Keypair,
+  opts?: { computeUnits?: number }
 ): Promise<string> {
-  const tx = new Transaction().add(ix);
+  const tx = new Transaction();
+  // The ER honors ComputeBudget (verified live). Instructions that scan the
+  // fill ring (mirror_fills) need more than the 200k default once the ring
+  // carries a backlog.
+  if (opts?.computeUnits) {
+    tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: opts.computeUnits }));
+  }
+  tx.add(ix);
   tx.recentBlockhash = (await er.getLatestBlockhash()).blockhash;
   tx.feePayer = payer.publicKey;
   tx.sign(payer);

@@ -1,8 +1,7 @@
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { getOrCreateAssociatedTokenAccount, mintTo, getAccount } from "@solana/spl-token";
-import * as fs from "fs";
-import * as path from "path";
 import { loadKeypair, log } from "./shared/connection";
+import { loadManifest, MANIFEST_PATH } from "./shared/manifest";
 
 /**
  * Mint test USDC to a user wallet (operator is the live mint authority). SOL is
@@ -19,8 +18,8 @@ async function main() {
   );
   const amountUsdc = Number(process.env.AMOUNT_USDC || "50000");
 
-  const manifestPath = path.resolve(__dirname, "../../../deploy.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+  const manifest = loadManifest();
+  if (!manifest.usdcMint) throw new Error(`usdcMint missing from ${MANIFEST_PATH}`);
   const mint = new PublicKey(manifest.usdcMint);
 
   log("FUND", `USDC mint: ${mint.toBase58()}`);

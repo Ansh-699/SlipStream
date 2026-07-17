@@ -4,7 +4,7 @@ import {
   mintTo,
 } from "@solana/spl-token";
 import { getBaseConnection, getErConnection, sendAndConfirm, log } from "./shared/connection";
-import { getKeeperAddresses } from "./shared/manifest";
+import { getKeeperAddresses, loadManifest, MANIFEST_PATH } from "./shared/manifest";
 import { loadBotWallets, getOperator, readTradingCredit, fmtUsdc } from "./shared/bot-wallets";
 import {
   createDepositCollateralInstruction,
@@ -12,8 +12,6 @@ import {
 } from "../../client/src/instructions";
 import { findUserAccountPda } from "../../client/src/pda";
 import { PublicKey } from "@solana/web3.js";
-import * as fs from "fs";
-import * as path from "path";
 
 /**
  * Top up the taker bots' trading credit so they can keep crossing the book
@@ -30,8 +28,9 @@ async function main() {
   const { marketIndex, usdcVault } = getKeeperAddresses();
   const topup = BigInt(Math.round(Number(process.env.TOPUP_USDC || "3000") * 1e6));
 
-  const manifestPath = path.resolve(__dirname, "../../../deploy.json");
-  const mint = new PublicKey(JSON.parse(fs.readFileSync(manifestPath, "utf-8")).usdcMint);
+  const manifest = loadManifest();
+  if (!manifest.usdcMint) throw new Error(`usdcMint missing from ${MANIFEST_PATH}`);
+  const mint = new PublicKey(manifest.usdcMint);
 
   const takers = loadBotWallets().filter((w) => w.role === "taker");
   for (const w of takers) {

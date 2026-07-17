@@ -29,9 +29,24 @@ import { PYTH_SOL_USD_FEED } from "./pyth";
  * how `connection.ts` reads `BASE_RPC`/`ER_RPC` from env).
  */
 
-// Default points at the repo-root deploy.json. Resolved relative to this module
-// so it works regardless of the process cwd. Override via DEPLOY_MANIFEST.
-const DEFAULT_MANIFEST_PATH = path.resolve(__dirname, "../../../../deploy.json");
+// Default points at the repo-root deploy.json. `__dirname` differs between the
+// tsx (src/shared) and compiled (dist/src/shared) layouts, so walk upward until
+// deploy.json is found instead of hard-coding a ../ depth. Override via
+// DEPLOY_MANIFEST.
+function findDefaultManifest(startDir: string): string {
+  let dir = startDir;
+  for (let i = 0; i < 8; i++) {
+    const candidate = path.join(dir, "deploy.json");
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // Not found: return the repo-root guess so the "not found at <path>" error
+  // names a sensible location.
+  return path.resolve(startDir, "../../../deploy.json");
+}
+const DEFAULT_MANIFEST_PATH = findDefaultManifest(__dirname);
 
 export const MANIFEST_PATH = process.env.DEPLOY_MANIFEST || DEFAULT_MANIFEST_PATH;
 

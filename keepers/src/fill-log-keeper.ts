@@ -8,7 +8,7 @@ import {
   log,
 } from "./shared/connection";
 import { getKeeperAddresses } from "./shared/manifest";
-import { sendErTx, classifyTxError } from "./shared/ertx";
+import { sendErTx, classifyTxError, errText } from "./shared/ertx";
 import {
   createInitializeFillLogInstruction,
   createDelegateFillLogInstruction,
@@ -46,6 +46,17 @@ const COMMIT_POLL_INTERVAL_MS = 1500;
 // Rotate BEFORE the hard cap of 10 so a commit never fails mid-flight.
 const COMMITS_BEFORE_ROTATE = 9;
 const ERR_FILL_QUEUE_EMPTY = 0x11d;
+// Bound each mirror_fills call: max_fills=0 (uncapped) scans+copies the whole
+// 4096-slot fill ring and blows the CU budget once a backlog builds (observed
+// live: "exceeded CUs meter", settlement stalled for days). 64 per 4s tick
+// drains any backlog while staying well inside the raised budget below.
+const MAX_FILLS_PER_MIRROR = 64;
+// Ring scan + appends need more than the 200k default; the ER honors
+// ComputeBudget (verified live: bounded mirror consumed 83k with headroom).
+const MIRROR_CU_LIMIT = 600_000;
+// Consecutive mirror failures before assuming the current epoch is unusable
+// (full log + spent commit budget) and rotating to a fresh one.
+const MIRROR_ERRORS_BEFORE_ROTATE = 3;
 
 async function main() {
   const base = getBaseConnection();
@@ -55,12 +66,27 @@ async function main() {
 
   log("FILLLOG-KEEPER", `keeper ${keeper.publicKey.toBase58()} market=${marketIndex}`);
 
-  // Discover the current live epoch: the highest epoch whose FillLog exists and is
-  // still delegated with commits remaining. For a fresh start this is epoch 0.
   let epoch = parseInt(process.env.FILL_LOG_START_EPOCH ?? "0", 10);
   let commitsThisEpoch = 0;
   // L1 settlement cursor mirror (Market.last_settled_sequence is the source of truth).
   let lastSettledSeq: bigint | null = null;
+
+  /**
+   * Discover the current live epoch: the highest epoch whose FillLog already
+   * exists. Rotation state is in-memory only, so a restart that blindly
+   * resumed at FILL_LOG_START_EPOCH landed on a long-abandoned epoch (full
+   * log, spent commit budget) and settlement deadlocked. Probes the ER, which
+   * knows every delegated FillLog, so discovery works even when the base RPC
+   * is rate-limited.
+   */
+  async function discoverEpoch(startEpoch: number): Promise<number> {
+    let ep = startEpoch;
+    for (;;) {
+      const [nextFl] = findFillLogPda(marketIndex, ep + 1, programId);
+      if (!(await er.getAccountInfo(nextFl))) return ep;
+      ep += 1;
+    }
+  }
 
   /** Ensure the FillLog for `epoch` exists + is delegated to the ER. Idempotent. */
   async function ensureEpochReady(ep: number): Promise<void> {
@@ -91,17 +117,22 @@ async function main() {
   }
 
   /** mirror_fills on the ER: append new orderbook fills to the current FillLog. */
-  async function mirror(): Promise<boolean> {
+  async function mirror(): Promise<"mirrored" | "empty" | "error"> {
     try {
-      const ix = createMirrorFillsInstruction(marketIndex, epoch, 0, programId);
-      const sig = await sendErTx(er, ix, keeper);
+      const ix = createMirrorFillsInstruction(
+        marketIndex,
+        epoch,
+        MAX_FILLS_PER_MIRROR,
+        programId
+      );
+      const sig = await sendErTx(er, ix, keeper, { computeUnits: MIRROR_CU_LIMIT });
       log("FILLLOG-KEEPER", `epoch ${epoch}: mirror_fills ${sig}`);
-      return true;
+      return "mirrored";
     } catch (e: any) {
       const c = classifyTxError(e);
-      if (c.code === ERR_FILL_QUEUE_EMPTY) return false; // nothing new
+      if (c.code === ERR_FILL_QUEUE_EMPTY) return "empty"; // nothing new
       log("FILLLOG-KEEPER", `mirror_fills error: ${c.name ?? c.raw}`);
-      return false;
+      return "error";
     }
   }
 
@@ -233,29 +264,68 @@ async function main() {
     }
   }
 
+  // A stuck epoch (full FillLog whose commit budget is spent) fails mirror
+  // forever, and tick() returning early meant the rotate path in commit()
+  // could never run — the exact live deadlock this replaces. Rotate directly
+  // after repeated mirror failures instead.
+  let mirrorErrors = 0;
+
   async function tick(): Promise<void> {
-    const hadNew = await mirror();
-    if (!hadNew) return;
+    const mirrored = await mirror();
+    if (mirrored === "error") {
+      mirrorErrors += 1;
+      if (mirrorErrors >= MIRROR_ERRORS_BEFORE_ROTATE) {
+        log(
+          "FILLLOG-KEEPER",
+          `mirror failed ${mirrorErrors}x on epoch ${epoch}; rotating to a fresh epoch`
+        );
+        mirrorErrors = 0;
+        await rotate();
+      }
+      return;
+    }
+    mirrorErrors = 0;
+    if (mirrored === "empty") return;
     const committed = await commit();
     if (!committed) return;
     await settle();
   }
 
-  await ensureEpochReady(epoch);
+  epoch = await discoverEpoch(epoch);
+  // Startup needs base-RPC writes (init/delegate). Retry with backoff instead
+  // of crashing: the old exit(1)-into-pm2-restart loop burned RPC quota on
+  // every relaunch (33k restarts observed).
+  for (;;) {
+    try {
+      await ensureEpochReady(epoch);
+      break;
+    } catch (e: any) {
+      log("FILLLOG-KEEPER", `startup not ready: ${errText(e)}; retrying in 30s`);
+      await sleep(30_000);
+    }
+  }
   log("FILLLOG-KEEPER", `ready on epoch ${epoch}; entering loop`);
 
+  let consecutiveErrors = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       await tick();
+      consecutiveErrors = 0;
     } catch (e: any) {
-      log("FILLLOG-KEEPER", `tick error: ${e?.message ?? e}`);
+      consecutiveErrors += 1;
+      log("FILLLOG-KEEPER", `tick error (${consecutiveErrors}): ${errText(e)}`);
+      if (consecutiveErrors > 10) {
+        log("FILLLOG-KEEPER", "too many consecutive errors, backing off 60s");
+        await sleep(60_000);
+        consecutiveErrors = 0;
+      }
     }
     await sleep(POLL_INTERVAL_MS);
   }
 }
 
 main().catch((err) => {
-  console.error("fill-log keeper crashed:", err?.message ?? err);
+  log("FILLLOG-KEEPER", `crashed: ${errText(err)}`);
   process.exit(1);
 });

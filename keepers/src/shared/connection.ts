@@ -9,7 +9,10 @@ const KEYPAIR_PATH =
   path.join(process.env.HOME || "~", ".config/solana/id.json");
 
 export function getBaseConnection(commitment: Commitment = "confirmed"): Connection {
-  return new Connection(BASE_RPC, { commitment });
+  // web3.js retries a 429 five times internally before throwing; on a
+  // quota-exhausted endpoint that multiplies every call ×5 and starves the
+  // keepers' own backoff logic. Fail fast and let callers back off.
+  return new Connection(BASE_RPC, { commitment, disableRetryOnRateLimit: true });
 }
 
 export function getErConnection(): Connection {
