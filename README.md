@@ -49,18 +49,18 @@ Slipstream **splits the system**:
 
 | Capability | Status |
 |---|---|
-| Limit + market orders, price-time-priority matching in the ER | ✅ live |
-| Margin × leverage (up to 20×), real notional/PnL accounting | ✅ live |
-| ER → L1 settlement into real `Position` accounts (FillLog pipeline) | ✅ live |
-| Partial close + slippage-bounded close-at-market | ✅ live |
-| Stop-loss / take-profit trigger orders (keeper-executed on-chain) | ✅ live, keeper-cranked |
-| Funding rate (8h interval, self-computed 30-min TWAP) | ✅ live, keeper-cranked |
-| Liquidations (health factor, liq price) | ✅ live, keeper-cranked |
-| Session keys (sign once, trade many — no popup per order) | ✅ live |
-| Live Pyth price chart (SSE stream + real OHLC history) | ✅ live |
-| Settled-trade history + system-status panel (SQLite fills indexer) | ✅ live |
-| On-chain order book held in a single ~612 KB PDA | ✅ live |
-| CI (clippy `-D warnings`, mollusk program tests, tsc + eslint) | ✅ green |
+| Limit + market orders, price-time-priority matching in the ER |  live |
+| Margin × leverage (up to 20×), real notional/PnL accounting |  live |
+| ER → L1 settlement into real `Position` accounts (FillLog pipeline) |  live |
+| Partial close + slippage-bounded close-at-market |  live |
+| Stop-loss / take-profit trigger orders (keeper-executed on-chain) |  live, keeper-cranked |
+| Funding rate (8h interval, self-computed 30-min TWAP) |  live, keeper-cranked |
+| Liquidations (health factor, liq price) |  live, keeper-cranked |
+| Session keys (sign once, trade many — no popup per order) |  live |
+| Live Pyth price chart (SSE stream + real OHLC history) |  live |
+| Settled-trade history + system-status panel (SQLite fills indexer) |  live |
+| On-chain order book held in a single ~612 KB PDA |  live |
+| CI (clippy `-D warnings`, mollusk program tests, tsc + eslint) |  green |
 
 ## How it does it
 
