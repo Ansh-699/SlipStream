@@ -80,6 +80,9 @@ pub fn apply_bps(amount: u64, bps: u16) -> Result<u64, ProgramError> {
         .checked_mul(bps as u128)
         .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?
         / (BPS_SCALE as u128);
+    if result > u64::MAX as u128 {
+        return Err(SlipstreamError::MathOverflow.into());
+    }
     Ok(result as u64)
 }
 
@@ -204,6 +207,19 @@ mod tests {
         // 6 bps of $1000 = $0.60
         let fee = apply_bps(1_000_000_000, 6).unwrap();
         assert_eq!(fee, 600_000);
+    }
+
+    /// Unlike every sibling in this file, apply_bps had no post-division
+    /// overflow check: an amount/bps pair whose result exceeds u64::MAX used
+    /// to truncate silently via `as u64` instead of erroring.
+    #[test]
+    fn test_apply_bps_rejects_overflow_instead_of_truncating() {
+        let result = apply_bps(u64::MAX, 20_000); // 200% of u64::MAX
+        assert!(
+            matches!(result, Err(ProgramError::Custom(c)) if c == SlipstreamError::MathOverflow as u32),
+            "expected MathOverflow, got {:?}",
+            result
+        );
     }
 
     #[test]
