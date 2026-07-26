@@ -131,15 +131,33 @@ export function getBotCounts(): { mm: number; taker: number } {
   return { mm, taker };
 }
 
+/**
+ * Wallet-name prefixes. A TradingCredit PDA is derived from the OWNER key, so the
+ * only way to escape a credit account that has become unusable is a fresh wallet.
+ * That happens when L1 says the credit is delegated but the ER never took
+ * ownership of it: fund_trading_credit then refuses it as delegated, while the
+ * magic program refuses to undelegate something it does not consider delegated —
+ * the account is unreachable from both layers. Repointing the fleet at a new
+ * prefix (e.g. BOT_MM_PREFIX=mm-v2) provisions clean credits without renaming
+ * key files or editing code.
+ */
+export function getBotPrefixes(): { mm: string; taker: string } {
+  return {
+    mm: process.env.BOT_MM_PREFIX || "mm",
+    taker: process.env.BOT_TAKER_PREFIX || "taker",
+  };
+}
+
 /** Load (create on first use) the full configured set of bot wallets. */
 export function loadBotWallets(counts = getBotCounts()): BotWallet[] {
+  const prefixes = getBotPrefixes();
   const wallets: BotWallet[] = [];
   for (let i = 0; i < counts.mm; i++) {
-    const name = `mm-${i}`;
+    const name = `${prefixes.mm}-${i}`;
     wallets.push({ name, role: "mm", keypair: loadOrCreateBotKeypair(name) });
   }
   for (let i = 0; i < counts.taker; i++) {
-    const name = `taker-${i}`;
+    const name = `${prefixes.taker}-${i}`;
     wallets.push({ name, role: "taker", keypair: loadOrCreateBotKeypair(name) });
   }
   return wallets;
