@@ -248,6 +248,27 @@ fn test_order_slot_drain_margin_full() {
     assert_eq!(slot.margin_reserved, 0);
 }
 
+/// A dust order (margin_reserved rounded to 0 at rest) must still shrink
+/// remaining_size on every fill. Before this fix, drain_margin_for_fill
+/// returned early whenever margin_reserved == 0, leaving remaining_size
+/// untouched forever — the slot could be matched for its full original size
+/// over and over across separate calls, unlimited free liquidity at zero cost.
+#[test]
+fn test_order_slot_drain_margin_dust_order_still_consumes_remaining_size() {
+    let mut slot = OrderSlot::zeroed();
+    slot.init(1, [1u8; 32], SIDE_BID, ORDER_TYPE_LIMIT, 100_000_000, 10_000, 0, 0);
+    let drained = slot.drain_margin_for_fill(4_000);
+    assert_eq!(drained, 0, "no margin to distribute");
+    assert_eq!(
+        slot.remaining_size, 6_000,
+        "remaining_size must shrink even when margin_reserved is 0"
+    );
+
+    let drained2 = slot.drain_margin_for_fill(6_000);
+    assert_eq!(drained2, 0);
+    assert_eq!(slot.remaining_size, 0, "slot must fully drain to zero, not get stuck");
+}
+
 #[test]
 fn test_order_slot_drain_margin_partial() {
     let mut slot = OrderSlot::zeroed();

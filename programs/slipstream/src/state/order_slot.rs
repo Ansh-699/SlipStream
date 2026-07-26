@@ -78,18 +78,28 @@ impl OrderSlot {
 
     /// Compute margin to release for a partial fill proportional to `filled_size`.
     /// Returns `filled_margin` and leaves `margin_reserved` reduced by that amount.
-    /// Also decrements `remaining_size` by `filled_size` so the caller does not have
-    /// to track the two counters separately.
+    /// Always decrements `remaining_size` by the filled amount (even when there is
+    /// no margin left to distribute) so the caller does not have to track the two
+    /// counters separately.
     pub fn drain_margin_for_fill(&mut self, filled_size: u64) -> u64 {
-        if self.remaining_size == 0 || self.margin_reserved == 0 || filled_size == 0 {
+        if self.remaining_size == 0 || filled_size == 0 {
             return 0;
         }
         let clamped = filled_size.min(self.remaining_size);
-        // Proportional share: clamped / remaining. Use u128 to avoid overflow.
-        let share = (self.margin_reserved as u128)
-            .saturating_mul(clamped as u128)
-            / (self.remaining_size as u128);
-        let filled_margin = share.min(self.margin_reserved as u128) as u64;
+        // `remaining_size` must shrink regardless of `margin_reserved`: a dust
+        // order whose rounded margin is 0 at rest (compute_initial_margin on a
+        // tiny notional) must still be consumed by fills, or it never leaves the
+        // book and can be matched against for its full original size over and
+        // over across separate calls — unlimited free liquidity at zero margin.
+        let filled_margin = if self.margin_reserved == 0 {
+            0
+        } else {
+            // Proportional share: clamped / remaining. Use u128 to avoid overflow.
+            let share = (self.margin_reserved as u128)
+                .saturating_mul(clamped as u128)
+                / (self.remaining_size as u128);
+            share.min(self.margin_reserved as u128) as u64
+        };
         self.margin_reserved -= filled_margin;
         self.remaining_size -= clamped;
         filled_margin
