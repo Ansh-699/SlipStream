@@ -118,10 +118,16 @@ export async function sendErTx(
     } catch {
       /* ignore */
     }
-    const err: any = new Error(
-      `ER tx ${sig} failed: ${JSON.stringify(conf.value.err)}\n${logs}`
-    );
-    const classified = classifyTxError({ message: logs, logs: [logs] });
+    const confErr = JSON.stringify(conf.value.err);
+    const err: any = new Error(`ER tx ${sig} failed: ${confErr}\n${logs}`);
+    // Classify from BOTH sources: conf.value.err carries the structured
+    // {InstructionError:[ix,{Custom:n}]} the confirm response already gave us,
+    // and logs (when available) carry the human "custom program error: 0x.."
+    // line. Passing only `logs` here meant that whenever the ER hadn't indexed
+    // logs yet (the exact race this function's own comment above documents),
+    // classification silently degraded to code:null even though conf.value.err
+    // had the real code the whole time.
+    const classified = classifyTxError({ message: `${confErr}\n${logs}`, logs: [logs] });
     err.code = classified.code;
     err.name = classified.name ?? "Error";
     err.sig = sig;
