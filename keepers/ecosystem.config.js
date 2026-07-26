@@ -42,6 +42,11 @@ module.exports = {
     // 2s cadence: the previous 1s cadence roughly doubled base-RPC usage for
     // no visible depth benefit and contributed to quota exhaustion.
     keeper("market-maker", "market-maker-bot.ts", {
+      // mm-v2: the original mm-0/mm-1 TradingCredits are stuck half-delegated
+      // (L1 says delegated so fund_trading_credit refuses; the ER never took
+      // ownership so the magic program refuses to undelegate). A credit PDA
+      // derives from the owner key, so fresh wallets are the only way out.
+      BOT_MM_PREFIX: "mm-v2",
       BOT_MM_COUNT: "2",
       BOT_MM_SIZE_LOTS: "20", // 20 lots × 0.1 SOL = 2.0 SOL per order
       BOT_MM_LEVELS: "6",
