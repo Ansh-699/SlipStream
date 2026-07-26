@@ -12,6 +12,29 @@ use pinocchio::{
 /// The previous 8-byte discriminator meant this escape hatch never worked.
 const SCHEDULE_COMMIT_AND_UNDELEGATE_DATA: [u8; 4] = [2, 0, 0, 0];
 
+/// Hardcoded well-known MagicBlock addresses (mirrors commit_orderbook.rs).
+const MAGIC_PROGRAM_ID: Pubkey = [
+    0x05, 0x45, 0xb4, 0x24, 0xb0, 0xda, 0x70, 0x95, 0xec, 0xb9, 0xd6, 0xde, 0xc3, 0x77, 0xd7, 0x28,
+    0x91, 0xb6, 0xe7, 0x8e, 0x92, 0xea, 0x12, 0xd6, 0xdf, 0xbb, 0x3a, 0x40, 0x00, 0x00, 0x00, 0x00,
+];
+const MAGIC_CONTEXT_ID: Pubkey = [
+    0x05, 0x45, 0xb4, 0x24, 0xc4, 0xa5, 0x28, 0xbf, 0x5f, 0xb4, 0x03, 0x2f, 0x44, 0x52, 0x82, 0x8e,
+    0xbb, 0x38, 0xab, 0xc1, 0xd2, 0xdc, 0x97, 0xf7, 0x3f, 0x8b, 0x94, 0x54, 0x80, 0x00, 0x00, 0x00,
+];
+
+// KNOWN LIMITATION (audit-confirmed): this instruction's two effects require
+// mutually exclusive execution layers. `ScheduleCommitAndUndelegate` is a
+// magic-program CPI that only exists inside the ER (see commit_orderbook.rs's
+// identical CPI, documented as ER-only); `GlobalState` is never delegated, so it
+// cannot be written from inside the ER and the ER never commits a non-delegated
+// account back to L1. In practice: call this on L1 and the magic CPI reverts
+// (the program doesn't exist there); call it on the ER and the `paused` write
+// cannot land. Splitting into an L1-only pause/unpause plus an L1-only forced
+// delegation-program `undelegate` is the real fix and is intentionally NOT done
+// here — it changes this instruction's account list and is a design decision
+// for whoever owns the incident-response runbook, not a drive-by patch. The
+// identity pins below at least make a decoy-program bypass loud instead of silent.
+
 use crate::error::SlipstreamError;
 use crate::state::{GlobalState, SEED_ORDERBOOK};
 
@@ -79,6 +102,12 @@ pub fn process(
         program_id,
     );
     if order_book_acc.key() != &expected_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    if magic_program.key() != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if magic_context.key() != &MAGIC_CONTEXT_ID {
         return Err(SlipstreamError::InvalidPda.into());
     }
 

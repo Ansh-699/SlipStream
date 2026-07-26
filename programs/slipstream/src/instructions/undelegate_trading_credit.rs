@@ -17,14 +17,25 @@ use pinocchio::{
 /// working undelegation path — including `emergency_undelegate`.
 const SCHEDULE_COMMIT_AND_UNDELEGATE_DATA: [u8; 4] = [2, 0, 0, 0];
 
+/// Hardcoded well-known MagicBlock addresses (mirrors commit_orderbook.rs /
+/// commit_fill_log.rs, which pin these on their own magic-program CPI).
+const MAGIC_PROGRAM_ID: Pubkey = [
+    0x05, 0x45, 0xb4, 0x24, 0xb0, 0xda, 0x70, 0x95, 0xec, 0xb9, 0xd6, 0xde, 0xc3, 0x77, 0xd7, 0x28,
+    0x91, 0xb6, 0xe7, 0x8e, 0x92, 0xea, 0x12, 0xd6, 0xdf, 0xbb, 0x3a, 0x40, 0x00, 0x00, 0x00, 0x00,
+];
+const MAGIC_CONTEXT_ID: Pubkey = [
+    0x05, 0x45, 0xb4, 0x24, 0xc4, 0xa5, 0x28, 0xbf, 0x5f, 0xb4, 0x03, 0x2f, 0x44, 0x52, 0x82, 0x8e,
+    0xbb, 0x38, 0xab, 0xc1, 0xd2, 0xdc, 0x97, 0xf7, 0x3f, 0x8b, 0x94, 0x54, 0x80, 0x00, 0x00, 0x00,
+];
+
 use crate::error::SlipstreamError;
 use crate::state::SEED_CREDIT;
 
 /// Instruction data: market_index: u16
 ///
-/// Note: Like `undelegate_orderbook`, this is a two-step CPI:
-///   1. Magic program `commit_and_undelegate` (commits ER state back to L1)
-///   2. Delegation program `undelegate` (returns write authority to this program)
+/// A SINGLE `ScheduleCommitAndUndelegate` CPI to the magic program commits the ER
+/// state and schedules the undelegation; the base-layer `undelegate` on the
+/// delegation program is then performed by the validator, not by this instruction.
 ///
 /// After this instruction, the TradingCredit is owned by the program again and the
 /// user can `withdraw_trading_credit`. We require `active_orders == 0` before
@@ -67,11 +78,16 @@ pub fn process(
     if trading_credit_acc.key() != &expected_pda {
         return Err(SlipstreamError::InvalidPda.into());
     }
+    // Pin the CPI target and context so a caller cannot substitute a decoy program
+    // that "succeeds" without actually undelegating anything.
+    if magic_program.key() != &MAGIC_PROGRAM_ID {
+        return Err(ProgramError::IncorrectProgramId);
+    }
+    if magic_context.key() != &MAGIC_CONTEXT_ID {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
 
-    // ONE CPI, not two: `ScheduleCommitAndUndelegate` commits the ER state and
-    // schedules the undelegation. The base-layer `undelegate` on the delegation
-    // program is performed by the validator afterwards — calling it here from the
-    // ER was never correct. `magic_context` must be WRITABLE.
+    // `magic_context` must be WRITABLE for ScheduleCommitAndUndelegate.
     let metas = [
         AccountMeta::writable_signer(payer.key()),
         AccountMeta::writable(magic_context.key()),
