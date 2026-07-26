@@ -91,6 +91,16 @@ pub(crate) fn do_close(
     if market_acc.key() != &market_pda {
         return Err(SlipstreamError::InvalidPda.into());
     }
+    // Circuit breaker (crank_twap.rs): a >10% jump from the 5-min TWAP trips
+    // this until price re-enters range. liquidate_position/place_order already
+    // gate on it; closing/trigger-executing at a momentarily anomalous price
+    // is exactly the case it exists to prevent — a bad tick would otherwise
+    // lock in an incorrect PnL settlement against either the trader or the
+    // insurance fund. Self-clears on the next in-range crank, so this is a
+    // brief price-integrity pause, not an indefinite lock like the global pause.
+    if market.circuit_breaker_active != 0 {
+        return Err(SlipstreamError::MarketPaused.into());
+    }
     let pos = Position::from_account_info(position_acc)?;
 
     if pos.owner != *owner_key {

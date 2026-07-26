@@ -226,6 +226,38 @@ fn test_close_slippage_bound_rejects() {
     );
 }
 
+/// close_position must respect the TWAP circuit breaker, same as place_order
+/// and liquidate_position — closing at a momentarily anomalous price would
+/// lock in an incorrect PnL settlement against the trader or the insurance
+/// fund.
+#[test]
+fn test_close_rejects_while_circuit_breaker_active() {
+    let s = setup();
+    let m = mollusk(&s.program_id);
+
+    let mut mkt = Market::zeroed();
+    mkt.discriminator = DISC_MARKET;
+    mkt.last_mark_price = 110 * PRICE_SCALE;
+    mkt.open_interest_long = 2 * SOL as u64;
+    mkt.insurance_fund_balance = 1_000 * PRICE_SCALE;
+    mkt.circuit_breaker_active = 1;
+
+    let accounts = vec![
+        (s.market, program_account(&s.program_id, bytemuck::bytes_of(&mkt))),
+        (s.position, position_account(&s.program_id, &s.owner, 2 * SOL, 100 * PRICE_SCALE, 10 * PRICE_SCALE)),
+        (s.user, user_account(&s.program_id, &s.owner, 0)),
+        (s.owner, Account::default()),
+    ];
+    let ix = close_ix(&s.program_id, s.market, s.position, s.user, s.owner, None);
+    let res = m.process_instruction(&ix, &accounts);
+    assert_eq!(
+        res.program_result,
+        MolluskResult::Failure(ProgramError::Custom(SlipstreamError::MarketPaused as u32)),
+        "close_position must reject while the circuit breaker is tripped: {:?}",
+        res.program_result
+    );
+}
+
 fn trigger_setup(
     s: &Setup,
     trigger_above: u8,
