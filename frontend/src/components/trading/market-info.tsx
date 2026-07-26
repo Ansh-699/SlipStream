@@ -75,6 +75,8 @@ export function MarketInfo() {
           <span className="text-base font-bold tracking-tight text-white">SOL-PERP</span>
           {market.circuitBreakerActive ? (
             <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">PAUSED</Badge>
+          ) : market.restrictedMode ? (
+            <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">CLOSES ONLY</Badge>
           ) : (
             <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300/80 uppercase tracking-wider">
               <span className="live-dot" /> Live
@@ -95,7 +97,11 @@ export function MarketInfo() {
       <Stat label="OI Short" value={`${oiShort.toFixed(2)}`} accent="rose" />
       <Stat
         label="Funding / 8h"
-        value={fundingBps !== null ? `${fundingBps >= 0 ? "+" : ""}${fundingBps.toFixed(3)}%` : "—"}
+        value={
+          fundingBps !== null
+            ? `${fundingBps >= 0 ? "+" : ""}${(fundingBps / 100).toFixed(3)}%`
+            : "—"
+        }
         accent={fundingBps !== null ? (fundingBps >= 0 ? "emerald" : "rose") : undefined}
       />
     </>

@@ -20,6 +20,8 @@ export interface MarketData {
   fundingRate: bigint;
   /** L1 settlement cursor (highest settled fill sequence). */
   lastSettledSequence: number;
+  /** Dual-oracle disagreement circuit breaker: closes-only while true. */
+  restrictedMode: boolean;
 }
 
 export function useMarket(marketIndex: number = 0) {
@@ -56,6 +58,7 @@ export function useMarket(marketIndex: number = 0) {
           twapPrice: computeTwap(m),
           fundingRate: m.cumulativeFundingIndex,
           lastSettledSequence: m.lastSettledSequence,
+          restrictedMode: m.restrictedMode,
         });
       }
     } catch {
