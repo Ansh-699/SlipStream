@@ -10,7 +10,7 @@ use crate::error::SlipstreamError;
 use crate::math::fixed_point::{apply_bps, compute_notional, compute_unrealized_pnl, compute_vwap_entry};
 use crate::state::{
     FillEvent, Market, OrderBookHeader, OrderSlot, Position, PriceLevel, UserAccount,
-    DISC_ORDER_BOOK, DISC_POSITION, DISC_USER_ACCOUNT, SIDE_BID,
+    DISC_ORDER_BOOK, DISC_POSITION, DISC_USER_ACCOUNT, SEED_MARKET, SEED_ORDERBOOK, SIDE_BID,
 };
 
 /// settle_trades instruction data (2 bytes):
@@ -46,7 +46,7 @@ const SETTLEMENT_BOUNTY_BPS: u16 = 50; // 0.5%
 /// (it never pops), so the committed queue holds every fill in ascending
 /// `sequence` order from `fill_event_head`.
 pub fn process(
-    _program_id: &Pubkey,
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
@@ -65,11 +65,28 @@ pub fn process(
     let clock = Clock::get()?;
     let now_slot = clock.slot;
 
-    // Settlement cursor: the highest fill sequence already applied on L1.
-    let last_settled = {
+    // This instruction is permissionless and mints Position collateral from the
+    // fills it reads, so BOTH accounts must be pinned to their canonical PDAs.
+    // A discriminator byte alone is not identity: any caller can hand in an
+    // account carrying DISC_ORDER_BOOK and fabricated FillEvents.
+    if market_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (last_settled, market_index) = {
         let market = Market::from_account_info(market_acc)?;
-        market.last_settled_sequence()
+        (market.last_settled_sequence(), market.market_index)
     };
+    let market_index_bytes = market_index.to_le_bytes();
+    let (market_pda, _) =
+        pinocchio::pubkey::find_program_address(&[SEED_MARKET, &market_index_bytes], program_id);
+    if market_acc.key() != &market_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    let (ob_pda, _) =
+        pinocchio::pubkey::find_program_address(&[SEED_ORDERBOOK, &market_index_bytes], program_id);
+    if order_book_acc.key() != &ob_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
 
     // --- Read the committed fill queue READ-ONLY (no mutation of the delegated book) ---
     let ob_data = unsafe { order_book_acc.borrow_data_unchecked() };
@@ -185,10 +202,12 @@ pub fn process(
                 .insurance_fund_balance
                 .checked_add(insurance_cut)
                 .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
-            market.last_mark_price = fill.price;
-            // A settled fill is a fresh mark observation — stamp it so closes
-            // stay available during active trading even if the crank stalls.
-            market.set_mark_price_minute(((clock.unix_timestamp / 60) as u64 % 65536) as u16);
+            // DO NOT source `last_mark_price` from `fill.price`. A fill price is
+            // user-controlled: nothing bounds a limit order's price against the
+            // oracle and there is no self-trade prevention, so a user could rest an
+            // order at an arbitrary price, cross it themselves, and have that price
+            // become the stamped-fresh mark that close_position / execute_trigger
+            // settle against. `crank_twap` (oracle-validated) is the sole writer.
         }
 
         if fill.sequence > max_seq {

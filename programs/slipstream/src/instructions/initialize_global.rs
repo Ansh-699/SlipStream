@@ -64,7 +64,7 @@ pub fn process(
     let mut insurance_vault = [0u8; 32];
     insurance_vault.copy_from_slice(&data[32..64]);
 
-    let state = GlobalState::from_account_info_mut(global_state_acc)?;
+    let state = GlobalState::from_account_info_mut_or_init(global_state_acc)?;
     state.discriminator = DISC_GLOBAL_STATE;
     state.bump = bump;
     state.market_count = 0;

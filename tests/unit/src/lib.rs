@@ -19,3 +19,7 @@ mod test_trading_credit;
 // Mollusk (in-process SVM) tests running the real compiled program.
 #[cfg(test)]
 mod test_close_position;
+
+// Negative tests pinning the account-validation fixes.
+#[cfg(test)]
+mod test_security_regressions;

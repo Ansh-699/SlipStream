@@ -60,6 +60,8 @@ pub enum SlipstreamError {
     FillMarginExceeded,
     // Round 6: SL/TP trigger orders
     TriggerConditionNotMet,
+    // Appended at the END so existing `e as u32` codes do not shift.
+    SelfTrade,
 }
 
 impl From<SlipstreamError> for ProgramError {

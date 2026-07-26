@@ -42,6 +42,30 @@ impl OracleReading {
     }
 }
 
+/// Assert the supplied oracle accounts are the ones this market was initialised
+/// with (`Market.pyth_feed` / `Market.switchboard_feed`).
+///
+/// MUST be called before any `parse_pyth` / `parse_switchboard` on caller-supplied
+/// accounts. Both parsers read raw bytes with `borrow_data_unchecked()` and check
+/// neither owner nor discriminator, so an unvalidated account is an attacker-chosen
+/// price — and via `crank_twap` that price becomes `Market.last_mark_price`, which
+/// `close_position` / `execute_trigger` settle against.
+pub fn verify_feeds(
+    market: &Market,
+    pyth_acc: &AccountInfo,
+    switchboard_acc: Option<&AccountInfo>,
+) -> Result<(), ProgramError> {
+    if pyth_acc.key() != &market.pyth_feed {
+        return Err(SlipstreamError::InvalidOracle.into());
+    }
+    if let Some(sb) = switchboard_acc {
+        if sb.key() != &market.switchboard_feed {
+            return Err(SlipstreamError::InvalidSwitchboardFeed.into());
+        }
+    }
+    Ok(())
+}
+
 /// Parse a Pyth price account and return a 6-decimal price + publish timestamp.
 ///
 /// Handles BOTH on-chain Pyth layouts so whichever feed account is passed works:
@@ -250,6 +274,13 @@ pub fn apply_dual_oracle(
     switchboard_acc: &AccountInfo,
     now: i64,
 ) -> Result<u64, ProgramError> {
+    // The feed pubkeys recorded at initialize_market are the ONLY thing that makes
+    // these readings trustworthy: parse_pyth / parse_switchboard read raw account
+    // bytes and validate neither the owner nor the identity of the account, and
+    // they dispatch purely on data.len(). Without this check any caller can hand in
+    // an account they control and choose the price outright.
+    verify_feeds(market, pyth_acc, Some(switchboard_acc))?;
+
     let reading = dual_oracle_read(pyth_acc, switchboard_acc, now)?;
 
     // DEVNET single-oracle (Pyth-only) fallback: Switchboard is environmentally

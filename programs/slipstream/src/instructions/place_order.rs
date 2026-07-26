@@ -340,6 +340,16 @@ fn match_order(
             let maker_slot = &ob.order_slots[head_slot as usize];
             (maker_slot.remaining_size, maker_slot.owner, maker_slot.side)
         };
+        // Self-trade prevention. Without it a user can rest an order at any price
+        // and cross it themselves, manufacturing a fill at a price of their
+        // choosing — the primary way `last_mark_price` and the TWAP get moved, and
+        // a free way to fabricate PnL between two positions the same owner holds.
+        // Reject rather than cancel-the-resting-order: the taker keeps control and
+        // no maker state is mutated mid-match.
+        if maker_owner == *taker {
+            return Err(SlipstreamError::SelfTrade.into());
+        }
+
         let fill_qty = remaining.min(maker_remaining);
 
         // Drain maker slot's margin proportionally — this amount is what Position.collateral
