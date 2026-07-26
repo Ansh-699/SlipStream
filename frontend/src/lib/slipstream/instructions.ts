@@ -1082,15 +1082,23 @@ export function createCrankTwapInstruction(
 
 export function createCloseUserAccountInstruction(
   owner: PublicKey,
-  programId: PublicKey = PROGRAM_ID
+  programId: PublicKey = PROGRAM_ID,
+  marketCount = 1
 ): TransactionInstruction {
   const [userAccount] = findUserAccountPda(owner, programId);
+  const [globalState] = findGlobalStatePda(programId);
   const data = Buffer.alloc(1);
   data[0] = IX_CLOSE_USER_ACCOUNT;
+  const positionKeys = Array.from({ length: marketCount }, (_, i) => {
+    const [position] = findPositionPda(owner, i, programId);
+    return { pubkey: position, isSigner: false, isWritable: false };
+  });
   return new TransactionInstruction({
     keys: [
       { pubkey: userAccount, isSigner: false, isWritable: true },
       { pubkey: owner, isSigner: true, isWritable: true },
+      { pubkey: globalState, isSigner: false, isWritable: false },
+      ...positionKeys,
     ],
     programId,
     data,

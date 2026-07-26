@@ -44,3 +44,7 @@ mod test_record_pending_fill_regressions;
 // Regression test for liquidate_position's LiquidationIntent validation fix.
 #[cfg(test)]
 mod test_liquidate_position_regressions;
+
+// Regression tests for close_user_account's open-position gate.
+#[cfg(test)]
+mod test_close_user_account_regressions;

@@ -62,6 +62,7 @@ pub enum SlipstreamError {
     TriggerConditionNotMet,
     // Appended at the END so existing `e as u32` codes do not shift.
     SelfTrade,
+    PositionStillOpen,
 }
 
 impl From<SlipstreamError> for ProgramError {
