@@ -105,10 +105,19 @@ fn position_account(
     program_account(program_id, bytemuck::bytes_of(&p))
 }
 
+fn global_state_account(program_id: &Pubkey) -> (Pubkey, Account) {
+    let (global_pk, _) = Pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    let mut g = GlobalState::zeroed();
+    g.discriminator = DISC_GLOBAL_STATE;
+    (global_pk, program_account(program_id, bytemuck::bytes_of(&g)))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn settle_trades_ix(
     program_id: &Pubkey,
     market: Pubkey,
     order_book: Pubkey,
+    global_state: Pubkey,
     maker_user: Pubkey,
     taker_user: Pubkey,
     maker_pos: Pubkey,
@@ -121,6 +130,7 @@ fn settle_trades_ix(
         accounts: vec![
             AccountMeta::new(market, false),
             AccountMeta::new_readonly(order_book, false),
+            AccountMeta::new_readonly(global_state, false),
             AccountMeta::new(maker_user, false),
             AccountMeta::new(taker_user, false),
             AccountMeta::new(maker_pos, false),
@@ -167,9 +177,12 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
         _pad: [0u8; 3],
     };
 
+    let (global_pk, global_acc) = global_state_account(&program_id);
+
     let accounts = vec![
         (market, market_account(&program_id)),
         (order_book, program_account(&program_id, &order_book_with_one_fill(fill))),
+        (global_pk, global_acc),
         (maker_user_pk, user_account(&program_id, &maker, 0)),
         (taker_user_pk, user_account(&program_id, &taker, 0)),
         (
@@ -183,6 +196,7 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
         &program_id,
         market,
         order_book,
+        global_pk,
         maker_user_pk,
         taker_user_pk,
         maker_pos_pk,
@@ -192,7 +206,7 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
     assert!(matches!(res.program_result, MolluskResult::Success), "{:?}", res.program_result);
 
     let maker_pos: &Position =
-        bytemuck::from_bytes(&res.resulting_accounts[4].1.data[..Position::LEN]);
+        bytemuck::from_bytes(&res.resulting_accounts[5].1.data[..Position::LEN]);
     assert_eq!(maker_pos.size, 0, "position must be fully flattened");
     assert_eq!(
         maker_pos.collateral, 0,
@@ -200,7 +214,7 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
     );
 
     let maker_user: &UserAccount =
-        bytemuck::from_bytes(&res.resulting_accounts[2].1.data[..UserAccount::LEN]);
+        bytemuck::from_bytes(&res.resulting_accounts[3].1.data[..UserAccount::LEN]);
     // settle_trades separately credits the maker rebate (apply_bps(notional, 5bps) on a
     // $15 notional fill = 7_500) into the same free_collateral — additive to, not
     // instead of, the release/refund this test targets.

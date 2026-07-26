@@ -11,7 +11,8 @@ use pinocchio::{
 use pinocchio_system::instructions::{Assign, CreateAccount};
 
 use crate::error::SlipstreamError;
-use crate::state::{TradingCredit, SEED_CREDIT, SEED_DELEGATE_BUFFER};
+use crate::instructions::ensure_not_globally_paused;
+use crate::state::{GlobalState, TradingCredit, SEED_CREDIT, SEED_DELEGATE_BUFFER, SEED_GLOBAL};
 
 // MagicBlock delegation program: DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
 const DELEGATION_PROGRAM_ID: Pubkey = [
@@ -81,6 +82,7 @@ pub fn process(
         delegation_metadata_acc,
         delegation_program,
         system_program,
+        global_state_acc,
         _remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -95,6 +97,14 @@ pub fn process(
     if system_program.key() != &pinocchio_system::ID {
         return Err(ProgramError::IncorrectProgramId);
     }
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
     // The owner_program account passed for the delegation CPI must be THIS program.
     if owner_program_acc.key() != program_id {
         return Err(SlipstreamError::InvalidProgramId.into());

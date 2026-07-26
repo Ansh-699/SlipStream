@@ -87,12 +87,21 @@ fn credit_account(program_id: &Pubkey, owner: &Pubkey, market_index: u16, credit
     program_account(program_id, bytemuck::bytes_of(&c))
 }
 
+fn global_state_account(program_id: &Pubkey) -> (Pubkey, Account) {
+    let (global_pk, _) = Pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    let mut g = GlobalState::zeroed();
+    g.discriminator = DISC_GLOBAL_STATE;
+    (global_pk, program_account(program_id, bytemuck::bytes_of(&g)))
+}
+
+#[allow(clippy::too_many_arguments)]
 fn place_order_ix(
     program_id: &Pubkey,
     market: Pubkey,
     order_book: Pubkey,
     credit: Pubkey,
     signer: Pubkey,
+    global_state: Pubkey,
     side: u8,
     order_type: u8,
     price: u64,
@@ -114,6 +123,7 @@ fn place_order_ix(
             AccountMeta::new(order_book, false),
             AccountMeta::new(credit, false),
             AccountMeta::new_readonly(signer, true),
+            AccountMeta::new_readonly(global_state, false),
         ],
         data,
     }
@@ -149,12 +159,14 @@ fn test_place_order_rejects_forged_market_account() {
 
     let ob_data = order_book_data(0, 4, 2, 4);
     let credit_acc = credit_account(&program_id, &taker, 0, 10 * PRICE_SCALE);
+    let (global_pk, global_acc) = global_state_account(&program_id);
 
     let accounts = vec![
         (Pubkey::new_unique(), forged_market_acc),
         (order_book, program_account(&program_id, &ob_data)),
         (credit_pda, credit_acc),
         (taker, Account::default()),
+        (global_pk, global_acc),
     ];
     let market_key = accounts[0].0;
 
@@ -164,6 +176,7 @@ fn test_place_order_rejects_forged_market_account() {
         order_book,
         credit_pda,
         taker,
+        global_pk,
         SIDE_BID,
         ORDER_TYPE_LIMIT,
         1_000,
@@ -203,12 +216,14 @@ fn test_place_order_reduce_only_no_longer_bypasses_margin_gate() {
 
     // Taker has ZERO funded credit — the exploit's entire premise.
     let credit_acc = credit_account(&program_id, &taker, 0, 0);
+    let (global_pk, global_acc) = global_state_account(&program_id);
 
     let accounts = vec![
         (market, market_acc),
         (order_book, program_account(&program_id, &ob_data)),
         (credit_pda, credit_acc),
         (taker, Account::default()),
+        (global_pk, global_acc),
     ];
 
     // Taker SELLS at the minimum tick — far below the resting bid, so it crosses —
@@ -219,6 +234,7 @@ fn test_place_order_reduce_only_no_longer_bypasses_margin_gate() {
         order_book,
         credit_pda,
         taker,
+        global_pk,
         SIDE_ASK,
         ORDER_TYPE_LIMIT,
         1_000, // market.tick_size, the minimum
@@ -256,12 +272,14 @@ fn test_place_order_normal_fill_still_works() {
 
     // Taker funds enough real credit to cover the fill at the crossing price.
     let credit_acc = credit_account(&program_id, &taker, 0, 10 * PRICE_SCALE);
+    let (global_pk, global_acc) = global_state_account(&program_id);
 
     let accounts = vec![
         (market, market_acc),
         (order_book, program_account(&program_id, &ob_data)),
         (credit_pda, credit_acc),
         (taker, Account::default()),
+        (global_pk, global_acc),
     ];
 
     let ix = place_order_ix(
@@ -270,6 +288,7 @@ fn test_place_order_normal_fill_still_works() {
         order_book,
         credit_pda,
         taker,
+        global_pk,
         SIDE_ASK,
         ORDER_TYPE_LIMIT,
         1_000,

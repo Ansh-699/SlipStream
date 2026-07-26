@@ -6,7 +6,8 @@ use pinocchio::{
 };
 
 use crate::error::SlipstreamError;
-use crate::state::{TradingCredit, UserAccount};
+use crate::instructions::ensure_not_globally_paused;
+use crate::state::{GlobalState, TradingCredit, UserAccount, SEED_GLOBAL};
 
 /// Instruction data: amount: u64
 /// Caller must ensure TradingCredit is NOT delegated (we can't write delegated
@@ -18,13 +19,24 @@ pub fn process(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let [user_account_acc, trading_credit_acc, owner, _remaining @ ..] = accounts else {
+    let [user_account_acc, trading_credit_acc, owner, global_state_acc, _remaining @ ..] =
+        accounts
+    else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
     if !owner.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
+
     if data.len() < IX_DATA_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }

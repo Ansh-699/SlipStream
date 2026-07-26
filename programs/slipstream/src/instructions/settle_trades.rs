@@ -7,11 +7,13 @@ use pinocchio::{
 };
 
 use crate::error::SlipstreamError;
+use crate::instructions::ensure_not_globally_paused;
 use crate::math::fixed_point::{apply_bps, compute_notional, compute_unrealized_pnl, compute_vwap_entry};
 use crate::math::funding::compute_funding_payment;
 use crate::state::{
-    FillEvent, Market, OrderBookHeader, OrderSlot, Position, PriceLevel, UserAccount,
-    DISC_ORDER_BOOK, DISC_POSITION, DISC_USER_ACCOUNT, SEED_MARKET, SEED_ORDERBOOK, SIDE_BID,
+    FillEvent, GlobalState, Market, OrderBookHeader, OrderSlot, Position, PriceLevel, UserAccount,
+    DISC_ORDER_BOOK, DISC_POSITION, DISC_USER_ACCOUNT, SEED_GLOBAL, SEED_MARKET, SEED_ORDERBOOK,
+    SIDE_BID,
 };
 
 /// settle_trades instruction data (2 bytes):
@@ -19,8 +21,9 @@ use crate::state::{
 ///
 /// Accounts:
 ///   [0] market
-///   [1] order_book (READ-ONLY — it is delegated to the ER)
-///   [2..] remaining — UserAccount and Position accounts for all makers/takers in the batch
+///   [1] order_book   (READ-ONLY — it is delegated to the ER)
+///   [2] global_state (R) — gates the protocol-wide pause
+///   [3..] remaining — UserAccount and Position accounts for all makers/takers in the batch
 const IX_DATA_LEN: usize = 2;
 
 /// Fraction of taker_fee that goes to per-market insurance fund (§17).
@@ -51,7 +54,7 @@ pub fn process(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let [market_acc, order_book_acc, remaining_accounts @ ..] = accounts else {
+    let [market_acc, order_book_acc, global_state_acc, remaining_accounts @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -65,6 +68,19 @@ pub fn process(
 
     let clock = Clock::get()?;
     let now_slot = clock.slot;
+
+    // Settlement turns ER matching activity into real L1 balance changes — gate
+    // it on the pause switch so an incident (e.g. a compromised ER validator)
+    // caps its damage at whatever already committed but not-yet-settled, rather
+    // than continuing to apply new fills while the operator investigates.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
 
     // This instruction is permissionless and mints Position collateral from the
     // fills it reads, so BOTH accounts must be pinned to their canonical PDAs.

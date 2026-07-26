@@ -280,6 +280,7 @@ export function createDepositCollateralInstruction(
   const [userAccount] = findUserAccountPda(owner, programId);
   // The program pins quoteVault to market.quote_vault, so the market must be passed.
   const [market] = findMarketPda(marketIndex, programId);
+  const [globalState] = findGlobalStatePda(programId);
 
   const data = Buffer.alloc(9);
   data[0] = IX_DEPOSIT_COLLATERAL;
@@ -293,6 +294,7 @@ export function createDepositCollateralInstruction(
       { pubkey: quoteVault, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: market, isSigner: false, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
     ],
     programId,
     data,
@@ -348,9 +350,11 @@ export interface PlaceOrderParams {
   expiryTs?: bigint;
   /** Only enforced for MARKET orders. 0 = disabled. */
   maxSlippageBps?: number;
-  /** When true, marks the order as position-reducing (a close/flatten): the
-   *  program skips the upfront margin gate, charges the taker zero new credit,
-   *  and never rests a remainder. Used by the Close button. */
+  /** Parsed on-chain but NOT currently acted on: every order is gated and
+   *  debited identically regardless of this byte (the ER cannot verify the
+   *  claim that an order is actually reducing a position, so trusting it was a
+   *  free-position exploit). Kept for wire-format/forward compatibility only.
+   *  Use `close_position` (L1) to close/reduce without needing fresh ER margin. */
   reduceOnly?: boolean;
 }
 
@@ -366,6 +370,7 @@ export function createPlaceOrderInstruction(
   // NOTE: the trading_credit PDA always derives from the OWNER, never the
   // session signer — the session key is only an authorized SIGNER (account [3]).
   const [tradingCredit] = findTradingCreditPda(owner, marketIndex, programId);
+  const [globalState] = findGlobalStatePda(programId);
 
   // disc(1)+side(1)+type(1)+price(8)+size(8)+expiry(8)+slippage(2)+reduce_only(1) = 30
   const data = Buffer.alloc(30);
@@ -385,6 +390,7 @@ export function createPlaceOrderInstruction(
       { pubkey: tradingCredit, isSigner: false, isWritable: true },
       // [3] signer: owner OR an authorized, non-expired session key.
       { pubkey: signer, isSigner: true, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
     ],
     programId,
     data,
@@ -452,6 +458,7 @@ export function createFundTradingCreditInstruction(
 ): TransactionInstruction {
   const [userAccount] = findUserAccountPda(owner, programId);
   const [tradingCredit] = findTradingCreditPda(owner, marketIndex, programId);
+  const [globalState] = findGlobalStatePda(programId);
   const data = Buffer.alloc(9);
   data[0] = IX_FUND_TRADING_CREDIT;
   writeU64LE(data, amount, 1);
@@ -461,6 +468,7 @@ export function createFundTradingCreditInstruction(
       { pubkey: userAccount, isSigner: false, isWritable: true },
       { pubkey: tradingCredit, isSigner: false, isWritable: true },
       { pubkey: owner, isSigner: true, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
     ],
     programId,
     data,
@@ -520,6 +528,7 @@ export function createDelegateTradingCreditInstruction(
   const [delegateBuffer] = findDelegateBufferPda(tradingCredit, programId);
   const [delegationRecord] = findDelegationRecordPda(tradingCredit);
   const [delegationMetadata] = findDelegationMetadataPda(tradingCredit);
+  const [globalState] = findGlobalStatePda(programId);
 
   // data = disc(1) + session_authority(32) + session_expiry i64(8) = 41 bytes.
   // When no session is requested the authority is left all-zero and expiry 0,
@@ -540,6 +549,7 @@ export function createDelegateTradingCreditInstruction(
       { pubkey: delegationMetadata, isSigner: false, isWritable: true },
       { pubkey: DELEGATION_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
     ],
     programId,
     data,
@@ -665,6 +675,7 @@ export function createSettleTradesInstruction(
 ): TransactionInstruction {
   const [market] = findMarketPda(marketIndex, programId);
   const [orderBook] = findOrderBookPda(marketIndex, programId);
+  const [globalState] = findGlobalStatePda(programId);
 
   const data = Buffer.alloc(3);
   data[0] = IX_SETTLE_TRADES;
@@ -674,6 +685,7 @@ export function createSettleTradesInstruction(
     keys: [
       { pubkey: market, isSigner: false, isWritable: true },
       { pubkey: orderBook, isSigner: false, isWritable: true },
+      { pubkey: globalState, isSigner: false, isWritable: false },
       ...remainingAccounts,
     ],
     programId,
@@ -826,6 +838,7 @@ export function createPlaceTriggerInstruction(
 ): TransactionInstruction {
   const [trigger] = findTriggerPda(owner, marketIndex, kind, programId);
   const [position] = findPositionPda(owner, marketIndex, programId);
+  const [globalState] = findGlobalStatePda(programId);
 
   const data = Buffer.alloc(13);
   data[0] = IX_PLACE_TRIGGER;
@@ -840,6 +853,7 @@ export function createPlaceTriggerInstruction(
       { pubkey: position, isSigner: false, isWritable: false },
       { pubkey: owner, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
     ],
     programId,
     data,

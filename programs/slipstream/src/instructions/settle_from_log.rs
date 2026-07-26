@@ -10,9 +10,11 @@ use crate::error::SlipstreamError;
 use crate::instructions::settle_trades::{
     try_find_position_account, try_find_user_account, update_position,
 };
+use crate::instructions::ensure_not_globally_paused;
 use crate::math::fixed_point::{apply_bps, compute_notional};
 use crate::state::{
-    FillEvent, FillLogHeader, Market, DISC_FILL_LOG, SEED_FILL_LOG, SEED_MARKET, SIDE_BID,
+    FillEvent, FillLogHeader, GlobalState, Market, DISC_FILL_LOG, SEED_FILL_LOG, SEED_GLOBAL,
+    SEED_MARKET, SIDE_BID,
 };
 
 /// Fraction of taker_fee that goes to per-market insurance fund (mirror of settle_trades).
@@ -33,9 +35,10 @@ const INSURANCE_SHARE_BPS: u16 = 1000; // 10%
 ///   num_fills:    u16   (max NEW fills to settle this call)
 ///
 /// Accounts:
-///   [0] market    (W)
-///   [1] fill_log  (R, committed L1 copy)
-///   [2..] remaining — UserAccount + Position accounts for all makers/takers in the batch
+///   [0] market       (W)
+///   [1] fill_log     (R, committed L1 copy)
+///   [2] global_state (R) — gates the protocol-wide pause
+///   [3..] remaining — UserAccount + Position accounts for all makers/takers in the batch
 const IX_DATA_LEN: usize = 2 + 4 + 2;
 
 pub fn process(
@@ -43,9 +46,18 @@ pub fn process(
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
-    let [market_acc, fill_log_acc, remaining_accounts @ ..] = accounts else {
+    let [market_acc, fill_log_acc, global_state_acc, remaining_accounts @ ..] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
+
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
 
     if data.len() < IX_DATA_LEN {
         return Err(ProgramError::InvalidInstructionData);

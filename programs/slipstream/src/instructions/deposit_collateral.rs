@@ -7,7 +7,8 @@ use pinocchio::{
 use pinocchio_token::instructions::Transfer;
 
 use crate::error::SlipstreamError;
-use crate::state::{Market, UserAccount};
+use crate::instructions::ensure_not_globally_paused;
+use crate::state::{GlobalState, Market, UserAccount, SEED_GLOBAL};
 
 pub fn process(
     program_id: &Pubkey,
@@ -21,6 +22,7 @@ pub fn process(
         quote_vault_acc,
         _token_program,
         market_acc,
+        global_state_acc,
         _remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -29,6 +31,14 @@ pub fn process(
     if !owner.is_signer() {
         return Err(ProgramError::MissingRequiredSignature);
     }
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
 
     if data.len() < 8 {
         return Err(ProgramError::InvalidInstructionData);

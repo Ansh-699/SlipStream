@@ -52,3 +52,7 @@ mod test_close_user_account_regressions;
 // Tests for the two-step GlobalState.authority rotation.
 #[cfg(test)]
 mod test_authority_rotation;
+
+// Tests for the newly-wired global pause switch.
+#[cfg(test)]
+mod test_global_pause;

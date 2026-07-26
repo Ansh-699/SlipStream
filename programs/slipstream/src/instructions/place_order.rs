@@ -8,9 +8,10 @@ use pinocchio::{
 
 use crate::error::SlipstreamError;
 use crate::math::fixed_point::{compute_initial_margin, compute_notional};
+use crate::instructions::ensure_not_globally_paused;
 use crate::state::{
-    reconcile_credit, FillEvent, Market, OrderBookView, TradingCredit,
-    SENTINEL, SIDE_BID, SIDE_ASK, SEED_MARKET, SEED_ORDERBOOK,
+    reconcile_credit, FillEvent, GlobalState, Market, OrderBookView, TradingCredit,
+    SENTINEL, SIDE_BID, SIDE_ASK, SEED_GLOBAL, SEED_MARKET, SEED_ORDERBOOK,
     ORDER_TYPE_LIMIT, ORDER_TYPE_POST_ONLY, ORDER_TYPE_FOK, ORDER_TYPE_MARKET,
 };
 
@@ -23,6 +24,7 @@ use crate::state::{
 ///   [3] signer             (signer) — the credit OWNER or an authorized,
 ///                                     non-expired session key. The resulting
 ///                                     order is always attributed to credit.owner.
+///   [4] global_state       (R) — gates the protocol-wide pause
 ///
 /// Instruction data (28 bytes):
 ///   side:             u8
@@ -55,6 +57,7 @@ pub fn process(
         order_book_acc,
         trading_credit_acc,
         signer,
+        global_state_acc,
         _remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -66,6 +69,14 @@ pub fn process(
     if data.len() < IX_DATA_LEN {
         return Err(ProgramError::InvalidInstructionData);
     }
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    ensure_not_globally_paused(GlobalState::from_account_info(global_state_acc)?)?;
 
     let side = data[0];
     let order_type = data[1];
