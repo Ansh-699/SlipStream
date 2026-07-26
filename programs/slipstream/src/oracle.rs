@@ -25,6 +25,16 @@ pub const MAX_STALENESS_SECS: i64 = 60;
 /// 200 bps = 2% (§14, §16).
 pub const MAX_DIVERGENCE_BPS: u64 = 200;
 
+/// Maximum tolerated Pyth confidence interval relative to price, in basis
+/// points. A wide/uncertain reading must not be trusted as an exact price,
+/// especially for 20x-leverage liquidations.
+pub const MAX_CONFIDENCE_BPS: u64 = 100; // 1%
+
+/// Pyth Receiver's `VerificationLevel::Full` Anchor enum discriminant. The
+/// PriceUpdateV2 offsets below (price@73 etc.) assume this: `Partial { .. }`
+/// carries an extra payload byte that would shift every subsequent field.
+const PYTH_VERIFICATION_LEVEL_FULL: u8 = 1;
+
 /// Number of consecutive agreement readings required to clear `restricted_mode`.
 pub const AGREEMENT_HYSTERESIS_COUNT: u8 = 3;
 
@@ -104,27 +114,50 @@ pub fn parse_pyth(pyth_acc: &AccountInfo) -> Result<OracleReading, ProgramError>
         let exponent = i32::from_le_bytes(data[20..24].try_into().unwrap());
         let publish_time = i64::from_le_bytes(data[96..104].try_into().unwrap());
         let price_raw = i64::from_le_bytes(data[208..216].try_into().unwrap());
+        let conf_raw = u64::from_le_bytes(data[216..224].try_into().unwrap());
         let status = u32::from_le_bytes(data[224..228].try_into().unwrap());
 
         if status != 1 || price_raw <= 0 {
             return Err(SlipstreamError::OracleStale.into());
         }
+        check_confidence(conf_raw, price_raw as u64)?;
         let price = normalise_to_6_decimals(price_raw as u64, exponent)?;
         Ok(OracleReading { price, publish_ts: publish_time })
     } else if data.len() >= 134 {
         // --- Pyth Receiver PriceUpdateV2 (the live devnet feed) ---
+        // The fixed offsets below are only correct for VerificationLevel::Full
+        // (Partial carries an extra payload byte that shifts everything after it).
+        if data[40] != PYTH_VERIFICATION_LEVEL_FULL {
+            return Err(SlipstreamError::InvalidOracle.into());
+        }
         let price_raw = i64::from_le_bytes(data[73..81].try_into().unwrap());
+        let conf_raw = u64::from_le_bytes(data[81..89].try_into().unwrap());
         let exponent = i32::from_le_bytes(data[89..93].try_into().unwrap());
         let publish_time = i64::from_le_bytes(data[93..101].try_into().unwrap());
 
         if price_raw <= 0 {
             return Err(SlipstreamError::OracleStale.into());
         }
+        check_confidence(conf_raw, price_raw as u64)?;
         let price = normalise_to_6_decimals(price_raw as u64, exponent)?;
         Ok(OracleReading { price, publish_ts: publish_time })
     } else {
         Err(SlipstreamError::InvalidOracle.into())
     }
+}
+
+/// Reject a Pyth reading whose confidence interval is too wide relative to its
+/// price to be trusted as exact — a wide `conf` means the aggregate itself is
+/// uncertain, which is unsafe to settle liquidations or funding against.
+fn check_confidence(conf: u64, price: u64) -> Result<(), ProgramError> {
+    if price == 0 {
+        return Err(SlipstreamError::InvalidOracle.into());
+    }
+    let conf_bps = (conf as u128).saturating_mul(10_000) / (price as u128);
+    if conf_bps > MAX_CONFIDENCE_BPS as u128 {
+        return Err(SlipstreamError::InvalidOracle.into());
+    }
+    Ok(())
 }
 
 /// Parse a Switchboard On-Demand `PullFeedAccountData` and return a 6-decimal price.
@@ -321,5 +354,33 @@ pub fn apply_dual_oracle(
         market.restricted_mode = 1;
         market.agreement_streak = 0;
         Ok(DualOracleOutcome::Restricted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_confidence_accepts_tight_interval() {
+        // 0.5% confidence on a $150 price is well within the 1% tolerance.
+        assert!(check_confidence(750_000, 150_000_000).is_ok());
+    }
+
+    #[test]
+    fn test_check_confidence_accepts_exactly_at_threshold() {
+        // Exactly 1% (100 bps) must still pass (the check rejects only > threshold).
+        assert!(check_confidence(1_500_000, 150_000_000).is_ok());
+    }
+
+    #[test]
+    fn test_check_confidence_rejects_wide_interval() {
+        // 5% confidence on a $150 price is far too uncertain to trust as exact.
+        let result = check_confidence(7_500_000, 150_000_000);
+        assert!(
+            matches!(result, Err(ProgramError::Custom(c)) if c == SlipstreamError::InvalidOracle as u32),
+            "expected InvalidOracle, got {:?}",
+            result
+        );
     }
 }

@@ -154,3 +154,55 @@ fn test_crank_twap_rejects_foreign_oracle_account() {
         "mark price must not move"
     );
 }
+
+/// parse_pyth's PriceUpdateV2 offsets (price@73, conf@81, expo@89,
+/// publish_time@93) are only correct for VerificationLevel::Full; a Partial
+/// reading must be rejected outright rather than silently misparsed.
+#[test]
+fn test_crank_twap_rejects_non_full_verification_level() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let market = Pubkey::new_unique();
+    let real_feed = Pubkey::new_unique();
+
+    let mut mk = Market::zeroed();
+    mk.discriminator = DISC_MARKET;
+    mk.pyth_feed = real_feed.to_bytes();
+    mk.last_mark_price = 100 * PRICE_SCALE;
+
+    // A PriceUpdateV2-shaped buffer, otherwise well-formed and fresh, but with
+    // verification_level@40 left at its default 0 (Partial), not 1 (Full).
+    let mut fake = vec![0u8; 200];
+    fake[73..81].copy_from_slice(&(150_000_000i64).to_le_bytes());
+    fake[89..93].copy_from_slice(&(-6i32).to_le_bytes());
+    fake[93..101].copy_from_slice(&0i64.to_le_bytes());
+
+    let accounts = vec![
+        (market, program_account(&program_id, bytemuck::bytes_of(&mk))),
+        (
+            real_feed,
+            Account {
+                lamports: 1_000_000,
+                data: fake,
+                owner: Pubkey::new_unique(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        ),
+    ];
+
+    let ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(market, false),
+            AccountMeta::new_readonly(real_feed, false),
+        ],
+        data: vec![0x0Bu8],
+    };
+
+    let res = m.process_instruction(&ix, &accounts);
+    assert_rejected(&res, "crank_twap with a non-Full-verification PriceUpdateV2 account");
+
+    let after: &Market = bytemuck::from_bytes(&res.resulting_accounts[0].1.data[..Market::LEN]);
+    assert_eq!(after.last_mark_price, 100 * PRICE_SCALE, "mark price must not move");
+}

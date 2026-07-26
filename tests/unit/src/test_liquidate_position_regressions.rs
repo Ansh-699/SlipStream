@@ -39,12 +39,15 @@ fn program_account(program_id: &Pubkey, data: &[u8]) -> Account {
     }
 }
 
-/// A PriceUpdateV2-shaped Pyth account (len 134..248): price@73, expo@89,
-/// publish_time@93. publish_time=0 matches mollusk's default Clock (unix_timestamp
-/// 0), the same pattern used in test_security_regressions.rs, so this reading is
-/// FRESH, isolating the account-validation fix under test.
+/// A PriceUpdateV2-shaped Pyth account (len 134..248): verification_level@40
+/// (must be 1 = Full, or parse_pyth rejects it outright), price@73, conf@81
+/// (0 = maximally confident, well within the tolerance), expo@89, publish_time@93.
+/// publish_time=0 matches mollusk's default Clock (unix_timestamp 0), the same
+/// pattern used in test_security_regressions.rs, so this reading is FRESH,
+/// isolating the account-validation fix under test.
 fn fake_pyth_account(price: i64, expo: i32) -> Vec<u8> {
     let mut data = vec![0u8; 200];
+    data[40] = 1; // VerificationLevel::Full
     data[73..81].copy_from_slice(&price.to_le_bytes());
     data[89..93].copy_from_slice(&expo.to_le_bytes());
     data[93..101].copy_from_slice(&0i64.to_le_bytes());
