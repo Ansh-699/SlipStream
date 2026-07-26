@@ -616,7 +616,7 @@ export function createUndelegateTradingCreditInstruction(
       { pubkey: owner, isSigner: true, isWritable: true }, // payer
       { pubkey: tradingCredit, isSigner: false, isWritable: true },
       { pubkey: owner, isSigner: true, isWritable: false }, // owner
-      { pubkey: magicContext, isSigner: false, isWritable: false },
+      { pubkey: magicContext, isSigner: false, isWritable: true }, // ScheduleCommitAndUndelegate writes MagicContext,
       { pubkey: MAGIC_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: DELEGATION_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -1001,7 +1001,7 @@ export function createUndelegateOrderbookInstruction(
       { pubkey: orderBook, isSigner: false, isWritable: true },
       { pubkey: globalState, isSigner: false, isWritable: false },
       { pubkey: authority, isSigner: true, isWritable: true },
-      { pubkey: magicContext, isSigner: false, isWritable: false },
+      { pubkey: magicContext, isSigner: false, isWritable: true }, // ScheduleCommitAndUndelegate writes MagicContext,
       { pubkey: MAGIC_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: DELEGATION_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
@@ -1108,7 +1108,7 @@ export function createEmergencyUndelegateInstruction(
       { pubkey: orderBook, isSigner: false, isWritable: true },
       { pubkey: globalState, isSigner: false, isWritable: true },
       { pubkey: authority, isSigner: true, isWritable: false }, // authority signer
-      { pubkey: magicContext, isSigner: false, isWritable: false },
+      { pubkey: magicContext, isSigner: false, isWritable: true }, // ScheduleCommitAndUndelegate writes MagicContext,
       { pubkey: MAGIC_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: DELEGATION_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },

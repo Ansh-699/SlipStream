@@ -1,12 +1,16 @@
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction, Signer},
-    program::invoke_signed,
+    instruction::{AccountMeta, Instruction},
+    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
-    seeds,
     ProgramResult,
 };
+
+/// See `undelegate_trading_credit`: MagicBlock `ScheduleCommitAndUndelegate`
+/// = variant 2 (u32 LE), per the SDK's `createCommitAndUndelegateInstruction`.
+/// The previous 8-byte discriminator meant this escape hatch never worked.
+const SCHEDULE_COMMIT_AND_UNDELEGATE_DATA: [u8; 4] = [2, 0, 0, 0];
 
 use crate::error::SlipstreamError;
 use crate::state::{GlobalState, SEED_ORDERBOOK};
@@ -70,7 +74,7 @@ pub fn process(
 
     let market_index = u16::from_le_bytes([data[0], data[1]]);
     let market_index_bytes = market_index.to_le_bytes();
-    let (expected_pda, bump) = pinocchio::pubkey::find_program_address(
+    let (expected_pda, _bump) = pinocchio::pubkey::find_program_address(
         &[SEED_ORDERBOOK, &market_index_bytes],
         program_id,
     );
@@ -78,47 +82,21 @@ pub fn process(
         return Err(SlipstreamError::InvalidPda.into());
     }
 
-    let bump_bytes = [bump];
-    let signer_seeds = seeds![SEED_ORDERBOOK, &market_index_bytes, &bump_bytes];
-
-    // Step 1: commit ER state to L1
-    let commit_data: [u8; 8] = [82, 104, 152, 228, 209, 208, 105, 105];
-    let commit_metas = [
+    // Step 1: ONE CPI — ScheduleCommitAndUndelegate. `magic_context` must be WRITABLE.
+    let metas = [
         AccountMeta::writable_signer(payer.key()),
+        AccountMeta::writable(magic_context.key()),
         AccountMeta::writable(order_book_acc.key()),
-        AccountMeta::readonly(magic_context.key()),
     ];
-    let commit_ix = Instruction {
+    let ix = Instruction {
         program_id: magic_program.key(),
-        accounts: &commit_metas,
-        data: &commit_data,
+        accounts: &metas,
+        data: &SCHEDULE_COMMIT_AND_UNDELEGATE_DATA,
     };
-    invoke_signed(
-        &commit_ix,
-        &[payer, order_book_acc, magic_context],
-        &[Signer::from(&signer_seeds)],
-    )?;
+    invoke(&ix, &[payer, magic_context, order_book_acc])?;
+    let _ = (delegation_program, system_program);
 
-    // Step 2: undelegate
-    let undelegate_data: [u8; 8] = [131, 148, 82, 248, 89, 223, 190, 255];
-    let undelegate_metas = [
-        AccountMeta::writable_signer(payer.key()),
-        AccountMeta::writable(order_book_acc.key()),
-        AccountMeta::readonly(program_id),
-        AccountMeta::readonly(&pinocchio_system::ID),
-    ];
-    let undelegate_ix = Instruction {
-        program_id: delegation_program.key(),
-        accounts: &undelegate_metas,
-        data: &undelegate_data,
-    };
-    invoke_signed(
-        &undelegate_ix,
-        &[payer, order_book_acc, system_program],
-        &[Signer::from(&signer_seeds)],
-    )?;
-
-    // Step 3: pause the entire protocol so no new orders land while operators investigate
+    // Step 2: pause the entire protocol so no new orders land while operators investigate
     let global_mut = GlobalState::from_account_info_mut(global_state_acc)?;
     global_mut.paused = 1;
 

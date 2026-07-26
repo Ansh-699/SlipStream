@@ -1,12 +1,21 @@
 use pinocchio::{
     account_info::AccountInfo,
-    instruction::{AccountMeta, Instruction, Signer},
-    program::invoke_signed,
+    instruction::{AccountMeta, Instruction},
+    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
-    seeds,
     ProgramResult,
 };
+
+/// MagicBlock magic program `ScheduleCommitAndUndelegate` = variant 2 (u32 LE),
+/// matching the SDK's `createCommitAndUndelegateInstruction`
+/// (`Buffer.alloc(4); data.writeUInt32LE(2, 0)`), and consistent with the
+/// `ScheduleCommit` = 1 encoding that `commit_fill_log` uses in production.
+///
+/// This replaces an 8-byte Anchor-style discriminator that the magic program
+/// rejected outright ("invalid instruction data"), which left the protocol with NO
+/// working undelegation path — including `emergency_undelegate`.
+const SCHEDULE_COMMIT_AND_UNDELEGATE_DATA: [u8; 4] = [2, 0, 0, 0];
 
 use crate::error::SlipstreamError;
 use crate::state::SEED_CREDIT;
@@ -51,7 +60,7 @@ pub fn process(
     let market_index = u16::from_le_bytes([data[0], data[1]]);
     let market_index_bytes = market_index.to_le_bytes();
 
-    let (expected_pda, bump) = pinocchio::pubkey::find_program_address(
+    let (expected_pda, _bump) = pinocchio::pubkey::find_program_address(
         &[SEED_CREDIT, owner.key().as_ref(), &market_index_bytes],
         program_id,
     );
@@ -59,45 +68,22 @@ pub fn process(
         return Err(SlipstreamError::InvalidPda.into());
     }
 
-    let bump_bytes = [bump];
-    let signer_seeds = seeds![SEED_CREDIT, owner.key().as_ref(), &market_index_bytes, &bump_bytes];
-
-    // Step 1: commit state via Magic program
-    let commit_data: [u8; 8] = [82, 104, 152, 228, 209, 208, 105, 105];
-    let commit_metas = [
+    // ONE CPI, not two: `ScheduleCommitAndUndelegate` commits the ER state and
+    // schedules the undelegation. The base-layer `undelegate` on the delegation
+    // program is performed by the validator afterwards — calling it here from the
+    // ER was never correct. `magic_context` must be WRITABLE.
+    let metas = [
         AccountMeta::writable_signer(payer.key()),
+        AccountMeta::writable(magic_context.key()),
         AccountMeta::writable(trading_credit_acc.key()),
-        AccountMeta::readonly(magic_context.key()),
     ];
-    let commit_ix = Instruction {
+    let ix = Instruction {
         program_id: magic_program.key(),
-        accounts: &commit_metas,
-        data: &commit_data,
+        accounts: &metas,
+        data: &SCHEDULE_COMMIT_AND_UNDELEGATE_DATA,
     };
-    invoke_signed(
-        &commit_ix,
-        &[payer, trading_credit_acc, magic_context],
-        &[Signer::from(&signer_seeds)],
-    )?;
+    invoke(&ix, &[payer, magic_context, trading_credit_acc])?;
 
-    // Step 2: undelegate
-    let undelegate_data: [u8; 8] = [131, 148, 82, 248, 89, 223, 190, 255];
-    let undelegate_metas = [
-        AccountMeta::writable_signer(payer.key()),
-        AccountMeta::writable(trading_credit_acc.key()),
-        AccountMeta::readonly(program_id),
-        AccountMeta::readonly(&pinocchio_system::ID),
-    ];
-    let undelegate_ix = Instruction {
-        program_id: delegation_program.key(),
-        accounts: &undelegate_metas,
-        data: &undelegate_data,
-    };
-    invoke_signed(
-        &undelegate_ix,
-        &[payer, trading_credit_acc, system_program],
-        &[Signer::from(&signer_seeds)],
-    )?;
-
+    let _ = (delegation_program, system_program);
     Ok(())
 }
