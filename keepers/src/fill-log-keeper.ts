@@ -47,11 +47,15 @@ const COMMIT_POLL_INTERVAL_MS = 1500;
 // Rotate BEFORE the hard cap of 10 so a commit never fails mid-flight.
 const COMMITS_BEFORE_ROTATE = 9;
 const ERR_FILL_QUEUE_EMPTY = 0x11d;
+const ERR_FILL_QUEUE_FULL = 0x11e;
 // Bound each mirror_fills call: max_fills=0 (uncapped) scans+copies the whole
 // 4096-slot fill ring and blows the CU budget once a backlog builds (observed
-// live: "exceeded CUs meter", settlement stalled for days). 64 per 4s tick
-// drains any backlog while staying well inside the raised budget below.
-const MAX_FILLS_PER_MIRROR = 64;
+// live: "exceeded CUs meter", settlement stalled for days). The on-chain
+// FillLog ring holds FILL_LOG_CAPACITY=80 and now refuses (FillQueueFull)
+// rather than overwriting once full, so this is a throughput knob, not a
+// safety one — kept at FILL_LOG_CAPACITY/2 - MAX_FILLS_PER_TX so two
+// consecutive mirrors without an intervening settle still leave headroom.
+const MAX_FILLS_PER_MIRROR = 32;
 // Ring scan + appends need more than the 200k default; the ER honors
 // ComputeBudget (verified live: bounded mirror consumed 83k with headroom).
 const MIRROR_CU_LIMIT = 600_000;
@@ -143,6 +147,10 @@ async function main() {
     } catch (e: any) {
       const c = classifyTxError(e);
       if (c.code === ERR_FILL_QUEUE_EMPTY) return "empty"; // nothing new
+      if (c.code === ERR_FILL_QUEUE_FULL) {
+        log("FILLLOG-KEEPER", `epoch ${epoch}: FillLog ring full; needs settle+rotate`);
+        return "error"; // reuses the same rotate-after-N-failures path below
+      }
       log("FILLLOG-KEEPER", `mirror_fills error: ${c.name ?? c.raw}`);
       return "error";
     }
@@ -320,12 +328,15 @@ async function main() {
         mirrorErrors = 0;
         await rotate();
       }
-      return;
+    } else {
+      mirrorErrors = 0;
+      if (mirrored === "mirrored") await commit();
     }
-    mirrorErrors = 0;
-    if (mirrored === "empty") return;
-    const committed = await commit();
-    if (!committed) return;
+    // Always attempt to drain whatever is already committed on L1, independent
+    // of what mirror/commit did this tick: settle_from_log is exactly-once via
+    // Market.last_settled_sequence (safe to call with nothing to do), and
+    // gating it behind a fresh mirror+commit success left already-committed
+    // fills stranded whenever either step merely had nothing new to report.
     await settle();
   }
 

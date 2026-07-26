@@ -7,8 +7,8 @@ use pinocchio::{
 
 use crate::error::SlipstreamError;
 use crate::state::{
-    FillEvent, FillLogView, OrderBookHeader, OrderSlot, PriceLevel,
-    DISC_ORDER_BOOK, SEED_FILL_LOG, SEED_ORDERBOOK,
+    FillEvent, FillLogView, OrderBookHeader, OrderSlot, PriceLevel, DISC_ORDER_BOOK,
+    FILL_LOG_CAPACITY, SEED_FILL_LOG, SEED_ORDERBOOK,
 };
 
 /// mirror_fills (disc 0x1F): copy newly-produced OrderBook fills into the small
@@ -31,7 +31,9 @@ use crate::state::{
 /// Instruction data:
 ///   market_index: u16
 ///   epoch:        u32
-///   max_fills:    u16   (cap on fills appended this call; 0 => no cap)
+///   max_fills:    u16   (cap on fills appended this call; 0 => fill remaining
+///                        ring space. Never exceeds the ring's free capacity
+///                        regardless of what is requested.)
 const IX_DATA_LEN: usize = 2 + 4 + 2;
 
 pub fn process(
@@ -100,14 +102,19 @@ pub fn process(
     let mut log = FillLogView::from_account_data(fl_data)?;
     let last_mirrored = log.header.last_mirrored_sequence;
 
+    // Never request more than the ring could ever hold: scanning the
+    // OrderBook's (up to 4096-slot) ring past what could ever be stored just
+    // burns compute, and a caller-supplied 0 must not be read as "unbounded".
+    // `log.push` below is the authoritative fullness check either way.
     let cap_this_call: usize = if max_fills == 0 {
-        usize::MAX
+        FILL_LOG_CAPACITY as usize
     } else {
-        max_fills as usize
+        (max_fills as usize).min(FILL_LOG_CAPACITY as usize)
     };
 
     let mut appended = 0usize;
     let mut new_max_seq = last_mirrored;
+    let mut ring_full = false;
     let mut i = 0usize;
     while i < count && appended < cap_this_call {
         let idx = (head + i) % max_ring;
@@ -117,16 +124,29 @@ pub fn process(
         if fill.sequence <= last_mirrored {
             continue;
         }
-        log.push(fill);
+        // The ring is lossless: it refuses once full instead of overwriting an
+        // unsettled entry. Stop here WITHOUT advancing the cursor past this
+        // fill, so it is retried (not silently destroyed) once the keeper
+        // settles this epoch's log and rotates to a fresh one.
+        if !log.push(fill) {
+            ring_full = true;
+            break;
+        }
         appended += 1;
         if fill.sequence > new_max_seq {
             new_max_seq = fill.sequence;
         }
     }
 
-    // Nothing new to mirror — idempotent no-op signal.
+    // Nothing new was appended: either there is nothing new to mirror, or the
+    // ring is already full and cannot accept anything — distinguish the two so
+    // the keeper knows to settle+rotate rather than treating this as a no-op.
     if appended == 0 {
-        return Err(SlipstreamError::FillQueueEmpty.into());
+        return Err(if ring_full {
+            SlipstreamError::FillQueueFull.into()
+        } else {
+            SlipstreamError::FillQueueEmpty.into()
+        });
     }
 
     log.header.last_mirrored_sequence = new_max_seq;

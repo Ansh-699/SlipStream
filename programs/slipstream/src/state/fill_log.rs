@@ -77,22 +77,24 @@ impl<'a> FillLogView<'a> {
         Ok(Self { header, fills })
     }
 
-    /// Append a fill to the ring. When full, the oldest entry is overwritten
-    /// (head advances). In normal operation the keeper commits + settles faster
-    /// than `capacity` new fills accrue, so live fills are never lost; the
-    /// overwrite is only a safety valve, never the steady state.
-    pub fn push(&mut self, fill: FillEvent) {
+    /// Append a fill to the ring. Returns `false` (appending nothing) once the
+    /// ring is at capacity.
+    ///
+    /// Unlike `OrderBookHeader::push_fill_event`, this ring must never overwrite
+    /// an entry: nothing ever drains `count` (`settle_from_log` reads the ring
+    /// read-only and tracks progress on `Market.last_settled_sequence` instead),
+    /// so an "oldest" entry is not necessarily settled yet — overwriting it would
+    /// silently and irrecoverably destroy a fill no one has committed to L1. The
+    /// caller (`mirror_fills`) must stop advancing its cursor when this returns
+    /// `false` and let the keeper settle + rotate to a fresh epoch.
+    pub fn push(&mut self, fill: FillEvent) -> bool {
         let cap = self.header.capacity;
-        if cap == 0 {
-            return;
+        if cap == 0 || self.header.count >= cap {
+            return false;
         }
         let tail = (self.header.head + self.header.count) % cap;
         self.fills[tail as usize] = fill;
-        if self.header.count < cap {
-            self.header.count += 1;
-        } else {
-            // Full: overwrite oldest, advance head.
-            self.header.head = (self.header.head + 1) % cap;
-        }
+        self.header.count += 1;
+        true
     }
 }

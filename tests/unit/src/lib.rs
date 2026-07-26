@@ -56,3 +56,7 @@ mod test_authority_rotation;
 // Tests for the newly-wired global pause switch.
 #[cfg(test)]
 mod test_global_pause;
+
+// Regression tests for the FillLog overrun fix (mirror_fills / FillLogView::push).
+#[cfg(test)]
+mod test_mirror_fills_regressions;
