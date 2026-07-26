@@ -16,7 +16,8 @@ import {
   createDelegateTradingCreditInstruction,
   createUndelegateTradingCreditInstruction,
 } from "../../client/src/instructions";
-import { findTradingCreditPda } from "../../client/src/pda";
+import { findTradingCreditPda, findUserAccountPda } from "../../client/src/pda";
+import { decodeUserAccount } from "../../client/src/accounts";
 import { MAGIC_CONTEXT_ID, PROGRAM_ID } from "../../client/src/constants";
 
 /**
@@ -94,15 +95,27 @@ async function main() {
     log("topup", `${w.name} credit=${fmtUsdc(before?.credit ?? 0n)} delegated=${delegated}`);
     if (dryRun) continue;
 
-    // 1. Mint + deposit collateral (L1; independent of delegation state).
-    const ata = await getOrCreateAssociatedTokenAccount(base, operator, mint, owner);
-    await mintTo(base, operator, mint, ata.address, operator.publicKey, topup);
-    await sendAndConfirm(
-      base,
-      new Transaction().add(createDepositCollateralInstruction(owner, ata.address, usdcVault, topup)),
-      [w.keypair]
-    );
-    log("topup", `${w.name} deposited ${fmtUsdc(topup)}`);
+    // 1. Top free_collateral up to `topup` (L1; independent of delegation state).
+    //    Only mint the SHORTFALL — a failed run must not mint another full topup
+    //    every time it is retried.
+    const [userPda] = findUserAccountPda(owner);
+    const userInfo = await base.getAccountInfo(userPda, "confirmed");
+    const free = userInfo ? decodeUserAccount(userInfo.data as Buffer).freeCollateral : 0n;
+    if (free >= topup) {
+      log("topup", `${w.name} free_collateral already ${fmtUsdc(free)} — skipping mint/deposit`);
+    } else {
+      const shortfall = topup - free;
+      const ata = await getOrCreateAssociatedTokenAccount(base, operator, mint, owner);
+      await mintTo(base, operator, mint, ata.address, operator.publicKey, shortfall);
+      await sendAndConfirm(
+        base,
+        new Transaction().add(
+          createDepositCollateralInstruction(owner, ata.address, usdcVault, shortfall)
+        ),
+        [w.keypair]
+      );
+      log("topup", `${w.name} deposited ${fmtUsdc(shortfall)} (free was ${fmtUsdc(free)})`);
+    }
 
     // 2. Undelegate so fund_trading_credit can write the L1 account.
     if (delegated) {
