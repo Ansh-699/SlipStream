@@ -100,9 +100,13 @@ struct Setup {
 }
 
 fn setup() -> Setup {
+    let program_id = Pubkey::new_unique();
+    // do_close now pins market_acc to its canonical PDA (market_index 0, matching
+    // Market::zeroed()'s default in market_account() below).
+    let (market, _) = Pubkey::find_program_address(&[SEED_MARKET, &0u16.to_le_bytes()], &program_id);
     Setup {
-        program_id: Pubkey::new_unique(),
-        market: Pubkey::new_unique(),
+        program_id,
+        market,
         position: Pubkey::new_unique(),
         user: Pubkey::new_unique(),
         owner: Pubkey::new_unique(),

@@ -8,6 +8,7 @@ use pinocchio::{
 
 use crate::error::SlipstreamError;
 use crate::math::fixed_point::{apply_bps, compute_notional, compute_unrealized_pnl, compute_vwap_entry};
+use crate::math::funding::compute_funding_payment;
 use crate::state::{
     FillEvent, Market, OrderBookHeader, OrderSlot, Position, PriceLevel, UserAccount,
     DISC_ORDER_BOOK, DISC_POSITION, DISC_USER_ACCOUNT, SEED_MARKET, SEED_ORDERBOOK, SIDE_BID,
@@ -244,8 +245,46 @@ pub(crate) fn update_position(
 ) -> Result<(), ProgramError> {
     let market = Market::from_account_info(market_acc)?;
     let cumulative_funding = market.get_cumulative_funding_index();
+    let mark_price = market.last_mark_price;
 
     let pos = Position::from_account_info_mut(position_acc)?;
+
+    // Realize any funding accrued on the position's CURRENT (pre-fill) size since
+    // its last snapshot, before this fill changes anything. The snapshot used to
+    // be advanced unconditionally at the end of this function with no payment
+    // ever computed anywhere on this path — silently erasing the entire accrual
+    // on every single settled fill. Realizing it here, before any of the
+    // open/add/reduce branches run, covers all of them uniformly.
+    if pos.size != 0 {
+        let funding_payment = compute_funding_payment(
+            pos.size,
+            cumulative_funding,
+            pos.get_funding_index_snapshot(),
+            mark_price,
+        )?;
+        if funding_payment != 0 {
+            let user = UserAccount::from_account_info_mut(user_acc)?;
+            if funding_payment > 0 {
+                // Position PAYS: debit free_collateral, falling back to the
+                // position's own collateral if free_collateral can't cover it —
+                // same fallback claim_funding uses.
+                let abs_payment = funding_payment as u64;
+                if user.free_collateral >= abs_payment {
+                    user.free_collateral -= abs_payment;
+                } else {
+                    let shortfall = abs_payment - user.free_collateral;
+                    user.free_collateral = 0;
+                    pos.collateral = pos.collateral.saturating_sub(shortfall);
+                }
+            } else {
+                user.free_collateral = user
+                    .free_collateral
+                    .checked_add((-funding_payment) as u64)
+                    .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
+            }
+        }
+    }
+    pos.set_funding_index_snapshot(cumulative_funding);
 
     let signed_qty = if side == SIDE_BID {
         fill_qty as i64
@@ -384,7 +423,8 @@ pub(crate) fn update_position(
         }
     }
 
-    pos.set_funding_index_snapshot(cumulative_funding);
+    // Funding was already realized (and the snapshot advanced) at the top of this
+    // function, against the position's pre-fill size.
     Ok(())
 }
 

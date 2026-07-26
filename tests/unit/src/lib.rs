@@ -31,3 +31,8 @@ mod test_place_order_regressions;
 // Regression tests for update_position's reduce/flatten collateral accounting.
 #[cfg(test)]
 mod test_settle_trades_regressions;
+
+// Regression test proving the funding sign fix (a long must pay, not be paid,
+// when the funding index rises).
+#[cfg(test)]
+mod test_funding_sign_regressions;

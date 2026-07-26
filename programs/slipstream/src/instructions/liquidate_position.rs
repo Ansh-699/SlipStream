@@ -18,7 +18,7 @@ use crate::math::funding::compute_funding_payment;
 use crate::oracle::apply_dual_oracle;
 use crate::state::{
     LiquidationIntent, Market, Position, UserAccount,
-    DISC_LIQUIDATION_INTENT, SEED_LIQ_INTENT,
+    DISC_LIQUIDATION_INTENT, SEED_LIQ_INTENT, SEED_MARKET,
 };
 
 // liquidate_position instruction data: empty (oracle prices come from accounts)
@@ -61,6 +61,23 @@ pub fn process(
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
+    // Pin market_acc's identity before trusting anything it holds (mark price,
+    // leverage, funding index, OI) — this instruction settles PnL/funding/OI and
+    // pays a liquidator bounty straight from it.
+    if market_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    {
+        let market_check = Market::from_account_info(market_acc)?;
+        let (market_pda, _) = pinocchio::pubkey::find_program_address(
+            &[SEED_MARKET, &market_check.market_index.to_le_bytes()],
+            program_id,
+        );
+        if market_acc.key() != &market_pda {
+            return Err(SlipstreamError::InvalidPda.into());
+        }
+    }
+
     // --- Pause / circuit breaker gates ---
     {
         let market = Market::from_account_info(market_acc)?;
@@ -86,6 +103,18 @@ pub fn process(
         return Err(SlipstreamError::InvalidAuthority.into());
     }
 
+    // Bind the position to THIS market — every economic decision below (mark
+    // price, leverage, funding index, OI) comes from market_acc, whose identity
+    // is pinned at the top of this function. Without this, a position on market A
+    // could be liquidated against market B's parameters (latent while only one
+    // market is deployed, live the moment a second exists).
+    {
+        let market_check = Market::from_account_info(market_acc)?;
+        if pos.market_index != market_check.market_index {
+            return Err(SlipstreamError::InvalidMarketIndex.into());
+        }
+    }
+
     // --- Compute health factor ---
     let (max_leverage, cumulative_funding) = {
         let market_view = Market::from_account_info(market_acc)?;
@@ -98,16 +127,23 @@ pub fn process(
     let maintenance_margin = compute_maintenance_margin(initial_margin);
 
     let unrealized_pnl = compute_unrealized_pnl(pos.size, pos.entry_price, mark_price)?;
+    // Positive funding_payment means the position PAYS (see math/funding.rs).
     let funding_payment = compute_funding_payment(
         pos.size,
         cumulative_funding,
         pos.get_funding_index_snapshot(),
+        mark_price,
     )?;
 
+    // compute_health_factor's `accrued_funding` is ADDED to margin, i.e. it wants
+    // "funding owed TO the position" — the negation of a payment the position
+    // owes. Passing funding_payment directly (as before) meant a position that
+    // owed a LARGE funding debt reported a HIGHER health factor, protecting it
+    // from liquidation exactly when it was least solvent.
     let health = compute_health_factor(
         pos.collateral,
         unrealized_pnl,
-        funding_payment,
+        -funding_payment,
         maintenance_margin,
     )?;
 
@@ -139,7 +175,7 @@ pub fn process(
     // --- Compute liquidator bonus: 50bps of notional, capped at 20% of the
     // position's remaining net collateral, per §16.
     let bonus_bps = apply_bps(notional, 50)?;
-    let net_collateral = (pos.collateral as i128 + unrealized_pnl as i128 + funding_payment as i128)
+    let net_collateral = (pos.collateral as i128 + unrealized_pnl as i128 - funding_payment as i128)
         .max(0) as u64;
     let bonus_pct = net_collateral / 5; // 20%
     let liquidator_bonus = bonus_bps.min(bonus_pct);
@@ -154,7 +190,7 @@ pub fn process(
 
     let total_settlement = (pos.collateral as i128)
         + (unrealized_pnl as i128)
-        + (funding_payment as i128)
+        - (funding_payment as i128)
         - (liquidator_bonus as i128);
 
     let pos_mut = Position::from_account_info_mut(position_acc)?;
@@ -164,7 +200,7 @@ pub fn process(
     pos_mut.realized_pnl = pos_mut
         .realized_pnl
         .saturating_add(unrealized_pnl)
-        .saturating_add(funding_payment);
+        .saturating_sub(funding_payment);
     pos_mut.set_funding_index_snapshot(cumulative_funding);
 
     let user_mut = UserAccount::from_account_info_mut(user_account_acc)?;

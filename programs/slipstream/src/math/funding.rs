@@ -1,5 +1,5 @@
 use crate::error::SlipstreamError;
-use crate::math::fixed_point::FUNDING_SCALE;
+use crate::math::fixed_point::{compute_notional, FUNDING_SCALE};
 use pinocchio::program_error::ProgramError;
 
 /// Interest rate per funding interval: 0.01% = 1 bps = 0.0001
@@ -35,7 +35,8 @@ pub fn compute_funding_rate(mark_price: u64, index_price: u64) -> Result<i128, P
 
 /// Compute the funding payment for a position.
 ///
-/// payment = position_size * (current_funding_index - position_funding_snapshot) / FUNDING_SCALE
+/// payment = notional(|position_size|, mark_price) * sign(position_size)
+///           * (current_funding_index - position_funding_snapshot) / FUNDING_SCALE
 ///
 /// Positive payment means the position PAYS funding (longs pay when rate is positive).
 /// Negative payment means the position RECEIVES funding.
@@ -45,6 +46,7 @@ pub fn compute_funding_payment(
     position_size: i64,
     current_funding_index: i128,
     snapshot_funding_index: i128,
+    mark_price: u64,
 ) -> Result<i64, ProgramError> {
     if position_size == 0 {
         return Ok(0);
@@ -54,15 +56,27 @@ pub fn compute_funding_payment(
         .checked_sub(snapshot_funding_index)
         .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
 
-    // payment = size * delta / FUNDING_SCALE
-    // For longs (positive size): positive delta means they pay
-    // For shorts (negative size): positive delta means they receive
-    let payment = (position_size as i128)
+    // The rate (index_delta / FUNDING_SCALE) is dimensionless; it must be applied
+    // to the position's QUOTE-denominated notional, not to its raw base-atom size.
+    // `position_size` carries BASE_SCALE (1e9) decimals, not PRICE_SCALE (1e6), so
+    // multiplying it directly by the rate priced the base asset at a fixed $1000 —
+    // the same class of bug fixed_point.rs documents having already fixed for
+    // initial margin (compute_notional), never applied here.
+    let abs_notional = compute_notional(position_size.unsigned_abs(), mark_price)? as i128;
+    let signed_notional: i128 = if position_size > 0 {
+        abs_notional
+    } else {
+        -abs_notional
+    };
+
+    // For longs (positive notional): positive delta means they pay
+    // For shorts (negative notional): positive delta means they receive
+    let payment = signed_notional
         .checked_mul(index_delta)
         .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?
         / (FUNDING_SCALE as i128);
 
-    Ok(payment as i64)
+    i64::try_from(payment).map_err(|_| ProgramError::from(SlipstreamError::MathOverflow))
 }
 
 /// Compute the TWAP from a ring buffer of price snapshots.
@@ -108,27 +122,58 @@ mod tests {
 
     #[test]
     fn test_funding_payment_long_pays() {
-        // Long 1 SOL, funding index moved from 0 to 0.001 (0.1%)
+        // Long 1 SOL @ $150 mark, funding index moved from 0 to 0.001 (0.1%).
+        // notional = 1 SOL * $150 = $150 = 150_000_000 (6dp). payment = notional *
+        // rate = 150_000_000 * 0.001 = 150_000 ($0.15), not the price-less
+        // 1_000_000_000 * 0.001 = 1_000_000 ($1.00) the old (buggy) formula gave.
         let payment = compute_funding_payment(
             1_000_000_000,                   // 1 SOL
             1_000_000_000_000_000,           // 0.001 in 18-decimal
             0,                               // snapshot at 0
+            150_000_000,                     // $150 mark
         )
         .unwrap();
-        // payment = 1_000_000_000 * 1_000_000_000_000_000 / 10^18 = 1_000_000
-        assert_eq!(payment, 1_000_000); // $1.00 in USDC atoms
+        assert_eq!(payment, 150_000); // $0.15 in USDC atoms
     }
 
     #[test]
     fn test_funding_payment_short_receives() {
-        // Short 1 SOL, funding index moved from 0 to 0.001
+        // Short 1 SOL @ $150 mark, funding index moved from 0 to 0.001
         let payment = compute_funding_payment(
             -1_000_000_000,                  // -1 SOL (short)
             1_000_000_000_000_000,           // 0.001
             0,
+            150_000_000,
         )
         .unwrap();
-        assert_eq!(payment, -1_000_000); // Receives $1.00
+        assert_eq!(payment, -150_000); // Receives $0.15
+    }
+
+    #[test]
+    fn test_funding_payment_matches_price_scaled_notional() {
+        // The exact worked example from the audit: 1 SOL, 1 bps rate (a single
+        // interval's interest floor), at a $150 mark. The correct payment is 1 bps
+        // of the $150 notional ($150 * 0.0001 = $0.015 = 15_000 atoms) — NOT the
+        // price-less $1000/unit result (1000 * 0.0001 * 1e9-scaled = 100_000 atoms)
+        // the formula returned before this fix.
+        let payment = compute_funding_payment(
+            1_000_000_000,                   // 1 SOL
+            INTEREST_RATE_PER_INTERVAL,       // 1 bps
+            0,
+            150_000_000,                      // $150 mark
+        )
+        .unwrap();
+        assert_eq!(payment, 15_000);
+    }
+
+    #[test]
+    fn test_funding_payment_zero_mark_is_safe_not_exploitable() {
+        // Before any oracle crank, last_mark_price is 0. Funding must be skipped
+        // (not divide-by-zero, not an inflated/deflated payment either side could
+        // exploit), since notional(size, 0) = 0.
+        let payment = compute_funding_payment(1_000_000_000, INTEREST_RATE_PER_INTERVAL, 0, 0)
+            .unwrap();
+        assert_eq!(payment, 0);
     }
 
     #[test]

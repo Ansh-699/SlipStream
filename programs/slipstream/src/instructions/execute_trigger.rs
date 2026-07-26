@@ -87,7 +87,7 @@ pub fn process(
 
     // Full close at mark, no extra bound (the trigger price IS the user's bound;
     // execution happens at the first crank where the condition holds).
-    do_close(market_acc, position_acc, user_account_acc, owner.key(), 0, 0)?;
+    do_close(program_id, market_acc, position_acc, user_account_acc, owner.key(), 0, 0)?;
 
     // Rent to the executor — the incentive that keeps triggers permissionless.
     close_trigger_account(trigger_acc, executor)
