@@ -29,7 +29,7 @@ const MAGIC_CONTEXT_ID: Pubkey = [
 ];
 
 use crate::error::SlipstreamError;
-use crate::state::SEED_CREDIT;
+use crate::state::{reconcile_credit, OrderBookView, TradingCredit, SEED_CREDIT, SEED_ORDERBOOK};
 
 /// Instruction data: market_index: u16
 ///
@@ -38,10 +38,14 @@ use crate::state::SEED_CREDIT;
 /// delegation program is then performed by the validator, not by this instruction.
 ///
 /// After this instruction, the TradingCredit is owned by the program again and the
-/// user can `withdraw_trading_credit`. We require `active_orders == 0` before
-/// allowing undelegation to prevent orphaned slots on the ER; however this check
-/// must happen on the ER side pre-commit, not here (we can't read delegated state
-/// consistently). The ER session lifetime + periodic commits enforce this.
+/// user can `withdraw_trading_credit`. `committed`/`active_orders` are reconciled
+/// against the (also ER-delegated) order book before the commit below: a maker
+/// whose resting order was filled by someone else never gets an ER-side
+/// reconcile of their own (that only happens as a side effect of the OWNER's
+/// own place_order/cancel_order calls), so without this the committed L1 copy
+/// could show a stale nonzero committed/active_orders forever — permanently
+/// failing withdraw_trading_credit's `is_idle()` gate for an order that has
+/// nothing left reserved.
 const IX_DATA_LEN: usize = 2;
 
 pub fn process(
@@ -57,6 +61,7 @@ pub fn process(
         magic_program,
         delegation_program,
         system_program,
+        order_book_acc,
         _remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -77,6 +82,19 @@ pub fn process(
     );
     if trading_credit_acc.key() != &expected_pda {
         return Err(SlipstreamError::InvalidPda.into());
+    }
+    let (ob_pda, _) = pinocchio::pubkey::find_program_address(
+        &[SEED_ORDERBOOK, &market_index_bytes],
+        program_id,
+    );
+    if order_book_acc.key() != &ob_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+    {
+        let ob_data = unsafe { order_book_acc.borrow_mut_data_unchecked() };
+        let ob = OrderBookView::from_account_data(ob_data)?;
+        let credit = TradingCredit::from_account_info_mut(trading_credit_acc)?;
+        reconcile_credit(&ob, credit);
     }
     // Pin the CPI target and context so a caller cannot substitute a decoy program
     // that "succeeds" without actually undelegating anything.

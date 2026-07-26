@@ -630,6 +630,7 @@ export function createUndelegateTradingCreditInstruction(
   programId: PublicKey = PROGRAM_ID
 ): TransactionInstruction {
   const [tradingCredit] = findTradingCreditPda(owner, marketIndex, programId);
+  const [orderBook] = findOrderBookPda(marketIndex, programId);
   const data = Buffer.alloc(3);
   data[0] = IX_UNDELEGATE_TRADING_CREDIT;
   writeU16LE(data, marketIndex, 1);
@@ -643,6 +644,7 @@ export function createUndelegateTradingCreditInstruction(
       { pubkey: MAGIC_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: DELEGATION_PROGRAM_ID, isSigner: false, isWritable: false },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      { pubkey: orderBook, isSigner: false, isWritable: true },
     ],
     programId,
     data,
