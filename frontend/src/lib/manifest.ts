@@ -47,6 +47,8 @@ const ENV = {
   orderBook: process.env.NEXT_PUBLIC_ORDER_BOOK,
   rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
   erRpc: process.env.NEXT_PUBLIC_ER_RPC,
+  usdcMint: process.env.NEXT_PUBLIC_USDC_MINT,
+  usdcVault: process.env.NEXT_PUBLIC_USDC_VAULT,
 };
 
 /**
@@ -123,14 +125,18 @@ export const ORDER_BOOK = resolveAddress(
 );
 
 /** USDC mint + protocol vault (needed for deposit_collateral). Optional: only
- *  present when deploy.json carries them. */
-export const USDC_MINT: PublicKey | null = manifest.usdcMint
-  ? new PublicKey(manifest.usdcMint)
-  : null;
+ *  present when deploy.json carries them, or via env override. */
+export const USDC_MINT: PublicKey | null = ENV.usdcMint
+  ? new PublicKey(ENV.usdcMint)
+  : manifest.usdcMint
+    ? new PublicKey(manifest.usdcMint)
+    : null;
 
-export const USDC_VAULT: PublicKey | null = manifest.usdcVault
-  ? new PublicKey(manifest.usdcVault)
-  : null;
+export const USDC_VAULT: PublicKey | null = ENV.usdcVault
+  ? new PublicKey(ENV.usdcVault)
+  : manifest.usdcVault
+    ? new PublicKey(manifest.usdcVault)
+    : null;
 
 export const MARKET_INDEX: number = manifest.marketIndex ?? 0;
 
