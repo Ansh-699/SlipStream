@@ -63,12 +63,61 @@ async function forward(upstream: string, body: string): Promise<Response> {
   );
 }
 
+// This proxy is unauthenticated and forwards to an upstream that carries a private
+// API key, so it is a free relay onto the deployer's paid RPC quota unless it is
+// bounded. Two cheap bounds: cap the body, and only allow the JSON-RPC methods the
+// dApp actually calls (an unfiltered getProgramAccounts against a 612 KB orderbook
+// program, looped, is exactly how this project burned its quota before).
+const MAX_BODY_BYTES = 100_000;
+
+const ALLOWED_METHODS = new Set([
+  "getAccountInfo",
+  "getMultipleAccounts",
+  "getBalance",
+  "getLatestBlockhash",
+  "getSignatureStatuses",
+  "getSlot",
+  "getTokenAccountBalance",
+  "getTokenAccountsByOwner",
+  "getTransaction",
+  "getMinimumBalanceForRentExemption",
+  "getFeeForMessage",
+  "sendTransaction",
+  "simulateTransaction",
+  "getHealth",
+  "getVersion",
+  "getEpochInfo",
+  "getBlockHeight",
+  "getRecentPrioritizationFees",
+]);
+
+function methodsAllowed(body: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  const calls = Array.isArray(parsed) ? parsed : [parsed];
+  if (calls.length === 0 || calls.length > 20) return false;
+  return calls.every(
+    (c) =>
+      typeof c === "object" &&
+      c !== null &&
+      typeof (c as { method?: unknown }).method === "string" &&
+      ALLOWED_METHODS.has((c as { method: string }).method)
+  );
+}
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ layer: string }> }
 ): Promise<Response> {
   const { layer } = await ctx.params;
-  const upstream = UPSTREAMS[layer];
+  // Own-property lookup: a plain `UPSTREAMS[layer]` also resolves inherited keys
+  // ("toString", "constructor", "__proto__"), which are truthy and would sail past
+  // an `if (!upstream)` guard.
+  const upstream = Object.hasOwn(UPSTREAMS, layer) ? UPSTREAMS[layer] : undefined;
   if (!upstream) {
     return new Response(
       JSON.stringify({ error: `unknown rpc layer "${layer}"` }),
@@ -76,6 +125,22 @@ export async function POST(
     );
   }
   const body = await req.text();
+  if (body.length > MAX_BODY_BYTES) {
+    return new Response(JSON.stringify({ error: "request body too large" }), {
+      status: 413,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (!methodsAllowed(body)) {
+    return new Response(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32601, message: "method not permitted by proxy" },
+      }),
+      { status: 403, headers: { "Content-Type": "application/json" } }
+    );
+  }
   return forward(upstream, body);
 }
 

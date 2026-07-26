@@ -34,6 +34,29 @@ const BASE_RPC =
 // Per-wallet cooldown (best-effort; resets on server restart).
 const lastDrip = new Map<string, number>();
 
+// A per-wallet cooldown bounds nothing on its own: the wallet is supplied by the
+// caller, and fresh keypairs are free. Every drip also makes the operator pay ATA
+// rent, so an unbounded faucet drains the operator's SOL as well as minting
+// unlimited collateral into the live market. Add a global rate cap and a per-IP
+// cooldown so one client cannot loop with new pubkeys.
+const GLOBAL_MAX_PER_HOUR = Number(process.env.FAUCET_MAX_PER_HOUR || "60");
+const dripTimes: number[] = [];
+const lastDripByIp = new Map<string, number>();
+const IP_COOLDOWN_MS = 60_000;
+
+function clientIp(req: NextRequest): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0]!.trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+/** Drop timestamps older than an hour, then report whether we are at the cap. */
+function globalCapReached(now: number): boolean {
+  const cutoff = now - 3_600_000;
+  while (dripTimes.length > 0 && dripTimes[0]! < cutoff) dripTimes.shift();
+  return dripTimes.length >= GLOBAL_MAX_PER_HOUR;
+}
+
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -109,6 +132,24 @@ export async function POST(req: NextRequest): Promise<Response> {
     );
   }
 
+  const ip = clientIp(req);
+  const prevIp = lastDripByIp.get(ip) ?? 0;
+  if (ip !== "unknown" && now - prevIp < IP_COOLDOWN_MS) {
+    const wait = Math.ceil((IP_COOLDOWN_MS - (now - prevIp)) / 1000);
+    return json({ ok: false, error: `Please wait ${wait}s before requesting again.` }, 429);
+  }
+  if (globalCapReached(now)) {
+    return json(
+      { ok: false, error: "Faucet is rate limited right now. Try again later." },
+      429
+    );
+  }
+  // Reserve the slot BEFORE the awaited mint. Recording only on success makes the
+  // window between check and mint a free-for-all for concurrent requests.
+  lastDrip.set(key, now);
+  lastDripByIp.set(ip, now);
+  dripTimes.push(now);
+
   const operator = loadOperator();
   if (!operator) {
     return json(
@@ -133,7 +174,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     const atoms = BigInt(Math.round(FAUCET_USDC * 1_000_000));
     const sig = await mintTo(conn, operator, mint, ata.address, operator.publicKey, atoms);
 
-    lastDrip.set(key, now);
+    // (the cooldown slot was already reserved before the mint)
     return json({
       ok: true,
       signature: sig,
@@ -142,7 +183,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // Log the detail server-side only: RPC errors can embed the upstream URL, and
+    // BASE_RPC_UPSTREAM may carry a private API key (the RPC proxy hides this for
+    // the same reason).
     console.error("[faucet] mint failed:", msg);
-    return json({ ok: false, error: `Faucet mint failed: ${msg}` }, 502);
+    return json({ ok: false, error: "Faucet mint failed." }, 502);
   }
 }

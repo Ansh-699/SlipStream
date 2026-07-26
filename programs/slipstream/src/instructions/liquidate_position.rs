@@ -232,7 +232,7 @@ fn handle_grace_window(
         }
         .invoke_signed(&[Signer::from(&signer_seeds)])?;
 
-        let intent = LiquidationIntent::from_account_info_mut(intent_acc)?;
+        let intent = LiquidationIntent::from_account_info_mut_or_init(intent_acc)?;
         intent.discriminator = DISC_LIQUIDATION_INTENT;
         intent.bump = bump;
         intent._padding = [0u8; 6];

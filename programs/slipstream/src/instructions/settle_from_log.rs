@@ -12,7 +12,7 @@ use crate::instructions::settle_trades::{
 };
 use crate::math::fixed_point::{apply_bps, compute_notional};
 use crate::state::{
-    FillEvent, FillLogHeader, Market, DISC_FILL_LOG, SEED_FILL_LOG, SIDE_BID,
+    FillEvent, FillLogHeader, Market, DISC_FILL_LOG, SEED_FILL_LOG, SEED_MARKET, SIDE_BID,
 };
 
 /// Fraction of taker_fee that goes to per-market insurance fund (mirror of settle_trades).
@@ -70,6 +70,18 @@ pub fn process(
 
     let clock = Clock::get()?;
     let now_slot = clock.slot;
+
+    // The FillLog PDA is checked above, but the replay cursor lives on the MARKET.
+    // Pin the market to `market_index` too, otherwise one market's fill log could
+    // be settled against another market's cursor and replayed.
+    if market_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (market_pda, _) =
+        pinocchio::pubkey::find_program_address(&[SEED_MARKET, &market_index_bytes], program_id);
+    if market_acc.key() != &market_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
 
     let last_settled = {
         let market = Market::from_account_info(market_acc)?;
@@ -145,12 +157,21 @@ pub fn process(
         ) {
             (Some(mu), Some(tu), Some(mp), Some(tp)) => (mu, tu, mp, tp),
             _ => {
-                // Orphan fill: advance cursor past it and move on.
-                if fill.sequence > max_seq {
-                    max_seq = fill.sequence;
-                }
-                settled += 1;
-                continue;
+                // STOP — do not advance the cursor.
+                //
+                // Whether an account is "missing" is decided purely by what THIS
+                // caller passed in `remaining_accounts`, and this instruction is
+                // permissionless. Advancing the cursor here let anyone call
+                // settle_from_log with no remaining accounts and skip the entire
+                // queue, permanently discarding real fills: the positions are never
+                // credited and the cursor can never go back.
+                //
+                // Breaking makes a genuinely orphaned fill (maker/taker with no L1
+                // account, e.g. from a prior bot session) block the queue until an
+                // operator supplies the accounts or rotates the FillLog epoch. That
+                // is a liveness problem with an operator fix; the previous behaviour
+                // was unauthenticated destruction of settled trades.
+                break;
             }
         };
 
@@ -200,10 +221,10 @@ pub fn process(
                 .insurance_fund_balance
                 .checked_add(insurance_cut)
                 .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
-            market.last_mark_price = fill.price;
-            // A settled fill is a fresh mark observation — stamp it so closes
-            // stay available during active trading even if the crank stalls.
-            market.set_mark_price_minute(((clock.unix_timestamp / 60) as u64 % 65536) as u16);
+            // DO NOT source `last_mark_price` from `fill.price` — it is
+            // user-controlled (no oracle band on limit prices, no self-trade
+            // prevention). See the matching note in settle_trades.rs.
+            // `crank_twap` is the sole, oracle-validated writer of the mark.
         }
 
         if fill.sequence > max_seq {

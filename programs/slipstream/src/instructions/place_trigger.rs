@@ -120,7 +120,7 @@ pub fn process(
         }
     }
 
-    let trigger = TriggerOrder::from_account_info_mut(trigger_acc)?;
+    let trigger = TriggerOrder::from_account_info_mut_or_init(trigger_acc)?;
     trigger.discriminator = DISC_TRIGGER_ORDER;
     trigger.bump = bump;
     trigger.kind = kind;

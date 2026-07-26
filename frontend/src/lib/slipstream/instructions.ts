@@ -274,9 +274,12 @@ export function createDepositCollateralInstruction(
   userTokenAccount: PublicKey,
   quoteVault: PublicKey,
   amount: bigint,
-  programId: PublicKey = PROGRAM_ID
+  programId: PublicKey = PROGRAM_ID,
+  marketIndex = 0
 ): TransactionInstruction {
   const [userAccount] = findUserAccountPda(owner, programId);
+  // The program pins quoteVault to market.quote_vault, so the market must be passed.
+  const [market] = findMarketPda(marketIndex, programId);
 
   const data = Buffer.alloc(9);
   data[0] = IX_DEPOSIT_COLLATERAL;
@@ -289,6 +292,7 @@ export function createDepositCollateralInstruction(
       { pubkey: userTokenAccount, isSigner: false, isWritable: true },
       { pubkey: quoteVault, isSigner: false, isWritable: true },
       { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: market, isSigner: false, isWritable: false },
     ],
     programId,
     data,

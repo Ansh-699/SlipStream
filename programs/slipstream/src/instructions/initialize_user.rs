@@ -54,7 +54,7 @@ pub fn process(
     }
     .invoke_signed(&[Signer::from(&signer_seeds)])?;
 
-    let user = UserAccount::from_account_info_mut(user_account_acc)?;
+    let user = UserAccount::from_account_info_mut_or_init(user_account_acc)?;
     user.discriminator = DISC_USER_ACCOUNT;
     user.bump = bump;
     user.pending_fills = 0;

@@ -5,6 +5,17 @@ members = [
     "tests/unit",
 ]
 
+# Must live at the WORKSPACE ROOT. Cargo silently ignores `[profile.*]` in a
+# non-root member manifest ("profiles for the non root package will be ignored"),
+# so the same block in programs/slipstream/Cargo.toml never applied and the
+# deployed program was built with overflow-checks OFF — arithmetic wrapped
+# silently instead of aborting.
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+
 [workspace.dependencies]
 pinocchio = "0.9"
 pinocchio-system = "0.4"

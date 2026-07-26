@@ -7,7 +7,7 @@ use pinocchio::{
 use pinocchio_token::instructions::Transfer;
 
 use crate::error::SlipstreamError;
-use crate::state::UserAccount;
+use crate::state::{Market, UserAccount};
 
 pub fn process(
     program_id: &Pubkey,
@@ -20,6 +20,7 @@ pub fn process(
         user_token_acc,
         quote_vault_acc,
         _token_program,
+        market_acc,
         _remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
@@ -43,6 +44,22 @@ pub fn process(
     let user = UserAccount::from_account_info(user_account_acc)?;
     if user.owner != *owner.key() {
         return Err(SlipstreamError::InvalidAuthority.into());
+    }
+
+    // Pin the destination to THIS market's vault. Without it the caller chooses
+    // where the tokens go: pass a token account of a worthless mint that you own as
+    // both source and "vault", and the transfer succeeds while `free_collateral` is
+    // credited 1:1 — collateral minted from nothing, withdrawable as real USDC.
+    // The mint is pinned transitively: market.quote_vault is a fixed account with a
+    // fixed mint, so a transfer into it can only succeed with the matching mint.
+    if market_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    {
+        let market = Market::from_account_info(market_acc)?;
+        if quote_vault_acc.key() != &market.quote_vault {
+            return Err(SlipstreamError::InvalidVault.into());
+        }
     }
 
     Transfer {

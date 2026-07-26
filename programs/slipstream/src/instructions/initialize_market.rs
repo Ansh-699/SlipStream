@@ -135,7 +135,7 @@ pub fn process(
     }
     .invoke_signed(&[Signer::from(&ob_seeds)])?;
 
-    let market = Market::from_account_info_mut(market_acc)?;
+    let market = Market::from_account_info_mut_or_init(market_acc)?;
     market.discriminator = DISC_MARKET;
     market.bump = market_bump;
     market.market_index = market_index;

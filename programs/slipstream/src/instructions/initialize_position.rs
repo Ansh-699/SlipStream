@@ -77,7 +77,7 @@ pub fn process(
     }
     .invoke_signed(&[Signer::from(&signer_seeds)])?;
 
-    let position = Position::from_account_info_mut(position_acc)?;
+    let position = Position::from_account_info_mut_or_init(position_acc)?;
     position.discriminator = DISC_POSITION;
     position.bump = bump;
     position.market_index = market_index;

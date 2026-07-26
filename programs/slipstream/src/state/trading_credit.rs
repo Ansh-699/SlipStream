@@ -68,6 +68,27 @@ impl TradingCredit {
         if data.len() < Self::LEN {
             return Err(ProgramError::InvalidAccountData);
         }
+        // Type check on the WRITE path. Without it, any program-owned account of a
+        // compatible size can be cast to this type and overwritten field-by-field
+        // (Position and TradingCredit are both 96 bytes with `owner` at offset 8,
+        // so authorize_session could rewrite a Position's collateral).
+        if data[0] != DISC_TRADING_CREDIT {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok(bytemuck::from_bytes_mut(&mut data[..Self::LEN]))
+    }
+
+    /// As `from_account_info_mut`, but also accepts a freshly created account whose
+    /// discriminator is still zero. Initialize/upsert paths only.
+    #[allow(clippy::mut_from_ref)]
+    pub fn from_account_info_mut_or_init(account: &AccountInfo) -> Result<&mut Self, ProgramError> {
+        let data = unsafe { account.borrow_mut_data_unchecked() };
+        if data.len() < Self::LEN {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        if data[0] != 0 && data[0] != DISC_TRADING_CREDIT {
+            return Err(ProgramError::InvalidAccountData);
+        }
         Ok(bytemuck::from_bytes_mut(&mut data[..Self::LEN]))
     }
 

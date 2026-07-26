@@ -61,7 +61,7 @@ pub fn process(
     }
     .invoke_signed(&[Signer::from(&signer_seeds)])?;
 
-    let credit = TradingCredit::from_account_info_mut(trading_credit_acc)?;
+    let credit = TradingCredit::from_account_info_mut_or_init(trading_credit_acc)?;
     credit.discriminator = DISC_TRADING_CREDIT;
     credit.bump = bump;
     credit.market_index = market_index;

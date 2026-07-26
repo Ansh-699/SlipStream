@@ -19,8 +19,4 @@ pinocchio-token = { workspace = true }
 pinocchio-pubkey = { workspace = true }
 bytemuck = { workspace = true }
 
-[profile.release]
-overflow-checks = true
-lto = "fat"
-codegen-units = 1
-opt-level = 3
+# NOTE: profiles are defined at the workspace root (Cargo ignores them here).
