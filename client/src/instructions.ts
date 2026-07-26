@@ -289,15 +289,20 @@ export function createDepositCollateralInstruction(
   });
 }
 
-// ---- Withdraw Collateral (optional open-position check for same-slot guard) ----
+// ---- Withdraw Collateral ----
 
 export interface WithdrawCollateralParams {
   owner: PublicKey;
   userTokenAccount: PublicKey;
   quoteVault: PublicKey;
   amount: bigint;
-  /** Optional: any open Position accounts for this owner to check same-slot guard. */
-  positions?: PublicKey[];
+  /** Market whose registered vault `quoteVault` must match — the program pins
+   *  it, so an arbitrary/mismatched vault is rejected on-chain. */
+  marketIndex?: number;
+  /** Number of markets to check for the mandatory same-slot flash guard — one
+   *  Position PDA per market index is ALWAYS included (not optional): an
+   *  optional scan is trivially bypassed by simply not passing the account. */
+  marketCount?: number;
 }
 
 export function createWithdrawCollateralInstruction(
@@ -306,26 +311,33 @@ export function createWithdrawCollateralInstruction(
 ): TransactionInstruction {
   const [userAccount] = findUserAccountPda(params.owner, programId);
   const [vaultAuthority] = findVaultAuthorityPda(programId);
+  const [market] = findMarketPda(params.marketIndex ?? 0, programId);
+  const [globalState] = findGlobalStatePda(programId);
+  const marketCount = params.marketCount ?? 1;
+  const positionKeys = Array.from({ length: marketCount }, (_, i) => {
+    const [position] = findPositionPda(params.owner, i, programId);
+    return { pubkey: position, isSigner: false, isWritable: false };
+  });
 
   const data = Buffer.alloc(9);
   data[0] = IX_WITHDRAW_COLLATERAL;
   writeU64LE(data, params.amount, 1);
 
-  const keys = [
-    { pubkey: userAccount, isSigner: false, isWritable: true },
-    { pubkey: params.owner, isSigner: true, isWritable: false },
-    { pubkey: params.quoteVault, isSigner: false, isWritable: true },
-    { pubkey: params.userTokenAccount, isSigner: false, isWritable: true },
-    { pubkey: vaultAuthority, isSigner: false, isWritable: false },
-    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-  ];
-  if (params.positions) {
-    for (const pos of params.positions) {
-      keys.push({ pubkey: pos, isSigner: false, isWritable: false });
-    }
-  }
-
-  return new TransactionInstruction({ keys, programId, data });
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: userAccount, isSigner: false, isWritable: true },
+      { pubkey: params.owner, isSigner: true, isWritable: false },
+      { pubkey: params.quoteVault, isSigner: false, isWritable: true },
+      { pubkey: params.userTokenAccount, isSigner: false, isWritable: true },
+      { pubkey: vaultAuthority, isSigner: false, isWritable: false },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      { pubkey: market, isSigner: false, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
+      ...positionKeys,
+    ],
+    programId,
+    data,
+  });
 }
 
 // ---- Place Order (ER-native; uses TradingCredit, not UserAccount) ----

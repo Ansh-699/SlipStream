@@ -64,3 +64,8 @@ mod test_mirror_fills_regressions;
 // Regression test for the dual-oracle restricted_mode persistence fix.
 #[cfg(test)]
 mod test_oracle_restricted_mode_regressions;
+
+// Regression tests for withdraw_collateral's vault-pin and mandatory
+// same-slot-guard fixes.
+#[cfg(test)]
+mod test_withdraw_collateral_regressions;
