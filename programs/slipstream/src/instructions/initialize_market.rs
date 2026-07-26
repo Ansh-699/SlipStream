@@ -85,6 +85,12 @@ pub fn process(
     if tick_size == 0 || lot_size == 0 || max_leverage == 0 {
         return Err(ProgramError::InvalidInstructionData);
     }
+    // maker_rebate is paid out of the taker fee on every fill (settle_trades.rs /
+    // settle_from_log.rs); a rebate exceeding the fee it's funded from would mint
+    // collateral on every single trade regardless of who paid what.
+    if taker_fee_bps > 10_000 || maker_rebate_bps > taker_fee_bps {
+        return Err(ProgramError::InvalidInstructionData);
+    }
 
     let market_index_bytes = market_index.to_le_bytes();
     let (market_pda, market_bump) = pinocchio::pubkey::find_program_address(

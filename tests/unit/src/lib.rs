@@ -69,3 +69,7 @@ mod test_oracle_restricted_mode_regressions;
 // same-slot-guard fixes.
 #[cfg(test)]
 mod test_withdraw_collateral_regressions;
+
+// Regression test for initialize_market's fee/rebate bound check.
+#[cfg(test)]
+mod test_initialize_market_regressions;
