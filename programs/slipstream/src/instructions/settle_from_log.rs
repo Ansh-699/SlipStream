@@ -141,9 +141,9 @@ pub fn process(
         }
 
         let fill_notional = compute_notional(fill.quantity, fill.price)?;
-        let taker_fee = apply_bps(fill_notional, fill.taker_fee_bps_snapshot)?;
-        let maker_rebate = apply_bps(fill_notional, fill.maker_rebate_bps_snapshot)?;
-        let insurance_cut = apply_bps(taker_fee, INSURANCE_SHARE_BPS)?;
+        let taker_fee_owed = apply_bps(fill_notional, fill.taker_fee_bps_snapshot)?;
+        let maker_rebate_owed = apply_bps(fill_notional, fill.maker_rebate_bps_snapshot)?;
+        let insurance_cut_owed = apply_bps(taker_fee_owed, INSURANCE_SHARE_BPS)?;
 
         // Locate all four accounts. If ANY is missing (an "orphan" fill whose
         // maker/taker has no L1 account — e.g. a fill from a prior bot session),
@@ -187,6 +187,30 @@ pub fn process(
             }
         };
 
+        // Taker side FIRST: collect only what the taker's L1 balance can actually
+        // cover. Downstream payouts (maker rebate, insurance cut) are scaled to
+        // what was truly collected below, instead of being paid in full
+        // regardless — paying them in full off a saturating_sub taker debit
+        // mints value that was never collected from anyone.
+        let taker_fee_collected = {
+            let taker_user = crate::state::UserAccount::from_account_info_mut(taker_user_acc)?;
+            let collected = taker_fee_owed.min(taker_user.free_collateral);
+            taker_user.free_collateral -= collected;
+            if taker_user.pending_fills > 0 {
+                taker_user.pending_fills -= 1;
+            }
+            collected
+        };
+        let (maker_rebate, insurance_cut) = if taker_fee_owed == 0 {
+            (0u64, 0u64)
+        } else {
+            let m = ((maker_rebate_owed as u128) * (taker_fee_collected as u128)
+                / (taker_fee_owed as u128)) as u64;
+            let i = ((insurance_cut_owed as u128) * (taker_fee_collected as u128)
+                / (taker_fee_owed as u128)) as u64;
+            (m, i)
+        };
+
         // Maker side
         {
             let maker_user = crate::state::UserAccount::from_account_info_mut(maker_user_acc)?;
@@ -196,14 +220,6 @@ pub fn process(
                 .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
             if maker_user.pending_fills > 0 {
                 maker_user.pending_fills -= 1;
-            }
-        }
-        // Taker side
-        {
-            let taker_user = crate::state::UserAccount::from_account_info_mut(taker_user_acc)?;
-            taker_user.free_collateral = taker_user.free_collateral.saturating_sub(taker_fee);
-            if taker_user.pending_fills > 0 {
-                taker_user.pending_fills -= 1;
             }
         }
 

@@ -184,7 +184,10 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
         (order_book, program_account(&program_id, &order_book_with_one_fill(fill))),
         (global_pk, global_acc),
         (maker_user_pk, user_account(&program_id, &maker, 0)),
-        (taker_user_pk, user_account(&program_id, &taker, 0)),
+        // Taker needs enough L1 free_collateral to cover the taker fee, or the
+        // maker rebate/insurance cut this test asserts on are scaled down to
+        // whatever fraction was actually collectible (see the fee-mint fix).
+        (taker_user_pk, user_account(&program_id, &taker, 100_000)),
         (
             maker_pos_pk,
             position_account(&program_id, &maker, size as i64, entry, existing_collateral),
@@ -224,5 +227,90 @@ fn test_reduce_to_flat_releases_collateral_instead_of_stranding_it() {
         maker_user.free_collateral,
         existing_collateral + fill_margin + maker_rebate,
         "released collateral + refunded fill margin + maker rebate must reach free_collateral, not vanish"
+    );
+}
+
+/// A taker whose L1 free_collateral cannot cover the taker fee must not still
+/// trigger a FULL maker rebate / insurance cut — those payouts must scale down
+/// to whatever fraction of the fee was actually collectible, or value is
+/// minted from nothing on every fill where the taker comes up short.
+#[test]
+fn test_settle_trades_scales_maker_rebate_to_fee_actually_collected() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let maker = Pubkey::new_unique();
+    let taker = Pubkey::new_unique();
+
+    let (market, _) = Pubkey::find_program_address(&[SEED_MARKET, &0u16.to_le_bytes()], &program_id);
+    let (order_book, _) =
+        Pubkey::find_program_address(&[SEED_ORDERBOOK, &0u16.to_le_bytes()], &program_id);
+    let maker_user_pk = Pubkey::new_unique();
+    let taker_user_pk = Pubkey::new_unique();
+    let maker_pos_pk = Pubkey::new_unique();
+    let taker_pos_pk = Pubkey::new_unique();
+
+    let entry = 150 * PRICE_SCALE;
+    let size = SOL / 10;
+
+    let fill = FillEvent {
+        sequence: 1,
+        maker: maker.to_bytes(),
+        taker: taker.to_bytes(),
+        price: entry,
+        quantity: size,
+        filled_margin: 0,
+        taker_fee_bps_snapshot: 10,
+        maker_rebate_bps_snapshot: 5,
+        maker_side: SIDE_ASK,
+        _pad: [0u8; 3],
+    };
+
+    let (global_pk, global_acc) = global_state_account(&program_id);
+
+    let accounts = vec![
+        (market, market_account(&program_id)),
+        (order_book, program_account(&program_id, &order_book_with_one_fill(fill))),
+        (global_pk, global_acc),
+        (maker_user_pk, user_account(&program_id, &maker, 0)),
+        // Taker has ZERO free_collateral: cannot cover any of the fee.
+        (taker_user_pk, user_account(&program_id, &taker, 0)),
+        (
+            maker_pos_pk,
+            position_account(&program_id, &maker, size as i64, entry, 0),
+        ),
+        (taker_pos_pk, position_account(&program_id, &taker, 0, 0, 0)),
+    ];
+
+    let ix = settle_trades_ix(
+        &program_id,
+        market,
+        order_book,
+        global_pk,
+        maker_user_pk,
+        taker_user_pk,
+        maker_pos_pk,
+        taker_pos_pk,
+    );
+    let res = m.process_instruction(&ix, &accounts);
+    assert!(matches!(res.program_result, MolluskResult::Success), "{:?}", res.program_result);
+
+    let maker_user: &UserAccount =
+        bytemuck::from_bytes(&res.resulting_accounts[3].1.data[..UserAccount::LEN]);
+    assert_eq!(
+        maker_user.free_collateral, 0,
+        "maker rebate must be 0 when nothing was actually collected from the taker, not the full 7_500"
+    );
+
+    let taker_user: &UserAccount =
+        bytemuck::from_bytes(&res.resulting_accounts[4].1.data[..UserAccount::LEN]);
+    assert_eq!(
+        taker_user.free_collateral, 0,
+        "taker had nothing to give and must not go negative/underflow"
+    );
+
+    let market_after: &Market = bytemuck::from_bytes(&res.resulting_accounts[0].1.data[..Market::LEN]);
+    assert_eq!(
+        market_after.insurance_fund_balance, 0,
+        "insurance cut must not be minted when the taker fee was never collected"
     );
 }
