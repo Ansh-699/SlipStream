@@ -116,12 +116,21 @@ export interface Market {
   /** L1 settlement cursor (highest settled FillEvent.sequence) — LE u32 stored
    *  in the Round-3 trailing padding at byte 2058; 0 on pre-Round-3 layouts. */
   lastSettledSequence: number;
+  /** Round-3 addition (byte 2024). All-zero if never configured. */
+  switchboardFeed: PublicKey;
+  /** 0 = normal trading, 1 = restricted (closes-only) — set on dual-oracle
+   *  disagreement, cleared after 3 consecutive agreement readings. false on
+   *  pre-Round-3 layouts (byte 2056 doesn't exist yet). */
+  restrictedMode: boolean;
 }
 
-export const MARKET_SIZE = 224 + TWAP_BUFFER_SIZE * 8;
+/** Full Market account size, including the Round-3 tail (switchboard_feed,
+ *  restricted_mode, agreement_streak, and the last_settled_sequence padding). */
+export const MARKET_SIZE = 224 + TWAP_BUFFER_SIZE * 8 + 40;
 
 export function decodeMarket(data: Buffer): Market {
-  if (data.length < MARKET_SIZE) throw new Error("Market buffer too small");
+  if (data.length < 224 + TWAP_BUFFER_SIZE * 8)
+    throw new Error("Market buffer too small");
   if (data[0] !== DISC_MARKET) throw new Error("Invalid Market discriminator");
 
   const twapPrices: bigint[] = [];
@@ -154,6 +163,8 @@ export function decodeMarket(data: Buffer): Market {
     cumulativeFundingIndex: readI128FromSplitI64(data, 208),
     twapPrices,
     lastSettledSequence: data.length >= 2062 ? data.readUInt32LE(2058) : 0,
+    switchboardFeed: data.length >= 2056 ? readPubkey(data, 2024) : ZERO_PUBKEY,
+    restrictedMode: data.length >= 2057 ? readU8(data, 2056) !== 0 : false,
   };
 }
 
