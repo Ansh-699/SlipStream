@@ -59,6 +59,8 @@ module.exports = {
     // fills to move). Idles harmlessly when its trading credit runs low —
     // topup-takers refills it. Modest cadence to keep base-RPC load in check.
     keeper("taker", "taker-bot.ts", {
+      // taker-v2: same half-delegated credit deadlock as mm — see BOT_MM_PREFIX.
+      BOT_TAKER_PREFIX: "taker-v2",
       BOT_TAKER_INTERVAL_MS: "15000",
       BOT_TAKER_JITTER_MS: "8000",
       BOT_TAKER_CROSS_PROB: "0.8",
