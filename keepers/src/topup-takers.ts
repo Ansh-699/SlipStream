@@ -14,12 +14,16 @@ import { findUserAccountPda } from "../../client/src/pda";
 import { PublicKey } from "@solana/web3.js";
 
 /**
- * Top up the taker bots' trading credit so they can keep crossing the book
- * (their credit drains to positions over time, then they go idle). Deposits more
- * collateral + funds credit. Works on already-delegated credits (fund_trading_
- * credit runs on the base layer and propagates to the ER copy).
+ * Top up bot trading credit so they can keep quoting / crossing the book (credit
+ * drains into positions over time, then they go idle). Deposits more collateral +
+ * funds credit. Works on already-delegated credits (fund_trading_credit runs on the
+ * base layer and propagates to the ER copy).
  *
- *   TOPUP_USDC=3000 npx tsx src/topup-takers.ts
+ *   TOPUP_USDC=3000 npx tsx src/topup-takers.ts               # takers (default)
+ *   TOPUP_ROLES=mm,taker TOPUP_USDC=5000 npx tsx src/topup-takers.ts
+ *
+ * Market makers need materially more than takers: BOT_MM_LEVELS orders per side at
+ * BOT_MM_SIZE_LOTS each, all reserving margin simultaneously.
  */
 async function main() {
   const base = getBaseConnection();
@@ -28,12 +32,22 @@ async function main() {
   const { marketIndex, usdcVault } = getKeeperAddresses();
   const topup = BigInt(Math.round(Number(process.env.TOPUP_USDC || "3000") * 1e6));
 
+  const roles = (process.env.TOPUP_ROLES || "taker")
+    .split(",")
+    .map((r) => r.trim())
+    .filter(Boolean);
+
   const manifest = loadManifest();
   if (!manifest.usdcMint) throw new Error(`usdcMint missing from ${MANIFEST_PATH}`);
   const mint = new PublicKey(manifest.usdcMint);
 
-  const takers = loadBotWallets().filter((w) => w.role === "taker");
-  for (const w of takers) {
+  const selected = loadBotWallets().filter((w) => roles.includes(w.role));
+  if (selected.length === 0) {
+    throw new Error(`no bot wallets match TOPUP_ROLES="${roles.join(",")}"`);
+  }
+  log("topup", `topping up ${selected.length} bot(s) [${roles.join(",")}] with ${fmtUsdc(topup)} each`);
+
+  for (const w of selected) {
     const owner = w.keypair.publicKey;
     log("topup", `--- ${w.name} ${owner.toBase58()} ---`);
 
