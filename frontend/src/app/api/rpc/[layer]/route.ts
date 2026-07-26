@@ -73,6 +73,11 @@ const MAX_BODY_BYTES = 100_000;
 const ALLOWED_METHODS = new Set([
   "getAccountInfo",
   "getMultipleAccounts",
+  // Required by use-positions.ts (memcmp-filtered scan for the user's Positions).
+  // This is the expensive one the comment above warns about, so it stays behind
+  // the body/batch caps; bounding it properly needs a rate limiter or an
+  // indexer-backed endpoint, not removal — dropping it breaks the positions table.
+  "getProgramAccounts",
   "getBalance",
   "getLatestBlockhash",
   "getSignatureStatuses",
