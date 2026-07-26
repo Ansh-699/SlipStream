@@ -28,8 +28,6 @@ const IX_DATA_LEN: usize = 2;
 
 /// Fraction of taker_fee that goes to per-market insurance fund (§17).
 const INSURANCE_SHARE_BPS: u16 = 1000; // 10%
-/// Fraction of taker_fee paid to the settling keeper (settlement bounty).
-const SETTLEMENT_BOUNTY_BPS: u16 = 50; // 0.5%
 
 /// Settle fills produced by the ER matching engine onto L1 state.
 ///
@@ -155,11 +153,9 @@ pub fn process(
         let taker_fee_owed = apply_bps(fill_notional, fill.taker_fee_bps_snapshot)?;
         let maker_rebate_owed = apply_bps(fill_notional, fill.maker_rebate_bps_snapshot)?;
         let insurance_cut_owed = apply_bps(taker_fee_owed, INSURANCE_SHARE_BPS)?;
-        let settlement_bounty_owed = apply_bps(taker_fee_owed, SETTLEMENT_BOUNTY_BPS)?;
-        let _treasury_share = taker_fee_owed
-            .saturating_sub(maker_rebate_owed)
-            .saturating_sub(insurance_cut_owed)
-            .saturating_sub(settlement_bounty_owed);
+        // The remainder of taker_fee_owed beyond the maker rebate and insurance
+        // cut is NOT paid to anyone: there is no settlement-bounty or treasury
+        // withdrawal instruction, so it simply accrues unswept in the vault.
 
         // Locate accounts for both sides (program-owned; mutable).
         let maker_user_acc = find_user_account(remaining_accounts, &fill.maker)?;
