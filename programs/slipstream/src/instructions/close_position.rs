@@ -189,6 +189,11 @@ pub(crate) fn do_close(
         pos_mut.size = 0;
         pos_mut.entry_price = 0;
         pos_mut.collateral = 0;
+        // Re-arm the same-slot withdrawal guard: `open_slot` is only ever stamped
+        // by update_position on a 0 -> nonzero transition, so leaving it set here
+        // would permanently disarm withdraw_collateral's flash guard for every
+        // future re-open of this Position PDA (it would never look "fresh" again).
+        pos_mut.open_slot = 0;
         // Fully settled: nothing is left to accrue further funding against.
         pos_mut.set_funding_index_snapshot(market_mut.get_cumulative_funding_index());
     } else {

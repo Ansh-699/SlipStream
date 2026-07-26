@@ -141,6 +141,42 @@ fn test_full_close_credits_pnl_and_zeroes_position() {
     assert_eq!(market.open_interest_long, 0);
 }
 
+/// A full close must reset `open_slot` to 0. `open_slot` is only ever stamped
+/// on a 0 -> nonzero size transition (settle_trades.rs's update_position); if
+/// close left it set, withdraw_collateral's same-slot flash guard would
+/// compare `now_slot` against this stale, long-past value forever after and
+/// could never fire again for this Position PDA's next re-open.
+#[test]
+fn test_full_close_resets_open_slot_to_rearm_flash_guard() {
+    let s = setup();
+    let m = mollusk(&s.program_id);
+
+    let mut pos = Position::zeroed();
+    pos.discriminator = DISC_POSITION;
+    pos.owner = s.owner.to_bytes();
+    pos.size = 2 * SOL;
+    pos.entry_price = 100 * PRICE_SCALE;
+    pos.collateral = 10 * PRICE_SCALE;
+    pos.open_slot = 12_345; // some long-past slot from when the position first opened
+
+    let accounts = vec![
+        (s.market, market_account(&s.program_id, 110 * PRICE_SCALE, 2 * SOL as u64, 0)),
+        (s.position, program_account(&s.program_id, bytemuck::bytes_of(&pos))),
+        (s.user, user_account(&s.program_id, &s.owner, 5 * PRICE_SCALE)),
+        (s.owner, Account::default()),
+    ];
+    let ix = close_ix(&s.program_id, s.market, s.position, s.user, s.owner, None);
+    let res = m.process_instruction(&ix, &accounts);
+    assert!(matches!(res.program_result, MolluskResult::Success), "{:?}", res.program_result);
+
+    let closed: &Position = bytemuck::from_bytes(&res.resulting_accounts[1].1.data[..Position::LEN]);
+    assert_eq!(closed.size, 0);
+    assert_eq!(
+        closed.open_slot, 0,
+        "open_slot must be reset on full close, or the same-slot guard can never re-arm"
+    );
+}
+
 #[test]
 fn test_partial_close_scales_size_collateral_and_oi() {
     let s = setup();

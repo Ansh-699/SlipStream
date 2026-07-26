@@ -209,6 +209,9 @@ pub fn process(
     pos_mut.size = 0;
     pos_mut.entry_price = 0;
     pos_mut.collateral = 0;
+    // Re-arm the same-slot withdrawal guard for the next time this PDA opens a
+    // position — see the matching fix in close_position.rs/update_position.
+    pos_mut.open_slot = 0;
     pos_mut.realized_pnl = pos_mut
         .realized_pnl
         .saturating_add(unrealized_pnl)

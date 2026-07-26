@@ -426,6 +426,11 @@ pub(crate) fn update_position(
             } else {
                 pos.size = 0;
                 pos.entry_price = 0;
+                // Re-arm the same-slot withdrawal guard: `open_slot` is only ever
+                // stamped when size transitions 0 -> nonzero (line ~312 above), so
+                // leaving it set here would permanently disarm that guard for
+                // every future re-open of this Position PDA.
+                pos.open_slot = 0;
             }
         } else {
             pos.size += signed_qty;
