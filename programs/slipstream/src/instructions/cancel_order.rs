@@ -8,7 +8,7 @@ use pinocchio::{
 
 use crate::error::SlipstreamError;
 use crate::state::{
-    reconcile_credit, OrderBookView, TradingCredit, SENTINEL, SIDE_BID,
+    reconcile_credit, OrderBookView, TradingCredit, SENTINEL, SEED_ORDERBOOK, SIDE_BID,
 };
 
 /// ER-native cancel_order.
@@ -22,7 +22,7 @@ use crate::state::{
 const IX_DATA_LEN: usize = 8;
 
 pub fn process(
-    _program_id: &Pubkey,
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
@@ -48,6 +48,16 @@ pub fn process(
             return Err(SlipstreamError::InvalidAuthority.into());
         }
         credit_owner = credit.owner;
+
+        // Bind the order book to the credit's OWN market — without this a credit
+        // for market A could cancel into market B's order book.
+        let (ob_pda, _) = pinocchio::pubkey::find_program_address(
+            &[SEED_ORDERBOOK, &credit.market_index.to_le_bytes()],
+            program_id,
+        );
+        if order_book_acc.key() != &ob_pda {
+            return Err(SlipstreamError::InvalidPda.into());
+        }
     }
 
     let ob_data = unsafe { order_book_acc.borrow_mut_data_unchecked() };

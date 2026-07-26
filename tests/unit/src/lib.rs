@@ -23,3 +23,7 @@ mod test_close_position;
 // Negative tests pinning the account-validation fixes.
 #[cfg(test)]
 mod test_security_regressions;
+
+// Negative tests pinning the place_order fixes (forged Market, reduce_only bypass).
+#[cfg(test)]
+mod test_place_order_regressions;

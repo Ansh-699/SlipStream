@@ -10,7 +10,7 @@ use crate::error::SlipstreamError;
 use crate::math::fixed_point::{compute_initial_margin, compute_notional};
 use crate::state::{
     reconcile_credit, FillEvent, Market, OrderBookView, TradingCredit,
-    SENTINEL, SIDE_BID, SIDE_ASK,
+    SENTINEL, SIDE_BID, SIDE_ASK, SEED_MARKET, SEED_ORDERBOOK,
     ORDER_TYPE_LIMIT, ORDER_TYPE_POST_ONLY, ORDER_TYPE_FOK, ORDER_TYPE_MARKET,
 };
 
@@ -31,17 +31,22 @@ use crate::state::{
 ///   size:             u64   (base atoms, must be multiple of market.lot_size)
 ///   expiry_ts:        i64   (0 = never)
 ///   max_slippage_bps: u16   (only enforced for MARKET orders; 0 = disabled)
-///   reduce_only:      u8    (optional 29th byte; 1 = closing/reducing an existing
-///                            position — skips the upfront margin gate, costs the
-///                            taker zero new credit, and never rests a remainder.
-///                            DEVNET NOTE: the ER cannot read the L1 Position, so
-///                            this trusts the caller that it is a reduce. Before
-///                            mainnet this MUST be gated by an on-chain position
-///                            check; see the Trust Model.)
+///   reduce_only:      u8    (optional 29th byte; parsed but NOT currently acted on.
+///                            It used to skip the margin gate and the taker debit
+///                            outright, trusting the caller's claim that the order
+///                            reduces an existing position — the ER cannot read the
+///                            L1 Position to verify that, and there is no capital
+///                            cost to lying, so any account with zero funded credit
+///                            could drain a maker's margin into a free position.
+///                            Every order is now gated and debited identically
+///                            regardless of this byte. A real reduce-only path
+///                            needs an on-chain-verified position size, which is a
+///                            follow-up; until then, use `close_position` (L1) to
+///                            close/reduce without needing fresh ER margin.)
 const IX_DATA_LEN: usize = 1 + 1 + 8 + 8 + 8 + 2;
 
 pub fn process(
-    _program_id: &Pubkey,
+    program_id: &Pubkey,
     accounts: &[AccountInfo],
     data: &[u8],
 ) -> ProgramResult {
@@ -69,7 +74,9 @@ pub fn process(
     let expiry_ts = i64::from_le_bytes(data[18..26].try_into().unwrap());
     let max_slippage_bps = u16::from_le_bytes([data[26], data[27]]);
     // Optional 29th byte: reduce_only flag (backward compatible — absent => 0).
-    let reduce_only = data.get(28).copied().unwrap_or(0) != 0;
+    // Parsed for forward-compatibility only; see the doc comment above — it no
+    // longer changes any accounting or resting behavior.
+    let _reduce_only = data.get(28).copied().unwrap_or(0) != 0;
 
     if side != SIDE_BID && side != SIDE_ASK {
         return Err(SlipstreamError::InvalidOrderSide.into());
@@ -84,7 +91,24 @@ pub fn process(
         return Err(SlipstreamError::InvalidOrderPrice.into());
     }
 
+    // This is the price-setting entry point: taker_fee_bps / maker_rebate_bps read
+    // here are stamped verbatim into every FillEvent and trusted unconditionally by
+    // settlement, and max_leverage here sets the margin gate below. Every other
+    // instruction that reads a Market pins it; this one didn't, so an attacker's own
+    // account (DISC_MARKET byte + arbitrary fields) could set maker_rebate_bps to
+    // u16::MAX and mint free_collateral on settlement, or max_leverage to 255 to
+    // defeat the margin gate entirely.
+    if market_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
     let market = Market::from_account_info(market_acc)?;
+    let (market_pda, _) = pinocchio::pubkey::find_program_address(
+        &[SEED_MARKET, &market.market_index.to_le_bytes()],
+        program_id,
+    );
+    if market_acc.key() != &market_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     if market.circuit_breaker_active != 0 {
         return Err(SlipstreamError::MarketPaused.into());
     }
@@ -138,9 +162,23 @@ pub fn process(
     let taker_fee_bps = market.taker_fee_bps;
     let maker_rebate_bps = market.maker_rebate_bps;
 
+    // Bind the order book to THIS market — without it a caller could pass market A
+    // (for its leverage/fees/tick/lot) alongside market B's order book, reserving
+    // margin at A's parameters against B's liquidity.
+    let (ob_pda, _) = pinocchio::pubkey::find_program_address(
+        &[SEED_ORDERBOOK, &market.market_index.to_le_bytes()],
+        program_id,
+    );
+    if order_book_acc.key() != &ob_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+
     // Take a mutable view of the book + credit
     let ob_data = unsafe { order_book_acc.borrow_mut_data_unchecked() };
     let mut ob = OrderBookView::from_account_data(ob_data)?;
+    if ob.header.market_index != market.market_index {
+        return Err(SlipstreamError::InvalidMarketIndex.into());
+    }
     let orders_per_user = ob.header.orders_per_user;
 
     // Reconcile the caller's own credit first (catches any fills against their resting orders).
@@ -149,14 +187,14 @@ pub fn process(
         reconcile_credit(&ob, credit);
     }
 
-    // Check credit availability before any side effects.
-    // reduce_only orders SKIP the margin gate: a position-reducing order should
-    // not have to reserve fresh margin (settlement realizes PnL and releases the
-    // original collateral). They also cost the taker zero new credit below and
-    // never rest a remainder, so they cannot over-reserve credit.
+    // Cheap early-exit estimate: margin_required is computed from reference_price
+    // (the order's own limit, for non-MARKET orders), which can differ from the
+    // real price(s) the order actually fills at — the authoritative check against
+    // taker_margin_spent (the real, post-match amount) happens below, right before
+    // the credit is actually debited.
     {
         let credit = TradingCredit::from_account_info(trading_credit_acc)?;
-        if !reduce_only && credit.available() < margin_required {
+        if credit.available() < margin_required {
             return Err(SlipstreamError::InsufficientCredit.into());
         }
         if (credit.active_orders as u8) >= orders_per_user {
@@ -210,12 +248,11 @@ pub fn process(
         return Err(SlipstreamError::FokCannotFill.into());
     }
 
-    // Rest any remainder as a resting order.
-    // reduce_only never rests (IOC-like): a close should flatten, not leave a new
-    // resting order that would reserve margin.
+    // Rest any remainder as a resting order (MARKET/FOK never reach here with
+    // remaining_size > 0: MARKET always fills-or-slippage-reverts up to what the
+    // book offers and isn't LIMIT/POST_ONLY, FOK reverted above).
     let mut rest_margin: u64 = 0;
     if remaining_size > 0
-        && !reduce_only
         && (order_type == ORDER_TYPE_LIMIT || order_type == ORDER_TYPE_POST_ONLY)
     {
         let rest_notional = compute_notional(remaining_size, price)?;
@@ -265,11 +302,29 @@ pub fn process(
     //   - taker_margin_spent: drained from credit (this money flows to position.collateral
     //     via settlement).
     //   - rest_margin: committed (held against the new resting slot).
+    //
+    // Authoritative check first. The pre-match gate above used an ESTIMATE
+    // (margin_required, from the order's own reference price), which can differ
+    // from what actually happened — a taker can sweep multiple price levels at
+    // prices worse or better than its own limit. Checking `available()` here
+    // against the REAL taker_margin_spent + rest_margin is what actually prevents
+    // this debit from eating into margin already committed to a DIFFERENT resting
+    // order: subtracting straight from raw `credit` with no floor at `committed`
+    // let the debit succeed past that floor, and the resulting deficit was then
+    // silently absorbed by reconcile_credit's saturating_sub on the next call
+    // instead of ever being rejected.
+    let total_reserved = taker_margin_spent
+        .checked_add(rest_margin)
+        .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
+    {
+        let credit = TradingCredit::from_account_info(trading_credit_acc)?;
+        if credit.available() < total_reserved {
+            return Err(SlipstreamError::InsufficientCredit.into());
+        }
+    }
+
     let credit = TradingCredit::from_account_info_mut(trading_credit_acc)?;
-    if taker_margin_spent > 0 && !reduce_only {
-        // reduce_only closes do NOT spend new credit — the position's original
-        // collateral is released at settlement, so charging fresh margin here
-        // would double-count and re-trigger InsufficientCredit.
+    if taker_margin_spent > 0 {
         credit.credit = credit
             .credit
             .checked_sub(taker_margin_spent)
