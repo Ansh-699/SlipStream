@@ -15,7 +15,7 @@ use crate::math::fixed_point::{
     compute_maintenance_margin, compute_notional, compute_unrealized_pnl,
 };
 use crate::math::funding::compute_funding_payment;
-use crate::oracle::apply_dual_oracle;
+use crate::oracle::{apply_dual_oracle, DualOracleOutcome};
 use crate::state::{
     LiquidationIntent, Market, Position, UserAccount,
     DISC_LIQUIDATION_INTENT, SEED_LIQ_INTENT, SEED_MARKET,
@@ -90,7 +90,14 @@ pub fn process(
     // apply_dual_oracle mutates `restricted_mode` + `agreement_streak` in place.
     let mark_price = {
         let market = Market::from_account_info_mut(market_acc)?;
-        apply_dual_oracle(market, pyth_feed_acc, switchboard_feed_acc, now)?
+        match apply_dual_oracle(market, pyth_feed_acc, switchboard_feed_acc, now)? {
+            DualOracleOutcome::Price(p) => p,
+            // Returning Err here would roll back the restricted_mode/
+            // agreement_streak update apply_dual_oracle just made. Skip this
+            // liquidation attempt instead — the flag change commits, and the
+            // liquidator simply retries once the oracles agree again.
+            DualOracleOutcome::Restricted => return Ok(()),
+        }
     };
 
     // --- Load position + verify ownership ---

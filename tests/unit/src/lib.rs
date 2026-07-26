@@ -60,3 +60,7 @@ mod test_global_pause;
 // Regression tests for the FillLog overrun fix (mirror_fills / FillLogView::push).
 #[cfg(test)]
 mod test_mirror_fills_regressions;
+
+// Regression test for the dual-oracle restricted_mode persistence fix.
+#[cfg(test)]
+mod test_oracle_restricted_mode_regressions;

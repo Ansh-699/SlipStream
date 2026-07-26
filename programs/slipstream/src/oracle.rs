@@ -263,9 +263,21 @@ pub fn dual_oracle_read(
     Ok(DualOraclePrice { price, agreement, single_oracle: false })
 }
 
+/// Result of a dual-oracle read + hysteresis update.
+pub enum DualOracleOutcome {
+    /// Safe to proceed using this price.
+    Price(u64),
+    /// Oracles disagree, or the market is still inside its post-disagreement
+    /// hysteresis window. `market.restricted_mode`/`agreement_streak` have
+    /// already been updated by this call — the caller MUST let its instruction
+    /// return `Ok(())` (skipping whatever price-sensitive action it was about
+    /// to take) rather than an `Err`, or the Solana runtime rolls back this
+    /// very flag update along with everything else in the instruction.
+    Restricted,
+}
+
 /// Apply the dual-oracle reading to the market's `restricted_mode` flag with
-/// hysteresis. Returns the price the caller should use, or
-/// `Err(RestrictedMode)` if the market is currently restricted.
+/// hysteresis.
 ///
 /// Caller passes `&mut Market` so this function can update flags atomically.
 pub fn apply_dual_oracle(
@@ -273,7 +285,7 @@ pub fn apply_dual_oracle(
     pyth_acc: &AccountInfo,
     switchboard_acc: &AccountInfo,
     now: i64,
-) -> Result<u64, ProgramError> {
+) -> Result<DualOracleOutcome, ProgramError> {
     // The feed pubkeys recorded at initialize_market are the ONLY thing that makes
     // these readings trustworthy: parse_pyth / parse_switchboard read raw account
     // bytes and validate neither the owner nor the identity of the account, and
@@ -288,7 +300,7 @@ pub fn apply_dual_oracle(
     // deliberately leave `restricted_mode` untouched. Documented devnet
     // concession (trust model) — this branch must NOT exist on mainnet.
     if reading.single_oracle {
-        return Ok(reading.price);
+        return Ok(DualOracleOutcome::Price(reading.price));
     }
 
     if reading.agreement {
@@ -300,14 +312,14 @@ pub fn apply_dual_oracle(
                 market.restricted_mode = 0;
                 market.agreement_streak = 0;
             } else {
-                return Err(SlipstreamError::RestrictedMode.into());
+                return Ok(DualOracleOutcome::Restricted);
             }
         }
-        Ok(reading.price)
+        Ok(DualOracleOutcome::Price(reading.price))
     } else {
         // Disagreement: enter restricted mode immediately.
         market.restricted_mode = 1;
         market.agreement_streak = 0;
-        Err(SlipstreamError::OracleDisagreement.into())
+        Ok(DualOracleOutcome::Restricted)
     }
 }

@@ -8,7 +8,7 @@ use pinocchio::{
 
 use crate::error::SlipstreamError;
 use crate::math::funding::compute_funding_rate;
-use crate::oracle::apply_dual_oracle;
+use crate::oracle::{apply_dual_oracle, DualOracleOutcome};
 use crate::state::Market;
 
 pub fn process(
@@ -45,7 +45,14 @@ pub fn process(
     // Index price = dual-oracle median (also flips restricted_mode if oracles disagree)
     let index_price = {
         let market = Market::from_account_info_mut(market_acc)?;
-        apply_dual_oracle(market, pyth_feed_acc, switchboard_feed_acc, now)?
+        match apply_dual_oracle(market, pyth_feed_acc, switchboard_feed_acc, now)? {
+            DualOracleOutcome::Price(p) => p,
+            // Returning Err here would roll back the restricted_mode/
+            // agreement_streak update apply_dual_oracle just made. Skip
+            // accruing funding this call instead — the flag change commits,
+            // and the keeper simply retries next interval.
+            DualOracleOutcome::Restricted => return Ok(()),
+        }
     };
     if index_price == 0 {
         return Err(SlipstreamError::InvalidOracle.into());
