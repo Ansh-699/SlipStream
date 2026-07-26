@@ -630,18 +630,24 @@ export function createUndelegateTradingCreditInstruction(
 
 export function createRecordPendingFillInstruction(
   userAccounts: PublicKey[],
+  authority: PublicKey,
   programId: PublicKey = PROGRAM_ID
 ): TransactionInstruction {
+  const [globalState] = findGlobalStatePda(programId);
   const data = Buffer.alloc(3);
   data[0] = IX_RECORD_PENDING_FILL;
   writeU16LE(data, userAccounts.length, 1);
 
   return new TransactionInstruction({
-    keys: userAccounts.map((pk) => ({
-      pubkey: pk,
-      isSigner: false,
-      isWritable: true,
-    })),
+    keys: [
+      { pubkey: globalState, isSigner: false, isWritable: false },
+      { pubkey: authority, isSigner: true, isWritable: false },
+      ...userAccounts.map((pk) => ({
+        pubkey: pk,
+        isSigner: false,
+        isWritable: true,
+      })),
+    ],
     programId,
     data,
   });

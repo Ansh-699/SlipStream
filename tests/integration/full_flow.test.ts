@@ -440,7 +440,7 @@ async function main() {
   let settleErr: string | null = null;
   try {
     const bundle = [
-      createRecordPendingFillInstruction([makerUser, takerUser]),
+      createRecordPendingFillInstruction([makerUser, takerUser], authority.publicKey),
       createSettleTradesInstruction(MARKET_INDEX, 1, [
         { pubkey: makerUser, isSigner: false, isWritable: true },
         { pubkey: makerPos, isSigner: false, isWritable: true },

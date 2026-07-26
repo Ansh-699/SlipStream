@@ -36,3 +36,7 @@ mod test_settle_trades_regressions;
 // when the funding index rises).
 #[cfg(test)]
 mod test_funding_sign_regressions;
+
+// Regression tests for record_pending_fill's new authority requirement.
+#[cfg(test)]
+mod test_record_pending_fill_regressions;

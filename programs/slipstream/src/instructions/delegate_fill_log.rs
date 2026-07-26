@@ -11,7 +11,9 @@ use pinocchio::{
 use pinocchio_system::instructions::{Assign, CreateAccount};
 
 use crate::error::SlipstreamError;
-use crate::state::{FillLogHeader, GlobalState, DISC_FILL_LOG, SEED_DELEGATE_BUFFER, SEED_FILL_LOG};
+use crate::state::{
+    FillLogHeader, GlobalState, DISC_FILL_LOG, SEED_DELEGATE_BUFFER, SEED_FILL_LOG, SEED_GLOBAL,
+};
 
 // MagicBlock delegation program: DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
 const DELEGATION_PROGRAM_ID: Pubkey = [
@@ -83,6 +85,15 @@ pub fn process(
         return Err(SlipstreamError::InvalidProgramId.into());
     }
 
+    // GlobalState is only ever READ here, so a forged (attacker-owned) account is
+    // not caught by the runtime's write protection — pin owner + PDA first.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     let global = GlobalState::from_account_info(global_state_acc)?;
     if global.authority != *payer.key() {
         return Err(SlipstreamError::InvalidAuthority.into());

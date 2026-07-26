@@ -262,7 +262,7 @@ async function main() {
       ];
 
       const tx = new Transaction()
-        .add(createRecordPendingFillInstruction(users, programId))
+        .add(createRecordPendingFillInstruction(users, keeper.publicKey, programId))
         .add(
           createSettleFromLogInstruction(marketIndex, epoch, window.length, remaining, programId)
         );

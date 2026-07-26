@@ -428,7 +428,7 @@ async function tryOpenAdversePosition(
       log(`  settling backlog for ${owners.size} distinct owners`);
       try {
         const tx = new Transaction()
-          .add(createRecordPendingFillInstruction(userPdas))
+          .add(createRecordPendingFillInstruction(userPdas, authority.publicKey))
           .add(createSettleTradesInstruction(MARKET_INDEX, 16, remaining));
         const sig = await sendAndConfirmTransaction(baseConn, tx, [authority], {
           skipPreflight: false,

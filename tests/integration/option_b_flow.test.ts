@@ -235,7 +235,7 @@ async function main() {
     const [bobPos] = findPositionPda(new PublicKey(fill.taker), MARKET_INDEX);
 
     const bundle = new Transaction()
-      .add(createRecordPendingFillInstruction([aliceUser, bobUser]))
+      .add(createRecordPendingFillInstruction([aliceUser, bobUser], authority.publicKey))
       .add(
         createSettleTradesInstruction(MARKET_INDEX, 1, [
           { pubkey: aliceUser, isSigner: false, isWritable: true },

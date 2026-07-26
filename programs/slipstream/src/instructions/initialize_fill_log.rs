@@ -12,7 +12,7 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::error::SlipstreamError;
 use crate::state::{
     fill_log_account_size, FillLogHeader, GlobalState, DISC_FILL_LOG, FILL_LOG_CAPACITY,
-    SEED_FILL_LOG,
+    SEED_FILL_LOG, SEED_GLOBAL,
 };
 
 /// initialize_fill_log (disc 0x1D): create a small, append-only FillLog PDA for a
@@ -47,6 +47,15 @@ pub fn process(
         return Err(ProgramError::IncorrectProgramId);
     }
 
+    // GlobalState is only ever READ here, so a forged (attacker-owned) account is
+    // not caught by the runtime's write protection — pin owner + PDA first.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     let global = GlobalState::from_account_info(global_state_acc)?;
     if global.authority != *authority.key() {
         return Err(SlipstreamError::InvalidAuthority.into());

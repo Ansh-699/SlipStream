@@ -36,7 +36,7 @@ const MAGIC_CONTEXT_ID: Pubkey = [
 // identity pins below at least make a decoy-program bypass loud instead of silent.
 
 use crate::error::SlipstreamError;
-use crate::state::{GlobalState, SEED_ORDERBOOK};
+use crate::state::{GlobalState, SEED_GLOBAL, SEED_ORDERBOOK};
 
 /// emergency_undelegate
 ///
@@ -90,6 +90,17 @@ pub fn process(
         return Err(ProgramError::InvalidInstructionData);
     }
 
+    // Defense in depth: this instruction later writes global_state_acc (paused =
+    // 1 below), which the runtime's not-owned-write check would already reject
+    // for a forged account — but only after the magic-program CPI already ran.
+    // Pin it explicitly up front so a forged account is rejected immediately.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     let global = GlobalState::from_account_info(global_state_acc)?;
     if global.authority != *authority.key() {
         return Err(SlipstreamError::InvalidAuthority.into());

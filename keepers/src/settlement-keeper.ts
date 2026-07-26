@@ -208,7 +208,7 @@ async function main() {
     // Bundle: record_pending_fill (bumps pending_fills) + settle_trades. Atomic —
     // both land in one tx so a FillQueueEmpty revert also rolls back the bump.
     const tx = new Transaction()
-      .add(createRecordPendingFillInstruction(userAccounts, programId))
+      .add(createRecordPendingFillInstruction(userAccounts, keeper.publicKey, programId))
       .add(createSettleTradesInstruction(MARKET_INDEX, numFills, remainingForSettle, programId));
 
     try {

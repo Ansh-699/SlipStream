@@ -13,7 +13,7 @@ use crate::error::SlipstreamError;
 use crate::state::{
     GlobalState, Market, OrderBookHeader, OrderBookView,
     DISC_MARKET, DISC_ORDER_BOOK,
-    SEED_MARKET, SEED_ORDERBOOK,
+    SEED_GLOBAL, SEED_MARKET, SEED_ORDERBOOK,
     DEFAULT_MAX_ORDER_SLOTS, DEFAULT_MAX_PRICE_LEVELS, DEFAULT_MAX_FILL_EVENTS,
     DEFAULT_ORDERS_PER_USER,
 };
@@ -46,6 +46,19 @@ pub fn process(
         return Err(ProgramError::IncorrectProgramId);
     }
 
+    // Defense in depth: this instruction later writes global_state_acc
+    // (market_count += 1 below), so the runtime's not-owned-write check already
+    // rejects a forged account by the time this instruction finishes — but that
+    // makes the failure mode "silently do a bunch of work then revert" rather
+    // than "reject immediately", and it would stop being true if that later write
+    // were ever removed. Pin it explicitly up front instead.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     let global = GlobalState::from_account_info(global_state_acc)?;
     if global.authority != *authority.key() {
         return Err(SlipstreamError::InvalidAuthority.into());

@@ -10,7 +10,9 @@ use pinocchio::{
 use pinocchio_system::instructions::CreateAccount;
 
 use crate::error::SlipstreamError;
-use crate::state::{GlobalState, OrderBookHeader, DISC_ORDER_BOOK, SEED_DELEGATE_BUFFER, SEED_ORDERBOOK};
+use crate::state::{
+    GlobalState, OrderBookHeader, DISC_ORDER_BOOK, SEED_DELEGATE_BUFFER, SEED_GLOBAL, SEED_ORDERBOOK,
+};
 
 /// delegate_orderbook_prepare instruction data: market_index: u16
 const IX_DATA_LEN: usize = 2;
@@ -69,7 +71,17 @@ pub fn process(
         return Err(ProgramError::IncorrectProgramId);
     }
 
-    // Authority gate — same pattern as the other admin instructions.
+    // Authority gate — same pattern as the other admin instructions. GlobalState
+    // is only ever READ here (never mutated), so an attacker-owned forged account
+    // with a chosen `authority` field is not caught by the runtime's write
+    // protection the way a later mutation would catch it — pin owner + PDA first.
+    if global_state_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let (global_pda, _) = pinocchio::pubkey::find_program_address(&[SEED_GLOBAL], program_id);
+    if global_state_acc.key() != &global_pda {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
     let global = GlobalState::from_account_info(global_state_acc)?;
     if global.authority != *payer.key() {
         return Err(SlipstreamError::InvalidAuthority.into());
