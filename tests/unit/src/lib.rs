@@ -73,3 +73,7 @@ mod test_withdraw_collateral_regressions;
 // Regression test for initialize_market's fee/rebate bound check.
 #[cfg(test)]
 mod test_initialize_market_regressions;
+
+// Regression test for compute_funding's interval-scaling fix.
+#[cfg(test)]
+mod test_compute_funding_regressions;
