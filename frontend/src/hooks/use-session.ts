@@ -567,10 +567,12 @@ export function useSession(marketIndex: number = 0) {
     setNotice(null);
     try {
       slog("delegate", "starting ER delegation + session authorize");
-      // 1+2: generate + persist the session key with a TTL.
+      // 1: generate the session key with a TTL. Persisted only after the
+      // on-chain delegate+authorize succeeds below (matches rotate()) — storing
+      // it up front would overwrite a still-valid previous session with a key
+      // that was never actually authorized if this transaction fails.
       const sessionKp = Keypair.generate();
       const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL_SECS;
-      storeSession(publicKey, marketIndex, sessionKp, expiry);
       slog("delegate", `session key ${sessionKp.publicKey.toBase58()} (expires ${new Date(expiry * 1000).toISOString()})`);
 
       // 3: delegate + authorize the session in ONE instruction/signature.
@@ -600,6 +602,8 @@ export function useSession(marketIndex: number = 0) {
       setStep("Delegating to the rollup…");
       await confirmSignature(connection, sig, { timeoutMs: 45_000 });
       slog("delegate", `CONFIRMED: ${sig}`);
+      // Persist only AFTER the on-chain delegate+authorize succeeds.
+      storeSession(publicKey, marketIndex, sessionKp, expiry);
       setNotice("Trading session active — you can place orders now.");
       await refresh();
     } catch (err) {
