@@ -35,6 +35,7 @@ pub mod settle_from_log;
 pub mod place_trigger;
 pub mod cancel_trigger;
 pub mod execute_trigger;
+pub mod set_market_oracle;
 
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult};
 
@@ -88,6 +89,10 @@ pub const IX_SETTLE_FROM_LOG: u8 = 0x21;
 pub const IX_PLACE_TRIGGER: u8 = 0x22;
 pub const IX_CANCEL_TRIGGER: u8 = 0x23;
 pub const IX_EXECUTE_TRIGGER: u8 = 0x24;
+
+// Round 7 — admin oracle-feed rotation. Needed because initialize_market was the
+// only writer of Market.pyth_feed and the operational feed has since been migrated.
+pub const IX_SET_MARKET_ORACLE: u8 = 0x25;
 
 pub fn process(
     program_id: &Pubkey,
@@ -148,6 +153,7 @@ pub fn process(
         IX_PLACE_TRIGGER => place_trigger::process(program_id, accounts, data),
         IX_CANCEL_TRIGGER => cancel_trigger::process(program_id, accounts, data),
         IX_EXECUTE_TRIGGER => execute_trigger::process(program_id, accounts, data),
+        IX_SET_MARKET_ORACLE => set_market_oracle::process(program_id, accounts, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }
