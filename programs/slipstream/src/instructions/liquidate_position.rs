@@ -150,15 +150,16 @@ pub fn process(
     if health >= HEALTH_FACTOR_LIQUIDATION_THRESHOLD {
         // Position recovered — if we previously wrote a LiquidationIntent, clear it.
         if !liquidation_intent_acc.data_is_empty() {
-            close_liquidation_intent(liquidation_intent_acc, liquidator)?;
+            close_liquidation_intent(program_id, liquidation_intent_acc, position_acc, liquidator)?;
         }
         return Err(SlipstreamError::HealthFactorAboveThreshold.into());
     }
 
     // --- Pending fills grace window (§11) ---
     if user.pending_fills > 0 {
-        // Either create the intent and bail, or proceed if existing intent has expired.
-        return handle_grace_window(
+        // Create the intent and return (not liquidatable THIS call), or proceed
+        // if a previously-created intent has expired.
+        let ready = handle_grace_window(
             program_id,
             liquidation_intent_acc,
             position_acc,
@@ -166,11 +167,15 @@ pub fn process(
             system_program,
             now,
             health,
-        );
+        )?;
+        if !ready {
+            return Ok(());
+        }
+        // Grace period expired — fall through and liquidate in this same call.
     }
 
-    // If we get here, either pending_fills == 0, OR the grace window expired and the
-    // caller already cleared the intent in a prior call. Either way, proceed.
+    // If we get here, either pending_fills == 0, OR the grace window expired and
+    // we fell through above. Either way, proceed.
 
     // --- Compute liquidator bonus: 50bps of notional, capped at 20% of the
     // position's remaining net collateral, per §16.
@@ -223,15 +228,25 @@ pub fn process(
 
     // Successful liquidation — clean up any leftover intent
     if !liquidation_intent_acc.data_is_empty() {
-        close_liquidation_intent(liquidation_intent_acc, liquidator)?;
+        close_liquidation_intent(program_id, liquidation_intent_acc, position_acc, liquidator)?;
     }
 
     Ok(())
 }
 
 /// Handle the 60-second grace window when the position has pending fills.
-/// Either creates a new `LiquidationIntent` (returns `GracePeriodActive`), or
-/// proceeds if a previously-created intent has expired.
+/// Returns `Ok(true)` when the caller should proceed to liquidate NOW (a
+/// previously-created intent has expired), `Ok(false)` when there is nothing
+/// further to do this call (either a fresh intent was just created, or an
+/// existing one hasn't expired yet).
+///
+/// Both `Ok(false)` cases MUST be actual successes, not `Err`: the intent-
+/// creation branch's `CreateAccount` CPI only persists if this instruction
+/// commits, and the previous version returned `Err(GracePeriodActive)` from
+/// that exact branch — rolling the just-created account back out of existence
+/// on every single call, so the grace window could never even start and every
+/// liquidation attempt against an account with pending_fills > 0 failed
+/// identically forever, regardless of how insolvent it became.
 fn handle_grace_window(
     program_id: &Pubkey,
     intent_acc: &AccountInfo,
@@ -240,7 +255,7 @@ fn handle_grace_window(
     system_program: &AccountInfo,
     now: i64,
     health: u64,
-) -> ProgramResult {
+) -> Result<bool, ProgramError> {
     let (expected_pda, bump) = pinocchio::pubkey::find_program_address(
         &[SEED_LIQ_INTENT, position_acc.key().as_ref()],
         program_id,
@@ -250,7 +265,8 @@ fn handle_grace_window(
     }
 
     if intent_acc.data_is_empty() {
-        // Create the intent and bail
+        // Create the intent. Not ready to liquidate this call, but this branch
+        // must return Ok so the account creation actually commits.
         if system_program.key() != &pinocchio_system::ID {
             return Err(ProgramError::IncorrectProgramId);
         }
@@ -277,7 +293,7 @@ fn handle_grace_window(
         intent.deadline_ts = now + LiquidationIntent::GRACE_WINDOW_SECS;
         intent.initial_health_factor = health;
 
-        return Err(SlipstreamError::GracePeriodActive.into());
+        return Ok(false);
     }
 
     // Intent exists — check if expired
@@ -286,25 +302,42 @@ fn handle_grace_window(
         return Err(SlipstreamError::InvalidPda.into());
     }
     if !intent.is_expired(now) {
-        return Err(SlipstreamError::LiquidationIntentNotReady.into());
+        return Ok(false); // still waiting
     }
-    // Expired — caller is allowed to proceed with liquidation in this same call.
-    // We don't `Ok(())` here because the outer caller already did the early
-    // pending_fills check and routed us into the grace window. Instead we return Ok
-    // and let the caller continue (NOTE: caller pattern returns from this function;
-    // we'd need to refactor the outer flow to support fall-through. For simplicity,
-    // require the keeper to call once more after pending_fills clears, by which point
-    // we'll skip the grace-window branch entirely.)
-    Err(SlipstreamError::PendingFillsExist.into())
+    // Expired — caller proceeds with liquidation now, in this same call.
+    Ok(true)
 }
 
 /// Reclaim rent for a `LiquidationIntent` PDA by transferring its lamports to the
 /// liquidator. Pinocchio doesn't expose `close_account` directly, so we zero the
 /// data and move lamports manually.
+///
+/// Both call sites previously passed `intent_acc` straight through with NO
+/// validation whatsoever — no owner check, no discriminator check (so no
+/// `LiquidationIntent::from_account_info` load), no PDA re-derivation, and no
+/// check that it belonged to THIS position. Any program-owned account (an
+/// unrelated GlobalState, Market, or any third party's UserAccount/Position —
+/// the runtime's not-owned-write check is the only thing that limited the
+/// blast radius) could be zeroed and its rent lamports stolen on an otherwise
+/// completely ordinary, successful liquidation call. A LiquidationIntent can
+/// only ever be created by the CreateAccount CPI in `handle_grace_window`
+/// above, which is itself seeds-bound to `[SEED_LIQ_INTENT, position]` — so an
+/// owner + discriminator + position-match check is equivalent to re-deriving
+/// the PDA (no separate account could exist with those three properties true).
 fn close_liquidation_intent(
+    program_id: &Pubkey,
     intent_acc: &AccountInfo,
+    position_acc: &AccountInfo,
     liquidator: &AccountInfo,
 ) -> ProgramResult {
+    if intent_acc.owner() != program_id {
+        return Err(ProgramError::IllegalOwner);
+    }
+    let intent = LiquidationIntent::from_account_info(intent_acc)?;
+    if intent.position != *position_acc.key() {
+        return Err(SlipstreamError::InvalidPda.into());
+    }
+
     // Zero the data so the discriminator is invalidated
     let data = unsafe { intent_acc.borrow_mut_data_unchecked() };
     for b in data.iter_mut() {

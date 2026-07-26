@@ -40,3 +40,7 @@ mod test_funding_sign_regressions;
 // Regression tests for record_pending_fill's new authority requirement.
 #[cfg(test)]
 mod test_record_pending_fill_regressions;
+
+// Regression test for liquidate_position's LiquidationIntent validation fix.
+#[cfg(test)]
+mod test_liquidate_position_regressions;

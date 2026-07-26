@@ -13,7 +13,7 @@ import bs58 from "bs58";
 const SWITCHBOARD_SOL_USD = new PublicKey(
   process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
 );
-import { computeTwap, type Position } from "../../client/src/accounts";
+import { computeTwap, decodePosition, type Position } from "../../client/src/accounts";
 
 const MARKET_INDEX = 0;
 const POLL_INTERVAL_MS = 5_000;
@@ -180,8 +180,19 @@ async function main() {
           );
           const tx = new Transaction().add(ix);
           const sig = await sendAndConfirm(connection, tx, [keeper]);
-          log("LIQUIDATION", `Liquidated ${pubkey.toBase58()}, sig=${sig}`);
-          liquidated++;
+          // liquidate_position now succeeds (rather than reverting) on the
+          // pending-fills grace-window path too — it may have only started or
+          // extended the 60s window without actually zeroing the position.
+          // Re-check so this log (and the cycle summary) reflect what actually
+          // happened instead of assuming every non-throwing call liquidated.
+          const after = await connection.getAccountInfo(pubkey);
+          const actuallyLiquidated = !!after && decodePosition(after.data).size === 0n;
+          if (actuallyLiquidated) {
+            log("LIQUIDATION", `Liquidated ${pubkey.toBase58()}, sig=${sig}`);
+            liquidated++;
+          } else {
+            log("LIQUIDATION", `${pubkey.toBase58()} grace window started/pending, sig=${sig}`);
+          }
         } catch (err: any) {
           if (String(err?.message ?? err).includes("0x11a")) {
             const key = pubkey.toBase58();
