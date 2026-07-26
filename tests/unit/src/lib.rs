@@ -48,3 +48,7 @@ mod test_liquidate_position_regressions;
 // Regression tests for close_user_account's open-position gate.
 #[cfg(test)]
 mod test_close_user_account_regressions;
+
+// Tests for the two-step GlobalState.authority rotation.
+#[cfg(test)]
+mod test_authority_rotation;
