@@ -197,6 +197,7 @@ pub fn process(
 
         update_position(
             maker_position_acc,
+            maker_user_acc,
             fill.maker_side,
             fill.price,
             fill.quantity,
@@ -207,6 +208,7 @@ pub fn process(
         let taker_side = if fill.maker_side == SIDE_BID { 1u8 } else { 0u8 };
         update_position(
             taker_position_acc,
+            taker_user_acc,
             taker_side,
             fill.price,
             fill.quantity,

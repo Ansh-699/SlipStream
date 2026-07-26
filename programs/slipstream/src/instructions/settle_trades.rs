@@ -176,6 +176,7 @@ pub fn process(
         // --- Position updates: credit Position.collateral with filled_margin ---
         update_position(
             maker_position_acc,
+            maker_user_acc,
             fill.maker_side,
             fill.price,
             fill.quantity,
@@ -187,6 +188,7 @@ pub fn process(
         let taker_side = if fill.maker_side == SIDE_BID { 1u8 } else { 0u8 };
         update_position(
             taker_position_acc,
+            taker_user_acc,
             taker_side,
             fill.price,
             fill.quantity,
@@ -229,8 +231,10 @@ pub fn process(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn update_position(
     position_acc: &AccountInfo,
+    user_acc: &AccountInfo,
     side: u8,
     fill_price: u64,
     fill_qty: u64,
@@ -249,19 +253,17 @@ pub(crate) fn update_position(
         -(fill_qty as i64)
     };
 
-    // Fund the position's collateral with the slot's drained margin
-    // (this is the money that flowed from TradingCredit.credit on ER → here).
-    pos.collateral = pos
-        .collateral
-        .checked_add(fill_margin)
-        .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
-
     // Track first-time opening slot for same-slot guard on withdrawals
     if pos.size == 0 && pos.open_slot == 0 {
         pos.open_slot = current_slot;
     }
 
     if pos.size == 0 {
+        // Opening: all of this fill's margin backs the new position.
+        pos.collateral = pos
+            .collateral
+            .checked_add(fill_margin)
+            .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
         pos.size = signed_qty;
         pos.entry_price = fill_price;
         let market_mut = Market::from_account_info_mut(market_acc)?;
@@ -277,7 +279,12 @@ pub(crate) fn update_position(
                 .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
         }
     } else if (pos.size > 0 && side == SIDE_BID) || (pos.size < 0 && side != SIDE_BID) {
-        // Add to position in same direction — VWAP blend
+        // Adding to the position in the same direction: all of this fill's margin
+        // backs the added size.
+        pos.collateral = pos
+            .collateral
+            .checked_add(fill_margin)
+            .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
         let old_abs = pos.abs_size();
         pos.entry_price = compute_vwap_entry(old_abs, pos.entry_price, fill_qty, fill_price)?;
         pos.size += signed_qty;
@@ -288,7 +295,19 @@ pub(crate) fn update_position(
             market_mut.open_interest_short = market_mut.open_interest_short.saturating_add(fill_qty);
         }
     } else {
-        // Reducing or flipping
+        // Reducing or flipping.
+        //
+        // place_order cannot tell an opening order from a reducing one (the ER
+        // cannot read the L1 Position), so it always charges fresh margin for the
+        // full fill_qty as if it were opening new exposure. Settlement is where we
+        // learn the truth: `fill_margin` here is margin already paid for a fill
+        // that turns out to (partly) REDUCE this position, so the reducing portion
+        // must be refunded, not stacked on top of collateral that already backs the
+        // size being closed — the previous version added `fill_margin`
+        // unconditionally here and never released anything on this branch, which
+        // both stranded the original collateral forever (close_position /
+        // liquidate_position both reject on `pos.is_empty()`) and left
+        // `realized_pnl` write-only (accumulated, never paid to anyone).
         let old_abs = pos.abs_size();
         let reduce_qty = fill_qty.min(old_abs);
 
@@ -302,6 +321,22 @@ pub(crate) fn update_position(
             fill_price,
         )?;
         pos.realized_pnl = pos.realized_pnl.saturating_add(pnl);
+
+        // Release the closed fraction of the position's EXISTING collateral...
+        let released_collateral = ((pos.collateral as u128) * (reduce_qty as u128)
+            / (old_abs.max(1) as u128)) as u64;
+        pos.collateral = pos.collateral.saturating_sub(released_collateral);
+
+        // ...and refund the fraction of THIS fill's margin attributable to the
+        // reducing portion (fill_margin scales linearly with fill_qty at a fixed
+        // price/leverage, so this split is exact). Only a genuine flip leaves a
+        // remainder, which backs the newly-opened flipped exposure below.
+        let reduce_margin_refund = ((fill_margin as u128) * (reduce_qty as u128)
+            / (fill_qty.max(1) as u128)) as u64;
+        let flip_margin = fill_margin.saturating_sub(reduce_margin_refund);
+
+        let net_credit: i128 =
+            released_collateral as i128 + reduce_margin_refund as i128 + pnl as i128;
 
         let market_mut = Market::from_account_info_mut(market_acc)?;
         if pos.is_long() {
@@ -322,6 +357,10 @@ pub(crate) fn update_position(
                 };
                 pos.entry_price = fill_price;
                 pos.open_slot = current_slot;
+                pos.collateral = pos
+                    .collateral
+                    .checked_add(flip_margin)
+                    .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
                 if side == SIDE_BID {
                     market_mut.open_interest_long =
                         market_mut.open_interest_long.saturating_add(flip_qty);
@@ -335,6 +374,13 @@ pub(crate) fn update_position(
             }
         } else {
             pos.size += signed_qty;
+        }
+
+        let user = UserAccount::from_account_info_mut(user_acc)?;
+        if net_credit >= 0 {
+            user.free_collateral = user.free_collateral.saturating_add(net_credit as u64);
+        } else {
+            user.free_collateral = user.free_collateral.saturating_sub((-net_credit) as u64);
         }
     }
 

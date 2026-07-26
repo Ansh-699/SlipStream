@@ -27,3 +27,7 @@ mod test_security_regressions;
 // Negative tests pinning the place_order fixes (forged Market, reduce_only bypass).
 #[cfg(test)]
 mod test_place_order_regressions;
+
+// Regression tests for update_position's reduce/flatten collateral accounting.
+#[cfg(test)]
+mod test_settle_trades_regressions;
