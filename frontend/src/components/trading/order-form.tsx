@@ -57,7 +57,8 @@ const ERR_NAMES = [
   "MaxOrdersPerUser", "InvalidExpiryTimestamp", "AccountAlreadyInitialized", "AccountNotInitialized", "InvalidTokenMint",
   "InvalidVault", "InvalidProgramId", "InsufficientCredit", "CreditStillActive", "TickSizeViolation",
   "LotSizeViolation", "OracleDisagreement", "RestrictedMode", "InvalidSwitchboardFeed", "GracePeriodActive",
-  "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded",
+  "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded", "TriggerConditionNotMet",
+  "SelfTrade", "PositionStillOpen",
 ];
 
 function decodeProgramError(input: unknown): string | null {

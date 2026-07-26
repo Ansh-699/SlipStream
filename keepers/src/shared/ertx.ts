@@ -30,6 +30,7 @@ const ERR_NAMES = [
   "InvalidVault", "InvalidProgramId", "InsufficientCredit", "CreditStillActive", "TickSizeViolation",
   "LotSizeViolation", "OracleDisagreement", "RestrictedMode", "InvalidSwitchboardFeed", "GracePeriodActive",
   "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded", "TriggerConditionNotMet",
+  "SelfTrade", "PositionStillOpen",
 ];
 const ERROR_BASE = 0x100;
 
