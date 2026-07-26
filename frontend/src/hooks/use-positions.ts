@@ -3,6 +3,7 @@
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useCallback, useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
+import bs58 from "bs58";
 import { PROGRAM_ID } from "@/lib/manifest";
 import {
   SEED_USER,
@@ -73,7 +74,11 @@ export function usePositions(markPrice: bigint | null) {
     try {
       const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
         filters: [
-          { memcmp: { offset: 0, bytes: Buffer.from([DISC_POSITION]).toString("base64") } },
+          // getProgramAccounts memcmp `bytes` decodes as base58 by default (no
+          // `encoding` field here); base64 isn't valid base58, so this filter
+          // used to throw and get silently swallowed by the catch below, making
+          // every wallet's positions look empty regardless of actual state.
+          { memcmp: { offset: 0, bytes: bs58.encode([DISC_POSITION]) } },
           { memcmp: { offset: 8, bytes: publicKey.toBase58() } },
         ],
       });
