@@ -1,31 +1,59 @@
-import { Connection, Transaction } from "@solana/web3.js";
+import { Connection, Transaction, PublicKey } from "@solana/web3.js";
+import { getOrCreateAssociatedTokenAccount, mintTo } from "@solana/spl-token";
 import {
-  getOrCreateAssociatedTokenAccount,
-  mintTo,
-} from "@solana/spl-token";
-import { getBaseConnection, getErConnection, sendAndConfirm, log } from "./shared/connection";
+  getBaseConnection,
+  getErConnection,
+  sendAndConfirm,
+  sleep,
+  log,
+} from "./shared/connection";
 import { getKeeperAddresses, loadManifest, MANIFEST_PATH } from "./shared/manifest";
 import { loadBotWallets, getOperator, readTradingCredit, fmtUsdc } from "./shared/bot-wallets";
+import { sendErTx } from "./shared/ertx";
 import {
   createDepositCollateralInstruction,
   createFundTradingCreditInstruction,
+  createDelegateTradingCreditInstruction,
+  createUndelegateTradingCreditInstruction,
 } from "../../client/src/instructions";
-import { findUserAccountPda } from "../../client/src/pda";
-import { PublicKey } from "@solana/web3.js";
+import { findTradingCreditPda } from "../../client/src/pda";
+import { MAGIC_CONTEXT_ID, PROGRAM_ID } from "../../client/src/constants";
 
 /**
  * Top up bot trading credit so they can keep quoting / crossing the book (credit
- * drains into positions over time, then they go idle). Deposits more collateral +
- * funds credit. Works on already-delegated credits (fund_trading_credit runs on the
- * base layer and propagates to the ER copy).
+ * drains into positions over time, then they go idle).
  *
- *   TOPUP_USDC=3000 npx tsx src/topup-takers.ts               # takers (default)
+ *   TOPUP_USDC=3000 npx tsx src/topup-takers.ts                # takers (default)
  *   TOPUP_ROLES=mm,taker TOPUP_USDC=5000 npx tsx src/topup-takers.ts
+ *   TOPUP_ROLES=mm TOPUP_USDC=5000 npx tsx src/topup-takers.ts --dry-run
  *
- * Market makers need materially more than takers: BOT_MM_LEVELS orders per side at
- * BOT_MM_SIZE_LOTS each, all reserving margin simultaneously.
+ * IMPORTANT: `fund_trading_credit` requires the TradingCredit to be owned by THIS
+ * program, i.e. NOT delegated (see fund_trading_credit.rs:40 -> CreditStillActive).
+ * A live bot's credit is normally delegated to the ER, so a top-up has to
+ * undelegate first and re-delegate afterwards. An earlier version of this script
+ * claimed fund_trading_credit "works on already-delegated credits" — it does not,
+ * and every top-up against a live bot failed with 0x12b.
+ *
+ * Undelegation is only safe when the credit has no active orders; we check
+ * active_orders/committed before touching anything and skip the bot otherwise.
  */
+
+/** Poll L1 until the credit account is owned by the program again. */
+async function waitForUndelegation(
+  base: Connection,
+  creditPda: PublicKey,
+  tries = 30
+): Promise<boolean> {
+  for (let i = 0; i < tries; i++) {
+    const info = await base.getAccountInfo(creditPda, "confirmed");
+    if (info && info.owner.equals(PROGRAM_ID)) return true;
+    await sleep(2_000);
+  }
+  return false;
+}
+
 async function main() {
+  const dryRun = process.argv.includes("--dry-run");
   const base = getBaseConnection();
   const er = getErConnection();
   const operator = getOperator();
@@ -45,30 +73,73 @@ async function main() {
   if (selected.length === 0) {
     throw new Error(`no bot wallets match TOPUP_ROLES="${roles.join(",")}"`);
   }
-  log("topup", `topping up ${selected.length} bot(s) [${roles.join(",")}] with ${fmtUsdc(topup)} each`);
+  log("topup", `${selected.length} bot(s) [${roles.join(",")}] x ${fmtUsdc(topup)}${dryRun ? " (dry-run)" : ""}`);
 
   for (const w of selected) {
     const owner = w.keypair.publicKey;
+    const [creditPda] = findTradingCreditPda(owner, marketIndex);
     log("topup", `--- ${w.name} ${owner.toBase58()} ---`);
 
-    // Mint USDC to the taker's ATA + deposit as collateral, then fund credit.
+    const before = await readTradingCredit(base, er, owner, marketIndex);
+    const info = await base.getAccountInfo(creditPda, "confirmed");
+    const delegated = !!info && !info.owner.equals(PROGRAM_ID);
+
+    if (before && (before.activeOrders > 0 || before.committed > 0n)) {
+      log(
+        "topup",
+        `${w.name} SKIP: active=${before.activeOrders} committed=${fmtUsdc(before.committed)} — undelegation would orphan ER slots`
+      );
+      continue;
+    }
+    log("topup", `${w.name} credit=${fmtUsdc(before?.credit ?? 0n)} delegated=${delegated}`);
+    if (dryRun) continue;
+
+    // 1. Mint + deposit collateral (L1; independent of delegation state).
     const ata = await getOrCreateAssociatedTokenAccount(base, operator, mint, owner);
     await mintTo(base, operator, mint, ata.address, operator.publicKey, topup);
-    log("topup", `${w.name} minted ${fmtUsdc(topup)}`);
+    await sendAndConfirm(
+      base,
+      new Transaction().add(createDepositCollateralInstruction(owner, ata.address, usdcVault, topup)),
+      [w.keypair]
+    );
+    log("topup", `${w.name} deposited ${fmtUsdc(topup)}`);
 
-    const depIx = createDepositCollateralInstruction(owner, ata.address, usdcVault, topup);
-    await sendAndConfirm(base, new Transaction().add(depIx), [w.keypair]);
+    // 2. Undelegate so fund_trading_credit can write the L1 account.
+    if (delegated) {
+      const sig = await sendErTx(
+        er,
+        createUndelegateTradingCreditInstruction(owner, marketIndex, MAGIC_CONTEXT_ID),
+        w.keypair
+      );
+      log("topup", `${w.name} undelegate (ER) ${sig.slice(0, 16)}…`);
+      if (!(await waitForUndelegation(base, creditPda))) {
+        log("topup", `${w.name} ERROR: credit still delegated after 60s — leaving funds in free_collateral`);
+        continue;
+      }
+    }
 
-    const fundIx = createFundTradingCreditInstruction(owner, marketIndex, topup);
-    await sendAndConfirm(base, new Transaction().add(fundIx), [w.keypair]);
+    // 3. Fund, then hand the credit back to the ER.
+    await sendAndConfirm(
+      base,
+      new Transaction().add(createFundTradingCreditInstruction(owner, marketIndex, topup)),
+      [w.keypair]
+    );
+    await sendAndConfirm(
+      base,
+      new Transaction().add(createDelegateTradingCreditInstruction(owner, marketIndex)),
+      [w.keypair]
+    );
 
-    const credit = await readTradingCredit(base, er, owner, marketIndex);
-    log("topup", `${w.name} credit now total=${fmtUsdc(credit?.credit ?? 0n)} avail=${fmtUsdc(credit?.available ?? 0n)}`);
+    const after = await readTradingCredit(base, er, owner, marketIndex);
+    log(
+      "topup",
+      `${w.name} credit now total=${fmtUsdc(after?.credit ?? 0n)} avail=${fmtUsdc(after?.available ?? 0n)}`
+    );
   }
   log("topup", "done");
 }
 
 main().catch((e) => {
-  console.error("topup-takers failed:", e?.message ?? e);
+  console.error("topup failed:", e?.message ?? e);
   process.exit(1);
 });
