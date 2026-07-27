@@ -39,11 +39,14 @@ import type { Market, OrderSlot } from "../../client/src/accounts";
  * MAX_CYCLES bounds it for smoke testing.
  *
  * Config (env):
- *   BOT_MM_SPREAD_BPS    per-step spread from mid (default 10)
- *   BOT_MM_LEVELS        levels per side (default 3)
+ *   BOT_MM_SPREAD_BPS    per-step spread from mid (default 3)
+ *   BOT_MM_LEVELS        levels per side (default 9)
  *   BOT_MM_SIZE_LOTS     lots per order (default 1; 1 lot = 0.1 SOL)
- *   BOT_MM_INTERVAL_MS   cycle interval (default 5000)
- *   BOT_MM_REFRESH_BPS   mid-move threshold to cancel/replace (default 15)
+ *   BOT_MM_INTERVAL_MS   cycle interval (default 2000 — a 1-1.2s cadence
+ *                        roughly doubled base-RPC usage for no visible depth
+ *                        benefit and contributed to a real quota-exhaustion
+ *                        incident; see ecosystem.config.js's matching comment)
+ *   BOT_MM_REFRESH_BPS   mid-move threshold to cancel/replace (default 6)
  *   MAX_CYCLES           stop after N cycles (default unbounded)
  */
 
@@ -52,7 +55,7 @@ const SPREAD_BPS = Number(process.env.BOT_MM_SPREAD_BPS || "3");
 // Run multiple MM wallets (BOT_MM_COUNT) to widen total depth/range.
 const LEVELS = Math.max(1, parseInt(process.env.BOT_MM_LEVELS || "9", 10));
 const SIZE_LOTS = Math.max(1, parseInt(process.env.BOT_MM_SIZE_LOTS || "1", 10));
-const INTERVAL_MS = Number(process.env.BOT_MM_INTERVAL_MS || "1200");
+const INTERVAL_MS = Number(process.env.BOT_MM_INTERVAL_MS || "2000");
 const REFRESH_BPS = Number(process.env.BOT_MM_REFRESH_BPS || "6");
 const MAX_CYCLES = Number(process.env.MAX_CYCLES || "0"); // 0 = unbounded
 

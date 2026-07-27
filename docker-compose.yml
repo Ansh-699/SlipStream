@@ -8,6 +8,12 @@
 #
 # Each service is one long-running bot. They share the same image and keypair;
 # only the command differs. Split out so one crashing bot restarts independently.
+#
+# Use EITHER this docker-compose deployment OR keepers/ecosystem.config.js
+# (pm2, for a bare VM without Docker) — NOT both against the same market.
+# Running both launches duplicate keeper/bot processes against the same
+# credit/order-book state, which is exactly how this deployment's RPC quota
+# got burned once before (see market-maker's comment below).
 services:
   fill-log:
     build:
@@ -21,8 +27,16 @@ services:
       KEEPER_KEYPAIR: /run/secrets/keeper-id.json
     volumes:
       - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+      # Only fill-log-keeper writes the fills indexer DB (shared/fill-db.ts).
+      # Without a named volume here, the whole index is destroyed and rebuilt
+      # from nothing every time the container is recreated (`docker compose
+      # up` after a rebuild, a host reboot, etc.) instead of persisting.
+      - keeper-fills-data:/app/keepers/data
 
   funding:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
     image: slipstream-keepers
     command: ["npm", "run", "funding"]
     restart: unless-stopped
@@ -34,6 +48,9 @@ services:
     depends_on: [fill-log]
 
   liquidation:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
     image: slipstream-keepers
     command: ["npm", "run", "liquidation"]
     restart: unless-stopped
@@ -45,6 +62,9 @@ services:
     depends_on: [fill-log]
 
   twap:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
     image: slipstream-keepers
     command: ["npm", "run", "twap"]
     restart: unless-stopped
@@ -55,10 +75,12 @@ services:
       - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
     depends_on: [fill-log]
 
-  # Demo liquidity. Disable (comment out) if you don't want bot order flow.
-  market-maker:
+  expiry:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
     image: slipstream-keepers
-    command: ["npm", "run", "bots"]
+    command: ["npm", "run", "expiry"]
     restart: unless-stopped
     env_file: keepers/.env
     environment:
@@ -66,3 +88,31 @@ services:
     volumes:
       - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
     depends_on: [fill-log]
+
+  # Demo liquidity. Disable (comment out) if you don't want bot order flow.
+  market-maker:
+    build:
+      context: .
+      dockerfile: keepers/Dockerfile
+    image: slipstream-keepers
+    command: ["npm", "run", "bots"]
+    restart: unless-stopped
+    env_file: keepers/.env
+    environment:
+      KEEPER_KEYPAIR: /run/secrets/keeper-id.json
+      # mm-v2/taker-v2: the original mm-0/mm-1/taker-0/taker-1 TradingCredits
+      # are stuck half-delegated on this deployment's live market (L1 says
+      # delegated so fund_trading_credit refuses; the ER never took ownership
+      # so the magic program refuses to undelegate). A credit PDA derives from
+      # the owner key, so fresh wallets are the only way out — see
+      # keepers/ecosystem.config.js's BOT_MM_PREFIX comment (pm2's equivalent
+      # of this same deployment). Without this override, docker-compose falls
+      # back to the stuck default prefix and every bot order silently fails.
+      BOT_MM_PREFIX: mm-v2
+      BOT_TAKER_PREFIX: taker-v2
+    volumes:
+      - ./secrets/keeper-id.json:/run/secrets/keeper-id.json:ro
+    depends_on: [fill-log]
+
+volumes:
+  keeper-fills-data:
