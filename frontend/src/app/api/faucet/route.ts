@@ -20,6 +20,7 @@ import {
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
+import { USDC_MINT as MANIFEST_USDC_MINT } from "@/lib/manifest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -88,7 +89,12 @@ function loadOperator(): Keypair | null {
 }
 
 function loadUsdcMint(): PublicKey | null {
-  // Prefer env, else read the committed deploy.json next to the app.
+  // Prefer an explicit server-side override, else the SAME manifest module
+  // the browser bundle uses (@/lib/manifest — NEXT_PUBLIC_USDC_MINT or
+  // deploy-manifest.generated.json, copied at build time). This used to
+  // independently re-read deploy.json off the server's disk, a second source
+  // of truth that could silently diverge from what the UI actually shows
+  // (e.g. disk deploy.json updated without a frontend rebuild).
   if (process.env.USDC_MINT) {
     try {
       return new PublicKey(process.env.USDC_MINT);
@@ -96,20 +102,7 @@ function loadUsdcMint(): PublicKey | null {
       /* fall through */
     }
   }
-  for (const p of [
-    join(process.cwd(), "deploy.json"),
-    join(process.cwd(), "..", "deploy.json"),
-  ]) {
-    try {
-      if (existsSync(p)) {
-        const m = JSON.parse(readFileSync(p, "utf-8"));
-        if (m.usdcMint) return new PublicKey(m.usdcMint);
-      }
-    } catch {
-      /* try next */
-    }
-  }
-  return null;
+  return MANIFEST_USDC_MINT;
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
