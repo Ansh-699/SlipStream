@@ -3,6 +3,16 @@
 // (BASE_RPC / ER_RPC / KEEPER_KEYPAIR / DEPLOY_MANIFEST) into process.env.
 //
 // Usage (from keepers/):  pm2 start ecosystem.config.js
+//
+// Log rotation: the out_file/error_file paths below grow unbounded on their
+// own — pm2 does not rotate app logs by default. Install pm2's own log
+// rotation module ONCE per box (not per-app, no ecosystem.config.js change
+// needed):
+//   pm2 install pm2-logrotate
+//   pm2 set pm2-logrotate:max_size 50M
+//   pm2 set pm2-logrotate:retain 14
+// For the SQLite fills indexer (keepers/data/fills.db, separate from these
+// logs), see INDEXER_RETENTION_DAYS in .env.example.
 const path = require("path");
 const KEEPERS = __dirname;
 const TSX = path.join(KEEPERS, "node_modules/.bin/tsx");

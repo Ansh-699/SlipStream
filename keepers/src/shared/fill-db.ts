@@ -10,6 +10,11 @@ import { log } from "./connection";
  * The DB is strictly best-effort: every write is wrapped so an indexer failure
  * can never break settlement. `settled_at` is the keeper's ingest time —
  * FillEvent carries no on-chain timestamp.
+ *
+ * Retention: unbounded by default (matches the previous behavior — nothing
+ * here EVER deleted a row). Set INDEXER_RETENTION_DAYS to opt into pruning
+ * fills older than that many days; checked at most once/day so it never adds
+ * meaningful overhead to the settlement hot path.
  */
 
 export interface IndexedFill {
@@ -46,6 +51,27 @@ export const FILL_DB_PATH = process.env.INDEXER_DB || defaultDbPath();
 let db: Database.Database | null = null;
 let insertStmt: Database.Statement | null = null;
 let failed = false;
+
+const PRUNE_CHECK_INTERVAL_MS = 24 * 60 * 60_000; // at most once/day
+let lastPruneCheckAt = 0;
+
+/** Delete fills older than INDEXER_RETENTION_DAYS, if set. Best-effort, rate-limited. */
+function maybePrune(): void {
+  const retentionDays = Number(process.env.INDEXER_RETENTION_DAYS || "0");
+  if (!(retentionDays > 0)) return; // unset/0 = keep everything
+  const now = Date.now();
+  if (now - lastPruneCheckAt < PRUNE_CHECK_INTERVAL_MS) return;
+  lastPruneCheckAt = now;
+  try {
+    const cutoff = now - retentionDays * 24 * 60 * 60_000;
+    const info = db!.prepare("DELETE FROM fills WHERE settled_at < ?").run(cutoff);
+    if (info.changes > 0) {
+      log("FILL-DB", `pruned ${info.changes} fill(s) older than ${retentionDays}d`);
+    }
+  } catch (e: any) {
+    log("FILL-DB", `prune failed (non-fatal): ${e?.message ?? e}`);
+  }
+}
 
 function open(): boolean {
   if (db) return true;
@@ -108,4 +134,5 @@ export function recordSettledFills(fills: IndexedFill[]): void {
   } catch (e: any) {
     log("FILL-DB", `insert failed (settlement unaffected): ${e?.message ?? e}`);
   }
+  maybePrune();
 }
