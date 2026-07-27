@@ -43,7 +43,7 @@ import {
 import { loadKeypair, getBaseConnection, log } from "./setup";
 
 const MARKET_INDEX = 0;
-const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../../deploy.json");
+const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../deploy.json");
 const CRANKS = Number(process.env.CRANKS || "5");
 
 const ERR_NAMES = [

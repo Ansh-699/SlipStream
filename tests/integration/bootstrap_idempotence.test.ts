@@ -54,7 +54,7 @@ import * as path from "path";
 import { getBaseConnection, log } from "./setup";
 
 // Repo layout: this file is at slipstream/tests/integration/, repo root is 3 up.
-const REPO_ROOT = path.resolve(__dirname, "../../..");
+const REPO_ROOT = path.resolve(__dirname, "../..");
 const MANIFEST_PATH = path.join(REPO_ROOT, "deploy.json");
 const DEPLOY_SCRIPT = path.join("scripts", "deploy.ts"); // relative to REPO_ROOT
 // deploy.ts imports @solana/web3.js / @solana/spl-token transitively; resolve

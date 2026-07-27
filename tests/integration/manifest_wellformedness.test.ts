@@ -23,7 +23,7 @@
  *      beyond Number.MAX_SAFE_INTEGER) bigints stringified into the manifest.
  *      The well-formedness predicate is asserted across ~100 iterations.
  *
- *   2. REAL ARTIFACT — the ACTUAL emitted ../../../deploy.json is loaded and
+ *   2. REAL ARTIFACT — the ACTUAL emitted ../../deploy.json is loaded and
  *      the same predicate is asserted against it, so the test validates the
  *      real deployed artifact, not just synthetic data.
  *
@@ -75,7 +75,7 @@ const ADDRESS_FIELDS = [
 const NUMERIC_STRING_FIELDS = ["tickSize", "lotSize"] as const;
 
 const NUM_RUNS = 100;
-const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../../deploy.json");
+const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../deploy.json");
 
 // ---------------------------------------------------------------------------
 // The well-formedness predicate (the formal statement of Property 2).
@@ -246,7 +246,7 @@ function main(): void {
   );
 
   // -------------------------------------------------------------------------
-  // PART 2 — The REAL emitted artifact: ../../../deploy.json.
+  // PART 2 — The REAL emitted artifact: ../../deploy.json.
   // -------------------------------------------------------------------------
   console.log(`[real artifact] validating ${REPO_ROOT_MANIFEST}`);
   let raw: string;

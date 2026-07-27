@@ -178,8 +178,7 @@ interface Manifest {
 function loadManifest(): Manifest {
   const candidates = [
     process.env.DEPLOY_MANIFEST,
-    path.resolve(__dirname, "../../../deploy.json"), // repo root
-    path.resolve(__dirname, "../../deploy.json"),
+    path.resolve(__dirname, "../../deploy.json"), // repo root
     path.resolve(process.cwd(), "deploy.json"),
   ].filter((p): p is string => typeof p === "string");
 

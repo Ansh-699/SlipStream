@@ -118,7 +118,7 @@ const COMPUTE_FUNDING_EXPECTED_REVERTS: number[] = [
 ];
 
 const MARKET_INDEX = 0;
-const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../../deploy.json");
+const REPO_ROOT_MANIFEST = path.resolve(__dirname, "../../deploy.json");
 
 // ---------------------------------------------------------------------------
 // Manifest loading (Req 8.3: use the deployed market + manifest addresses).
