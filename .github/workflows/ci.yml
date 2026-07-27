@@ -8,7 +8,7 @@ on:
 
 jobs:
   rust:
-    name: Program (clippy + tests)
+    name: Program (clippy + audit + tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,13 +28,32 @@ jobs:
 
       - name: Install Solana CLI
         if: steps.solana-cache.outputs.cache-hit != 'true'
-        run: sh -c "$(curl -sSfL https://release.anza.xyz/v3.1.14/install)"
+        # Two-step (download, then execute) rather than `sh -c "$(curl ...)"`:
+        # if curl fails inside a command substitution, the substitution just
+        # evaluates to an empty string and `sh -c ""` "succeeds" having
+        # installed nothing — a network hiccup would silently no-op this step
+        # instead of failing it, and every step downstream would then fail
+        # with a much more confusing "solana: command not found".
+        run: |
+          curl -sSfL https://release.anza.xyz/v3.1.14/install -o /tmp/solana-install.sh
+          sh /tmp/solana-install.sh
 
       - name: Add Solana to PATH
         run: echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
 
       - name: Clippy
-        run: cargo clippy -p slipstream -- -D warnings -A clippy::too-many-arguments -A unexpected_cfgs
+        run: cargo clippy -p slipstream --locked -- -D warnings -A clippy::too-many-arguments -A unexpected_cfgs
+
+      # Dependency advisory scan (RUSTSEC) against the workspace Cargo.lock.
+      # The on-chain program's own dependency tree is small and curated
+      # (pinocchio + bytemuck + a handful of others), so this is a real gate,
+      # not noise: unlike the frontend/keepers npm trees (deep, wallet-adapter
+      # heavy, dozens of pre-existing advisories that would need a dedicated
+      # remediation pass before an audit gate could ever be green there).
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        run: cargo audit
 
       # The mollusk tests execute the real compiled program, so build the SBF
       # binary first (must target the program package directly — a bare
@@ -42,12 +61,19 @@ jobs:
       - name: Build program (SBF)
         run: cargo build-sbf --manifest-path programs/slipstream/Cargo.toml
 
+      # The program crate's OWN inline #[cfg(test)] modules (math::fixed_point,
+      # math::funding, oracle — including the only tests for
+      # compute_health_factor / compute_funding_rate) are a SEPARATE test
+      # binary from tests/unit below and were never run by CI at all.
+      - name: Program crate unit tests (math, oracle)
+        run: cargo test --manifest-path programs/slipstream/Cargo.toml --locked
+
       - name: Unit + mollusk tests
-        run: cargo test
+        run: cargo test --locked
         working-directory: tests/unit
 
   frontend:
-    name: Frontend (tsc + eslint)
+    name: Frontend (tsc + eslint + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +90,11 @@ jobs:
         working-directory: frontend
       - run: npm run lint
         working-directory: frontend
+      # tsc/eslint alone don't catch everything Next's own build pipeline
+      # checks (route/type generation, RSC boundary violations, etc.) — this
+      # is the same command the deployed build actually runs.
+      - run: npm run build
+        working-directory: frontend
 
   keepers:
     name: Keepers (tsc)
@@ -76,10 +107,12 @@ jobs:
           cache: npm
           cache-dependency-path: |
             keepers/package-lock.json
-            client/package.json
+            client/package-lock.json
       # keepers imports ../client/src directly, so the client package's deps
-      # must be installed too.
-      - run: npm install --no-audit --no-fund
+      # must be installed too. `npm ci` (not `npm install`) so this actually
+      # honors the committed client/package-lock.json instead of silently
+      # allowing it to drift.
+      - run: npm ci --no-audit --no-fund
         working-directory: client
       - run: npm ci
         working-directory: keepers
