@@ -2,6 +2,7 @@ import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./shared/connection";
 import { fetchMarket, fetchAllPositions } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
+import { readPythPrice } from "./shared/pyth";
 import {
   createLiquidatePositionInstruction,
   createExecuteTriggerInstruction,
@@ -17,11 +18,45 @@ import { computeTwap, decodePosition, type Position } from "../../client/src/acc
 
 const MARKET_INDEX = 0;
 const POLL_INTERVAL_MS = 5_000;
+// Mirror programs/slipstream/src/oracle.rs's MAX_STALENESS_SECS: a Pyth
+// reading older than this is not something the on-chain check would accept
+// either, so treat it the same as "unavailable" and fall back to TWAP.
+const PYTH_MAX_STALENESS_SECS = 60;
+// Mirror programs/slipstream/src/math/fixed_point.rs's FUNDING_SCALE (18dp).
+const FUNDING_SCALE = 1_000_000_000_000_000_000n;
 
+/** Mirror math/funding.rs::compute_funding_payment. Positive = position PAYS. */
+function computeFundingPayment(
+  positionSize: bigint,
+  currentFundingIndex: bigint,
+  snapshotFundingIndex: bigint,
+  markPrice: bigint
+): bigint {
+  if (positionSize === 0n) return 0n;
+  const indexDelta = currentFundingIndex - snapshotFundingIndex;
+  const absSize = positionSize < 0n ? -positionSize : positionSize;
+  // size is 9-dp base atoms -> notional in 6-dp quote, matching compute_notional.
+  const absNotional = (absSize * markPrice) / 1_000_000_000n;
+  const signedNotional = positionSize > 0n ? absNotional : -absNotional;
+  return (signedNotional * indexDelta) / FUNDING_SCALE;
+}
+
+/**
+ * Mirrors programs/slipstream/src/math/fixed_point.rs::compute_health_factor,
+ * INCLUDING accrued funding (accrued_funding = -funding_payment, since a
+ * positive funding_payment means the position OWES it — the same sign flip
+ * liquidate_position.rs applies before calling the on-chain version). Health
+ * >= 1.0 mirrors HEALTH_FACTOR_LIQUIDATION_THRESHOLD (1_000_000 in 6dp).
+ *
+ * Previously this omitted funding entirely, so a position kept artificially
+ * "healthy" by an unrealized funding debt (or flagged unfairly by unrealized
+ * funding owed TO it) disagreed with the program's own gate.
+ */
 function computeHealthFactor(
   pos: Position,
   markPrice: bigint,
-  maxLeverage: number
+  maxLeverage: number,
+  cumulativeFundingIndex: bigint
 ): number {
   if (maxLeverage <= 0) return Infinity; // corrupt/unset market — treat as not liquidatable
 
@@ -42,7 +77,14 @@ function computeHealthFactor(
   // (mirrors on-chain compute_unrealized_pnl).
   const unrealizedPnl = (signedSize * priceDiff) / 1_000_000_000n;
 
-  const equity = BigInt(pos.collateral) + unrealizedPnl;
+  const fundingPayment = computeFundingPayment(
+    pos.size,
+    cumulativeFundingIndex,
+    pos.fundingIndexSnapshot,
+    markPrice
+  );
+
+  const equity = BigInt(pos.collateral) + unrealizedPnl - fundingPayment;
   return Number(equity * 1_000_000n / maintenanceMargin) / 1_000_000;
 }
 
@@ -119,12 +161,20 @@ async function main() {
   //  - an ORPHANED corrupt position from early testing (entry=$1, ×1000-scaled
   //    collateral) whose owner key is gone, so it can never be closed AND the
   //    program's own math on the corrupt data always reads "healthy".
-  // Back off with escalation: first few rejects pause 10m (catch the edge case);
-  // after REJECT_GIVE_UP_COUNT it's certainly corrupt — skip it for the session
-  // so it stops re-logging forever.
+  // Back off with escalation: each reject doubles the cooldown (10m, 20m, 40m,
+  // ...) so a genuinely borderline LIVE position gets several increasingly
+  // patient re-checks — not just one 10-minute grace period — before this
+  // keeper gives up on it. Only after REJECT_GIVE_UP_COUNT straight rejects
+  // (now with a live-oracle + funding-aware health model, a real disagreement
+  // that persistent is a strong corruption signal) do we stop attempting, and
+  // only for GIVE_UP_MS (24h, not a blanket 30-day blacklist on a possibly-live
+  // position) — long enough to silence log/tx spam, short enough that a truly
+  // live position isn't locked out of liquidation for a month if the model is
+  // ever wrong again.
   const REJECT_COOLDOWN_MS = 10 * 60_000;
-  const REJECT_GIVE_UP_COUNT = 3;
-  const GIVE_UP_MS = 30 * 24 * 60 * 60_000; // effectively "this session"
+  const REJECT_GIVE_UP_COUNT = 5;
+  const REJECT_COOLDOWN_CAP_MS = 60 * 60_000;
+  const GIVE_UP_MS = 24 * 60 * 60_000;
   const rejectedUntil = new Map<string, number>();
   const rejectCount = new Map<string, number>();
 
@@ -143,14 +193,30 @@ async function main() {
         continue;
       }
 
-      const twapPrice = computeTwap(market);
-      if (!twapPrice) {
-        log("LIQUIDATION", "No TWAP price available, skipping");
-        await sleep(POLL_INTERVAL_MS);
-        continue;
+      // Prefer a LIVE Pyth read for the health pre-filter — it's what
+      // liquidate_position.rs itself actually gates on (apply_dual_oracle reads
+      // Pyth+Switchboard fresh at call time, max 60s stale). The local TWAP
+      // ring (crank_twap-fed, up to 225 samples) can lag by up to ~30 minutes
+      // behind that, which was the actual root cause of "our estimate disagrees
+      // with the program's" cases this backoff logic exists to paper over.
+      // TWAP is kept only as a fallback for when the feed is unreadable.
+      let markPriceBigint: bigint;
+      try {
+        const pyth = await readPythPrice(connection, pythFeed);
+        if (pyth.ageSecs > PYTH_MAX_STALENESS_SECS) {
+          throw new Error(`Pyth reading stale (${pyth.ageSecs}s)`);
+        }
+        markPriceBigint = pyth.price6;
+      } catch (e: any) {
+        const twapPrice = computeTwap(market);
+        if (!twapPrice) {
+          log("LIQUIDATION", `No usable price (Pyth: ${e?.message ?? e}; no TWAP either), skipping`);
+          await sleep(POLL_INTERVAL_MS);
+          continue;
+        }
+        log("LIQUIDATION", `Pyth unavailable (${e?.message ?? e}); falling back to TWAP`);
+        markPriceBigint = BigInt(Math.round(twapPrice * PRICE_SCALE));
       }
-
-      const markPriceBigint = BigInt(Math.round(twapPrice * PRICE_SCALE));
 
       const positions = await fetchAllPositions(connection, MARKET_INDEX);
       let liquidated = 0;
@@ -158,7 +224,12 @@ async function main() {
       for (const { pubkey, account: pos } of positions) {
         if (pos.size === 0n) continue;
 
-        const health = computeHealthFactor(pos, markPriceBigint, market.maxLeverage);
+        const health = computeHealthFactor(
+          pos,
+          markPriceBigint,
+          market.maxLeverage,
+          market.cumulativeFundingIndex
+        );
         if (health >= 1.0) continue;
 
         const pausedUntil = rejectedUntil.get(pubkey.toBase58());
@@ -200,15 +271,20 @@ async function main() {
             rejectCount.set(key, n);
             if (n >= REJECT_GIVE_UP_COUNT) {
               rejectedUntil.set(key, Date.now() + GIVE_UP_MS);
+              // Reset the strike count so a position that's still genuinely
+              // live gets a full fresh set of chances after the give-up window
+              // lapses, instead of being re-blacklisted on the very next reject.
+              rejectCount.delete(key);
               log(
                 "LIQUIDATION",
-                `${key} rejected ${n}x — treating as orphaned/corrupt, skipping for the session`
+                `${key} rejected ${n}x in a row — likely orphaned/corrupt, pausing 24h`
               );
             } else {
-              rejectedUntil.set(key, Date.now() + REJECT_COOLDOWN_MS);
+              const cooldown = Math.min(REJECT_COOLDOWN_MS * n, REJECT_COOLDOWN_CAP_MS);
+              rejectedUntil.set(key, Date.now() + cooldown);
               log(
                 "LIQUIDATION",
-                `${key} rejected on-chain (health above threshold); pausing 10m (${n}/${REJECT_GIVE_UP_COUNT})`
+                `${key} rejected on-chain (health above threshold); pausing ${Math.round(cooldown / 60_000)}m (${n}/${REJECT_GIVE_UP_COUNT})`
               );
             }
           } else {
