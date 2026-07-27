@@ -38,8 +38,11 @@ the OrderBook (and a scoped TradingCredit during a session) is ever delegated.
                          keepers crank the bridge
 ```
 
-> **Safety boundary, one line:** funds never leave L1, so a misbehaving ER can at
-> worst scramble order *ordering* — it can never move a token.
+> **Safety boundary, one line:** delegation is capped, not unlimited — the
+> OrderBook (non-financial) and a scoped, user-capped TradingCredit allowance
+> are the only things ever delegated. A misbehaving ER can at worst scramble
+> order *ordering* or misuse a session's capped credit — it can never touch
+> the vault or a user's un-delegated balance.
 
 ---
 
@@ -113,7 +116,7 @@ flowchart LR
     S["PDAs · decoders · ix builders"]
   end
   subgraph L1p["Layer 1 — On-chain Program"]
-    P["Pinocchio (Rust)<br/>zero-copy · 34 instructions"]
+    P["Pinocchio (Rust)<br/>zero-copy · 40 instructions"]
   end
 
   F --> S
@@ -271,7 +274,7 @@ erDiagram
 
 ---
 
-## 0.9 Instruction map (0x00–0x21)
+## 0.9 Instruction map (0x00–0x27)
 
 ```mermaid
 flowchart TB
@@ -281,6 +284,8 @@ flowchart TB
     A2["0x17 grow_orderbook"]
     A3["0x18 delegate_orderbook_prepare"]
     A4["0x09 delegate_orderbook"]
+    A5["0x25 set_market_oracle"]
+    A6["0x26 propose_authority · 0x27 accept_authority<br/>(two-step GlobalState.authority rotation)"]
   end
   subgraph USER["User lifecycle (L1)"]
     U0["0x01 initialize_user"]
@@ -296,6 +301,11 @@ flowchart TB
     T0["0x10 place_order"]
     T1["0x11 cancel_order"]
   end
+  subgraph TRIGGERS["SL/TP triggers"]
+    G0["0x22 place_trigger (L1)"]
+    G1["0x23 cancel_trigger (L1)"]
+    G2["0x24 execute_trigger (L1, keeper-cranked)"]
+  end
   subgraph SETTLE["Settlement / cranks"]
     S0["0x1F mirror_fills (ER)"]
     S1["0x20 commit_fill_log (ER)"]
@@ -305,7 +315,7 @@ flowchart TB
     S5["0x0B crank_twap (L1)"]
   end
 
-  ADMIN --> USER --> TRADE --> SETTLE
+  ADMIN --> USER --> TRADE --> TRIGGERS --> SETTLE
 ```
 
 ---

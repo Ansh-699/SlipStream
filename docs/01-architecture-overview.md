@@ -106,7 +106,7 @@ decoupled through a tiny side account.
 ┌───────────────┴──────────────────────────────────────────┴────────┐
 │  Layer 1 — On-chain program (Pinocchio, Rust)                       │
 │  slipstream/programs/slipstream/                                    │
-│  34 instructions (0x00–0x21). Runs on L1 AND (delegated) in the ER. │
+│  40 instructions (0x00–0x27). Runs on L1 AND (delegated) in the ER. │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -116,7 +116,7 @@ Solana SDK (no Anchor). It hand-rolls account parsing and uses **zero-copy**
 (doc 2). The single program binary runs in *both* environments — the same
 `place_order` code path executes inside the ER, while `settle_from_log` and
 `liquidate_position` execute on L1. Instruction dispatch is a one-byte
-discriminator (`0x00`–`0x21`) in `instructions/mod.rs`.
+discriminator (`0x00`–`0x27`) in `instructions/mod.rs`.
 
 **Layer 2 — the client SDK** (`slipstream/client/src/`). TypeScript helpers:
 `pda.ts` derives program addresses, `accounts.ts` decodes raw account bytes back

@@ -117,7 +117,7 @@ undelegated.
 stack and why zero-copy matters.
 
 **Discriminator.** A leading byte (or bytes) identifying an account type or
-instruction. Slipstream uses a one-byte instruction discriminator (`0x00`–`0x21`)
+instruction. Slipstream uses a one-byte instruction discriminator (`0x00`–`0x27`)
 and per-account-type discriminators (`DISC_ORDER_BOOK`, `DISC_FILL_LOG`, …).
 
 **Signer.** An account that authorized a transaction with its key. Distinct from
