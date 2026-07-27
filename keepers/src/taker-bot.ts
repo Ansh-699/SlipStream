@@ -46,6 +46,14 @@ import type { Market, OrderBookState, PriceLevel } from "../../client/src/accoun
  *   BOT_TAKER_CROSS_PROB      probability a wallet trades in a cycle (default 0.7)
  *   BOT_TAKER_SIZE_LOTS       lots per taker order (default 1)
  *   BOT_TAKER_MAX_SLIPPAGE_BPS  max bps past top-of-book to price the IOC (default 100)
+ *   BOT_TAKER_MAX_ORACLE_DEVIATION_BPS  max bps the resting top-of-book may sit
+ *     away from the live Pyth mid before this bot refuses to cross it (default
+ *     500 = 5%). MAX_SLIPPAGE_BPS alone only bounds price relative to the BOOK
+ *     itself — if the book has drifted (a stalled market-maker, a wash-traded
+ *     resting order, or the self-trade-prevention gap this bot exists to
+ *     exercise), that gives no protection at all against actually paying a
+ *     wildly bad price. This is the same sanity check `place_order` itself
+ *     omits by design (there is no on-chain oracle band on limit prices).
  *   BOT_TAKER_REVERT_BIAS     0..1 strength of mean-reversion bias (default 0.7)
  *   MAX_CYCLES                stop after N cycles (default unbounded)
  */
@@ -55,8 +63,11 @@ const JITTER_MS = Number(process.env.BOT_TAKER_JITTER_MS || "6000");
 const CROSS_PROB = Number(process.env.BOT_TAKER_CROSS_PROB || "0.7");
 const SIZE_LOTS = Math.max(1, parseInt(process.env.BOT_TAKER_SIZE_LOTS || "1", 10));
 const MAX_SLIPPAGE_BPS = Number(process.env.BOT_TAKER_MAX_SLIPPAGE_BPS || "100");
+const MAX_ORACLE_DEVIATION_BPS = Number(process.env.BOT_TAKER_MAX_ORACLE_DEVIATION_BPS || "500");
 const REVERT_BIAS = Math.min(1, Math.max(0, Number(process.env.BOT_TAKER_REVERT_BIAS || "0.7")));
 const MAX_CYCLES = Number(process.env.MAX_CYCLES || "0");
+// Mirror programs/slipstream/src/oracle.rs's MAX_STALENESS_SECS.
+const PYTH_MAX_STALENESS_SECS = 60;
 
 function roundToTick(price6: bigint, tick: bigint): bigint {
   if (tick <= 0n) return price6;
@@ -167,6 +178,23 @@ async function cycleWallet(ctx: TakerContext, wallet: BotWallet, pyth: PythPrice
     limitPrice = roundToTick(target, tick); // willing to sell down to bid - slippage
   }
 
+  // Oracle sanity bound: MAX_SLIPPAGE_BPS above only bounds the limit price
+  // relative to the BOOK's own top-of-book, which gives zero protection if the
+  // book itself has drifted away from reality. Refuse to cross a resting price
+  // that's too far from the live Pyth mid, regardless of what the book says.
+  const refPrice = refLevel!.price;
+  const oracleDeviationBps = pyth.price6 > 0n
+    ? Number(((refPrice > pyth.price6 ? refPrice - pyth.price6 : pyth.price6 - refPrice) * 10_000n) / pyth.price6)
+    : 0;
+  if (oracleDeviationBps > MAX_ORACLE_DEVIATION_BPS) {
+    log(
+      "taker",
+      `${wallet.name} top-of-book $${(Number(refPrice) / PRICE_SCALE).toFixed(4)} is ` +
+        `${oracleDeviationBps}bps from Pyth mid $${pyth.priceFloat.toFixed(4)} (max ${MAX_ORACLE_DEVIATION_BPS}) — refusing to cross`
+    );
+    return;
+  }
+
   // Make sure the wallet has credit to take (taker margin is drained on fill).
   const credit = await readTradingCredit(ctx.base, ctx.er, owner, ctx.marketIndex);
   if (!credit || credit.available === 0n) {
@@ -234,6 +262,16 @@ async function main() {
 
       const pyth = await readPythPrice(base, PYTH_SOL_USD_FEED);
       log("taker", `cycle ${cycle} pyth mid=$${pyth.priceFloat.toFixed(4)} (age ${pyth.ageSecs}s)`);
+      if (pyth.ageSecs > PYTH_MAX_STALENESS_SECS) {
+        // Age was computed and logged above but never actually gated — trading
+        // against a stale mid defeats the point of the oracle deviation check
+        // just above, since the "reference" price could itself be arbitrarily
+        // out of date. Mirrors programs/slipstream/src/oracle.rs's own
+        // MAX_STALENESS_SECS.
+        log("taker", `pyth reading stale (${pyth.ageSecs}s > ${PYTH_MAX_STALENESS_SECS}s) — skipping cycle`);
+        await sleep(INTERVAL_MS);
+        continue;
+      }
 
       const ctx: TakerContext = { base, er, market, marketIndex: addrs.marketIndex };
       for (const w of wallets) {
