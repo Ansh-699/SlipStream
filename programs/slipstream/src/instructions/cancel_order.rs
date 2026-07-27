@@ -15,8 +15,17 @@ use crate::state::{
 ///
 /// Accounts:
 ///   [0] order_book       (W, delegated to ER)
-///   [1] trading_credit   (W, delegated to ER)
-///   [2] signer           (signer) — the credit OWNER or a non-expired session key
+///   [1] trading_credit   (W, delegated to ER) — must be the ORDER OWNER's credit
+///   [2] signer           (signer) — the credit owner, a non-expired session key,
+///                         OR (permissionless) anyone at all once the target
+///                         order's `expiry_ts` has passed.
+///
+/// The expiry bypass is a deliberate permissionless cleanup path (§10): keepers
+/// have no owner signature and no session key to act with, but an order past its
+/// own `expiry_ts` was already consented to being cancelled at ANY time after
+/// that instant by whoever placed it. Margin still returns to the owner's
+/// credit, never to the canceller — there is nothing to steal by cancelling
+/// someone else's expired order.
 ///
 /// Instruction data (8 bytes): order_id: u64
 const IX_DATA_LEN: usize = 8;
@@ -38,16 +47,13 @@ pub fn process(
     }
     let order_id = u64::from_le_bytes(data[..8].try_into().unwrap());
 
-    // Validate credit authorization (owner or non-expired session key). Order
-    // attribution stays with credit.owner (checked against slot.owner below).
+    let now = Clock::get()?.unix_timestamp;
     let credit_owner;
+    let is_owner_or_session;
     {
-        let now = Clock::get()?.unix_timestamp;
         let credit = TradingCredit::from_account_info(trading_credit_acc)?;
-        if !credit.is_authorized_signer(signer.key(), now) {
-            return Err(SlipstreamError::InvalidAuthority.into());
-        }
         credit_owner = credit.owner;
+        is_owner_or_session = credit.is_authorized_signer(signer.key(), now);
 
         // Bind the order book to the credit's OWN market — without this a credit
         // for market A could cancel into market B's order book.
@@ -78,6 +84,10 @@ pub fn process(
         let slot = &ob.order_slots[slot_idx as usize];
         if slot.owner != credit_owner {
             return Err(SlipstreamError::NotOrderOwner.into());
+        }
+        let expired = slot.expiry_ts > 0 && now >= slot.expiry_ts;
+        if !is_owner_or_session && !expired {
+            return Err(SlipstreamError::InvalidAuthority.into());
         }
         (
             slot.side,

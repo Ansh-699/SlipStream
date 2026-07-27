@@ -70,6 +70,10 @@ mod test_oracle_restricted_mode_regressions;
 #[cfg(test)]
 mod test_withdraw_collateral_regressions;
 
+// Regression tests for cancel_order's permissionless-expiry-cancel fix.
+#[cfg(test)]
+mod test_cancel_order_expiry_regressions;
+
 // Regression test for initialize_market's fee/rebate bound check.
 #[cfg(test)]
 mod test_initialize_market_regressions;

@@ -429,7 +429,9 @@ export function createCancelOrderInstruction(
     keys: [
       { pubkey: orderBook, isSigner: false, isWritable: true },
       { pubkey: tradingCredit, isSigner: false, isWritable: true },
-      // [2] signer: owner OR an authorized, non-expired session key.
+      // [2] signer: owner, an authorized non-expired session key, OR (once the
+      // order's own expiry_ts has passed) anyone at all — a permissionless
+      // cleanup path for expiry keepers. Margin always returns to `owner`.
       { pubkey: signer, isSigner: true, isWritable: false },
     ],
     programId,
