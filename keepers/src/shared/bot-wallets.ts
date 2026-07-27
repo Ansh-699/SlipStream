@@ -119,7 +119,16 @@ export function loadOrCreateBotKeypair(name: string): Keypair {
     }
   }
   const kp = Keypair.generate();
-  fs.writeFileSync(kpPath, JSON.stringify(Array.from(kp.secretKey)));
+  // mode 0o600: writeFileSync's default (0o666 masked by umask, typically 0644)
+  // leaves a raw secret key world-readable by any other user on the box —
+  // contradicting the project's own chmod-600 convention for the operator
+  // keypair (see docker-compose.yml's header comment).
+  fs.writeFileSync(kpPath, JSON.stringify(Array.from(kp.secretKey)), { mode: 0o600 });
+  // `mode` above only applies when writeFileSync actually creates the file; on
+  // the corrupt-file-regenerate path (existsSync was already true) it just
+  // truncates in place and leaves whatever permissions the file already had —
+  // chmod explicitly so both paths end up 0o600.
+  fs.chmodSync(kpPath, 0o600);
   log("bot-wallets", `created persistent bot key ${name} -> ${kp.publicKey.toBase58()}`);
   return kp;
 }

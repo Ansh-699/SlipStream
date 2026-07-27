@@ -14,3 +14,10 @@ secrets
 !**/.env.example
 *.log
 *.so
+# Bot wallet secret keys (see keepers/src/shared/bot-wallets.ts,
+# BOT_KEYS_DIR = keepers/.bot-keys) and the local fills indexer DB — both are
+# generated on disk by keepers that have already run and are gitignored, but
+# a plain `COPY keepers ./keepers` in the Dockerfile would otherwise bake
+# whatever happens to exist on the build host straight into the image layer.
+keepers/.bot-keys
+keepers/data
