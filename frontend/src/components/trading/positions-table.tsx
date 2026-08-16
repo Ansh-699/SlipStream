@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import { Connection, Transaction } from "@solana/web3.js";
 import { usePositions } from "@/hooks/use-positions";
 import { useErPosition } from "@/hooks/use-er-position";

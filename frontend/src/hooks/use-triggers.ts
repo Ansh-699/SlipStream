@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
 import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
 import {
   findTriggerPda,

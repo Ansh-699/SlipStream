@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/use-wallet-compat";
 import { useOrderBook } from "@/hooks/use-orderbook";
 
 /**

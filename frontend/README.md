@@ -39,6 +39,8 @@ point at a different deployment without editing code:
 | `NEXT_PUBLIC_MARKET` | Override market address | from `deploy.json` |
 | `NEXT_PUBLIC_ORDER_BOOK` | Override orderbook address | from `deploy.json` |
 | `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_ER_RPC` | Override direct RPC URLs | from `deploy.json` |
+| `NEXT_PUBLIC_PHANTOM_APP_ID` | Phantom Portal app ID. Required for Google/Apple embedded wallets; without it only the Phantom browser extension ("injected") is offered | none |
+| `NEXT_PUBLIC_PHANTOM_REDIRECT_URL` | OAuth redirect target, must be allowlisted in the Phantom Portal | `<origin>/auth/callback` |
 
 ## Production build
 

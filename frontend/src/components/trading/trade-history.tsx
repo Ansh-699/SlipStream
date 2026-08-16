@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/use-wallet-compat";
 import { explorerAddress } from "@/lib/manifest";
 import { PRICE_SCALE, SIDE_BID } from "@/lib/slipstream";
 

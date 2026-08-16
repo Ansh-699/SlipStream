@@ -1,6 +1,6 @@
 "use client";
 
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnection } from "@/hooks/use-wallet-compat";
 import { useCallback, useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, MARKET, MARKET_INDEX } from "@/lib/manifest";
