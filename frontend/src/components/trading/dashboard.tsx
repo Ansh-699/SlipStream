@@ -35,21 +35,21 @@ export function TradingDashboard() {
           + Positions tables below; the RIGHT 3 cols hold the Order Form + the
           Trading Session. So Positions sits directly to the LEFT of the Trading
           Session and the two columns end on roughly the same plane. */}
-      <section className="flex flex-col px-3 md:px-4 lg:px-6 pt-3 pb-6 gap-3 max-w-[1700px] mx-auto w-full relative z-10">
+      <section className="flex flex-col px-3 md:px-5 lg:px-8 pt-4 pb-10 gap-4 max-w-[1700px] mx-auto w-full relative z-10">
         <div className="shrink-0">
           <MarketInfo />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           {/* LEFT 9 cols: chart + book on top, activity tables below */}
-          <div className="lg:col-span-9 flex flex-col gap-3">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
+          <div className="lg:col-span-9 flex flex-col gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               {/* Chart */}
               <div className="lg:col-span-2 h-[440px] lg:h-[620px] rise-in">
                 <PriceChart />
               </div>
               {/* Order Book + Recent Trades */}
-              <div className="lg:col-span-1 flex flex-col gap-3 rise-in" style={{ animationDelay: "60ms" }}>
+              <div className="lg:col-span-1 flex flex-col gap-4 rise-in" style={{ animationDelay: "60ms" }}>
                 <div className="h-[360px] lg:h-[400px]">
                   <OrderBookDisplay />
                 </div>
@@ -67,7 +67,7 @@ export function TradingDashboard() {
               </span>
               <div className="h-px flex-1 bg-white/[0.06]" />
             </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 rise-in" style={{ animationDelay: "150ms" }}>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 rise-in" style={{ animationDelay: "150ms" }}>
               <OpenOrders />
               <PositionsTable markPrice={markPrice} />
             </div>
@@ -79,7 +79,7 @@ export function TradingDashboard() {
           </div>
 
           {/* RIGHT 3 cols: Order Form + Trading Session + System Status. */}
-          <div className="lg:col-span-3 flex flex-col gap-3 rise-in" style={{ animationDelay: "120ms" }}>
+          <div className="lg:col-span-3 flex flex-col gap-4 rise-in" style={{ animationDelay: "120ms" }}>
             <OrderForm />
             <SessionPanel />
             <StatusPanel />

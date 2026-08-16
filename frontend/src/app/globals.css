@@ -167,16 +167,28 @@
 }
 
 /* Premium card — the workhorse panel surface for the redesign */
+/* The liquid-glass read comes from three stacked cues:
+   1. a specular sheen in the top-left, carried as a background layer rather
+      than a pseudo-element so it can never paint over panel content;
+   2. a rim light on the top and sides with a darkened bottom edge, which is
+      what reads as a refracting bevel rather than a flat translucent card;
+   3. a saturated blur, so the aurora behind the page bleeds through tinted. */
 .panel {
   position: relative;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(20, 28, 26, 0.66), rgba(9, 13, 12, 0.72));
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  background:
+    radial-gradient(130% 85% at 6% -14%, rgba(255, 255, 255, 0.09), transparent 58%),
+    linear-gradient(180deg, rgba(26, 36, 33, 0.62), rgba(9, 13, 12, 0.74));
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 10px 36px rgba(0, 0, 0, 0.45);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 0 rgba(255, 255, 255, 0.04),
+    inset -1px 0 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 14px 44px rgba(0, 0, 0, 0.46);
   overflow: hidden;
 }
 .panel::after {
@@ -189,28 +201,44 @@
   opacity: 0.7;
 }
 :root:not(.dark) .panel {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.72));
+  background:
+    radial-gradient(130% 85% at 6% -14%, rgba(255, 255, 255, 0.95), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.72));
   border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 14px 44px rgba(0, 0, 0, 0.08);
 }
 
 /* Like .panel but does NOT clip overflow — for bars containing popovers/dropdowns
    (e.g. the wallet menu) that must escape the container. */
 .panel-bar {
   position: relative;
-  border-radius: 16px;
-  background: linear-gradient(180deg, rgba(20, 28, 26, 0.66), rgba(9, 13, 12, 0.72));
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 18px;
+  background:
+    radial-gradient(130% 85% at 6% -14%, rgba(255, 255, 255, 0.09), transparent 58%),
+    linear-gradient(180deg, rgba(26, 36, 33, 0.62), rgba(9, 13, 12, 0.74));
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.05),
-    0 10px 36px rgba(0, 0, 0, 0.45);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 0 rgba(255, 255, 255, 0.04),
+    inset -1px 0 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 0 rgba(0, 0, 0, 0.3),
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 14px 44px rgba(0, 0, 0, 0.46);
 }
 :root:not(.dark) .panel-bar {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.72));
+  background:
+    radial-gradient(130% 85% at 6% -14%, rgba(255, 255, 255, 0.95), transparent 58%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.72));
   border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 14px 44px rgba(0, 0, 0, 0.08);
 }
 
 /* Panel header label */
@@ -269,6 +297,27 @@
   to { opacity: 1; transform: translateY(0); }
 }
 .rise-in { animation: rise-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+/* Every animation here is decorative: panel entrances, the live-dot pulse and
+   the price flash all restate something already visible statically. So honour
+   the OS setting by removing motion outright rather than just shortening it —
+   a shortened animation still moves, which is the thing being opted out of. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* `both` fill would otherwise leave these stuck at their opacity-0 start. */
+  .rise-in {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
 
 @layer base {
   * {

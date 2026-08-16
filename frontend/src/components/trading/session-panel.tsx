@@ -150,7 +150,7 @@ export function SessionPanel() {
               </Button>
             </div>
             {usdcBal <= 0 && !hasFunds && (
-              <div className="text-[10px] leading-tight text-amber-400">
+              <div className="text-[10px] leading-tight text-amber-700 dark:text-amber-400">
                 New wallet detected with no test USDC. Click “Get test USDC” to
                 mint some (devnet test tokens), then start trading.
               </div>
@@ -171,7 +171,10 @@ export function SessionPanel() {
               size="lg"
               onClick={() => autoStart(parseFloat(depositAmt || "0"))}
               disabled={!canStart}
-              className="w-full font-semibold bg-emerald-600 text-white hover:bg-emerald-600/90"
+              // text-emerald-50 rather than text-white: the light-mode remap in
+              // globals.css rewrites .text-white to dark ink for text sitting on
+              // glass, which would flip this label dark on a saturated green fill.
+              className="w-full font-semibold bg-emerald-700 text-emerald-50 hover:bg-emerald-700/90"
             >
               {busy ? "…" : hasFunds && !state.initialized ? "Resume setup" : "Start trading"}
             </Button>
@@ -254,7 +257,7 @@ export function SessionPanel() {
                 {busy ? "…" : "Withdraw all"}
               </Button>
               {state.activeOrders > 0 && (
-                <div className="text-[10px] text-amber-500">
+                <div className="text-[10px] text-amber-700 dark:text-amber-400">
                   Cancel your open orders first.
                 </div>
               )}
