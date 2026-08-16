@@ -9,7 +9,7 @@ import { useSession } from "@/hooks/use-session";
 const PRICE_SCALE = 1_000_000;
 
 export function SessionPanel() {
-  const { state, busy, step, error, notice, autoStart, requestFaucet, rotate, closeLegacyCredit } = useSession(0);
+  const { state, busy, step, error, notice, autoStart, withdraw, requestFaucet, rotate, closeLegacyCredit } = useSession(0);
   const [depositAmt, setDepositAmt] = useState("1000");
 
   const usdcBal = Number(state.usdcBalance) / PRICE_SCALE;
@@ -232,6 +232,32 @@ export function SessionPanel() {
               >
                 {busy ? "…" : state.sessionActive ? "Rotate session key" : "New session key"}
               </Button>
+            </div>
+
+            {/* Full exit: off the rollup, out of credit, back to the wallet. */}
+            <div className="rounded-md border p-2 space-y-1.5">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
+                Cash out
+              </span>
+              <div className="text-[10px] leading-tight text-muted-foreground">
+                Returns everything to your wallet: leaves the rollup, releases
+                your credit, then sends the USDC back. Takes a few seconds while
+                the rollup settles.
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full h-8 text-xs"
+                onClick={withdraw}
+                disabled={busy || state.activeOrders > 0}
+              >
+                {busy ? "…" : "Withdraw all"}
+              </Button>
+              {state.activeOrders > 0 && (
+                <div className="text-[10px] text-amber-500">
+                  Cancel your open orders first.
+                </div>
+              )}
             </div>
           </div>
         )}

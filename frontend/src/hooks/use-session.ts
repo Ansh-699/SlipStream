@@ -30,7 +30,13 @@ import {
   createAuthorizeSessionInstruction,
   createCloseTradingCreditInstruction,
   createInitializePositionInstruction,
+  createUndelegateTradingCreditInstruction,
+  createWithdrawTradingCreditInstruction,
+  createWithdrawCollateralInstruction,
+  decodeGlobalState,
+  findGlobalStatePda,
   findPositionPda,
+  MAGIC_CONTEXT_ID,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
@@ -160,6 +166,33 @@ function storeSession(
     sessionStorageKey(owner, marketIndex),
     JSON.stringify(payload)
   );
+}
+
+/**
+ * Wait for a scheduled undelegation to actually land on the base layer.
+ *
+ * `undelegate_trading_credit` only fires a ScheduleCommitAndUndelegate CPI on
+ * the rollup; the account's ownership flip back to our program is performed
+ * later by the MagicBlock validator. Until that lands, `withdraw_trading_credit`
+ * rejects with CreditStillActive, so callers must poll rather than assume the
+ * confirmed ER transaction means the funds are back.
+ */
+async function waitForUndelegation(
+  conn: Connection,
+  creditPda: PublicKey,
+  tries = 30
+): Promise<boolean> {
+  const programId = PROGRAM_ID.toBase58();
+  for (let i = 0; i < tries; i++) {
+    try {
+      const info = await conn.getAccountInfo(creditPda, "confirmed");
+      if (info && info.owner.toBase58() === programId) return true;
+    } catch {
+      /* transient RPC error — keep polling */
+    }
+    await new Promise((r) => setTimeout(r, 2_000));
+  }
+  return false;
 }
 
 export function useSession(marketIndex: number = 0) {
@@ -678,6 +711,156 @@ export function useSession(marketIndex: number = 0) {
     [publicKey, connection, marketIndex, initialize, fund, delegate, refresh]
   );
 
+  // withdraw — the full exit, in one click: pull the credit back off the
+  // rollup, convert it to collateral, and send the USDC to the wallet.
+  //
+  // Withdraws everything rather than a chosen amount: a credit is delegated to
+  // the ER as a whole, so any partial exit would still mean undelegating and
+  // re-delegating the lot. Resumable like autoStart — each leg is skipped when
+  // it is already done, so a retry after a failed step picks up where it left
+  // off instead of repeating work.
+  const withdraw = useCallback(async (): Promise<boolean> => {
+    if (!publicKey) return false;
+    if (!USDC_MINT || !USDC_VAULT) {
+      setError("USDC mint/vault missing from deploy manifest.");
+      return false;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+      let creditInfo = await connection.getAccountInfo(creditPda);
+      const delegated = creditInfo?.owner.toBase58() === DELEGATION_PROGRAM;
+
+      // The program refuses to release a credit that still backs resting
+      // orders. Check first: undelegating and only then discovering the credit
+      // is busy would strand the user off-rollup with funds they can't move.
+      if (creditInfo && creditInfo.data.length >= TRADING_CREDIT_SIZE) {
+        let live = creditInfo.data;
+        if (delegated) {
+          try {
+            const erInfo = await new Connection(ER_RPC, "confirmed").getAccountInfo(creditPda);
+            if (erInfo && erInfo.data[0] === DISC_TRADING_CREDIT) live = erInfo.data;
+          } catch {
+            /* fall back to the base-layer copy */
+          }
+        }
+        if (live[0] === DISC_TRADING_CREDIT) {
+          const c = decodeTradingCredit(live as Buffer);
+          if (c.activeOrders > 0 || c.committed > 0n) {
+            setError(
+              `Cancel your ${c.activeOrders} open order${c.activeOrders === 1 ? "" : "s"} before withdrawing.`
+            );
+            return false;
+          }
+        }
+      }
+
+      // 1. Leave the rollup. Only the schedule happens here; the base-layer
+      //    handover is the validator's job, so poll for it afterwards.
+      if (delegated) {
+        slog("withdraw", "undelegating trading credit from the ER");
+        setStep("Returning funds from the rollup…");
+        const erConn = new Connection(ER_RPC, "confirmed");
+        const tx = new Transaction().add(
+          createUndelegateTradingCreditInstruction(
+            publicKey,
+            marketIndex,
+            MAGIC_CONTEXT_ID,
+            PROGRAM_ID
+          )
+        );
+        const { blockhash } = await erConn.getLatestBlockhash();
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = publicKey;
+        const sig = await sendTransaction(tx, erConn);
+        await confirmSignature(erConn, sig, { timeoutMs: 45_000 });
+
+        setStep("Waiting for the rollup to settle…");
+        if (!(await waitForUndelegation(connection, creditPda))) {
+          setError(
+            "The rollup hasn't handed your funds back yet. Give it a moment and press Withdraw again."
+          );
+          return false;
+        }
+        slog("withdraw", "undelegation landed on L1");
+      }
+
+      // 2. Trading credit → free collateral (accounting only, no tokens move).
+      creditInfo = await connection.getAccountInfo(creditPda);
+      const credit =
+        creditInfo &&
+        creditInfo.data[0] === DISC_TRADING_CREDIT &&
+        creditInfo.data.length >= TRADING_CREDIT_SIZE
+          ? decodeTradingCredit(creditInfo.data as Buffer).credit
+          : 0n;
+      if (credit > 0n) {
+        setStep("Releasing trading credit…");
+        const sig = await sendTransaction(
+          new Transaction().add(
+            createWithdrawTradingCreditInstruction(publicKey, marketIndex, credit, PROGRAM_ID)
+          ),
+          connection
+        );
+        await confirmSignature(connection, sig, { timeoutMs: 45_000 });
+      }
+
+      // 3. Free collateral → the wallet's USDC account (the real transfer).
+      const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+      const uInfo = await connection.getAccountInfo(userPda);
+      const free =
+        uInfo && uInfo.data[0] === DISC_USER_ACCOUNT
+          ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
+          : 0n;
+      if (free === 0n) {
+        setNotice("Nothing left to withdraw.");
+        await refresh();
+        return true;
+      }
+
+      // withdraw_collateral checks one Position PDA per market, so it needs the
+      // live market count rather than an assumed single market.
+      const [globalPda] = findGlobalStatePda(PROGRAM_ID);
+      const gInfo = await connection.getAccountInfo(globalPda);
+      const marketCount = gInfo ? decodeGlobalState(gInfo.data as Buffer).marketCount : 1;
+
+      setStep("Sending USDC to your wallet…");
+      const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+      const sig = await sendTransaction(
+        new Transaction().add(
+          createWithdrawCollateralInstruction(
+            {
+              owner: publicKey,
+              userTokenAccount: ata,
+              quoteVault: USDC_VAULT,
+              amount: free,
+              marketIndex,
+              marketCount,
+            },
+            PROGRAM_ID
+          )
+        ),
+        connection
+      );
+      await confirmSignature(connection, sig, { timeoutMs: 45_000 });
+
+      const usd = (Number(free) / PRICE_SCALE).toFixed(2);
+      slog("withdraw", `withdrew $${usd} to the wallet`);
+      setNotice(`Withdrew $${usd} to your wallet.`);
+      await refresh();
+      return true;
+    } catch (err) {
+      const msg = humanizeError(err);
+      setError(msg);
+      slog("withdraw", `FAILED: ${msg}`, err);
+      return false;
+    } finally {
+      setStep(null);
+      setBusy(false);
+    }
+  }, [publicKey, sendTransaction, connection, marketIndex, refresh]);
+
   // rotate — issue a fresh session key and re-authorize it on the (already
   // delegated) credit via authorize_session. ONE wallet signature. Used when the
   // session expired or the user wants to invalidate the old key. Runs on the ER
@@ -771,6 +954,7 @@ export function useSession(marketIndex: number = 0) {
     fund,
     delegate,
     autoStart,
+    withdraw,
     rotate,
     refresh,
     getSessionKeypair,
