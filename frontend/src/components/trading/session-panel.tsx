@@ -9,11 +9,15 @@ import { useSession } from "@/hooks/use-session";
 const PRICE_SCALE = 1_000_000;
 
 export function SessionPanel() {
-  const { state, busy, step, error, notice, initialize, requestFaucet, fund, delegate, rotate, closeLegacyCredit } = useSession(0);
+  const { state, busy, step, error, notice, autoStart, requestFaucet, rotate, closeLegacyCredit } = useSession(0);
   const [depositAmt, setDepositAmt] = useState("1000");
-  const [amount, setAmount] = useState("500");
 
   const usdcBal = Number(state.usdcBalance) / PRICE_SCALE;
+  /** Money already inside the protocol — setup can finish without a new deposit. */
+  const hasFunds = state.freeCollateral > 0n || state.credit > 0n;
+  const depositNum = parseFloat(depositAmt || "0");
+  const canStart =
+    !busy && (hasFunds || (depositNum > 0 && usdcBal > 0 && depositNum <= usdcBal));
 
   const status = !state.initialized
     ? "uninitialized"
@@ -122,8 +126,8 @@ export function SessionPanel() {
           </div>
         )}
 
-        {/* Step 1: deposit collateral + create credit account (one click). */}
-        {!state.initialized && (
+        {/* Setup in one click: deposit → allocate to market → open ER session. */}
+        {!state.delegated && (
           <div className="space-y-2">
             {/* Wallet USDC balance + faucet for new wallets. */}
             <div className="flex items-center justify-between rounded-md bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
@@ -145,73 +149,37 @@ export function SessionPanel() {
                 {busy && step?.includes("USDC") ? "…" : "Get test USDC"}
               </Button>
             </div>
-            {usdcBal <= 0 && (
+            {usdcBal <= 0 && !hasFunds && (
               <div className="text-[10px] leading-tight text-amber-400">
                 New wallet detected with no test USDC. Click “Get test USDC” to
-                mint some (devnet test tokens), then deposit.
+                mint some (devnet test tokens), then start trading.
               </div>
             )}
 
             <label className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
               Deposit collateral (USDC)
             </label>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                step="1"
-                placeholder="1000"
-                value={depositAmt}
-                onChange={(e) => setDepositAmt(e.target.value)}
-                className="h-9 text-sm"
-              />
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => initialize(parseFloat(depositAmt || "0"))}
-                disabled={busy || !depositAmt || parseFloat(depositAmt) <= 0 || usdcBal <= 0}
-              >
-                {busy && !step?.includes("USDC") ? "…" : "Deposit + Init"}
-              </Button>
-            </div>
-            <div className="text-[10px] text-muted-foreground">
-              Moves USDC from your wallet into the protocol and creates your trading-credit account.
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: move collateral into trading credit, then delegate to the ER. */}
-        {state.initialized && !state.delegated && (
-          <>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                step="1"
-                placeholder="500"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                className="h-9 text-sm"
-              />
-              <Button size="lg" onClick={() => fund(parseFloat(amount || "0"))} disabled={busy}>
-                {busy ? "…" : "Fund credit"}
-              </Button>
-            </div>
-            <div className="text-[10px] text-muted-foreground">
-              Available collateral to fund: ${(Number(state.freeCollateral) / PRICE_SCALE).toFixed(2)}
-            </div>
+            <Input
+              type="number"
+              step="1"
+              placeholder="1000"
+              value={depositAmt}
+              onChange={(e) => setDepositAmt(e.target.value)}
+              className="h-9 text-sm"
+            />
             <Button
               size="lg"
-              onClick={delegate}
-              disabled={busy || state.credit === 0n}
+              onClick={() => autoStart(parseFloat(depositAmt || "0"))}
+              disabled={!canStart}
               className="w-full font-semibold bg-emerald-600 text-white hover:bg-emerald-600/90"
             >
-              {busy ? "…" : "Delegate to ER (start trading)"}
+              {busy ? "…" : hasFunds && !state.initialized ? "Resume setup" : "Start trading"}
             </Button>
-            {state.credit === 0n && (
-              <div className="text-[10px] text-amber-500">
-                Fund the credit before delegating (credit is $0).
-              </div>
-            )}
-          </>
+            <div className="text-[10px] text-muted-foreground">
+              Deposits your USDC, allocates it to the market, and opens a rollup
+              session so every order signs instantly — no wallet popups.
+            </div>
+          </div>
         )}
 
         {state.delegated && (

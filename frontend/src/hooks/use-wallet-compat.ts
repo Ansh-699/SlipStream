@@ -27,16 +27,12 @@ import {
 } from "@solana/web3.js";
 import { RPC_URL } from "@/lib/manifest";
 
-/** Lazily-created, process-wide base-layer connection (RPC_URL is a constant). */
-let baseConnection: Connection | null = null;
+/** Shared base-layer connection. Constructing one performs no I/O, and RPC_URL
+ *  is a build-time constant, so a single module-level instance is safe. */
+const baseConnection = new Connection(RPC_URL, "confirmed");
 
 export function useConnection(): { connection: Connection } {
-  return useMemo(() => {
-    if (!baseConnection) {
-      baseConnection = new Connection(RPC_URL, "confirmed");
-    }
-    return { connection: baseConnection };
-  }, []);
+  return useMemo(() => ({ connection: baseConnection }), []);
 }
 
 export interface WalletCompat {

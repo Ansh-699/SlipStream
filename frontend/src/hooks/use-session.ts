@@ -359,11 +359,11 @@ export function useSession(marketIndex: number = 0) {
   // FULL session setup in ONE click (base layer): initialize_user (if needed) →
   // deposit_collateral (wallet USDC → on-chain UserAccount) → initialize_trading_credit.
   const initialize = useCallback(
-    async (depositUsdc: number) => {
-      if (!publicKey) return;
+    async (depositUsdc: number): Promise<boolean> => {
+      if (!publicKey) return false;
       if (!USDC_MINT || !USDC_VAULT) {
         setError("USDC mint/vault missing from deploy manifest.");
-        throw new Error("USDC mint/vault missing from deploy manifest");
+        return false;
       }
       setBusy(true);
       setError(null);
@@ -392,7 +392,7 @@ export function useSession(marketIndex: number = 0) {
                 : `Deposit ($${depositUsdc}) exceeds your USDC balance ($${(Number(bal) / PRICE_SCALE).toFixed(2)}). Lower the amount or get more test USDC.`;
             setError(msg);
             slog("init", `BLOCKED: ${msg}`);
-            return;
+            return false;
           }
         }
 
@@ -402,7 +402,7 @@ export function useSession(marketIndex: number = 0) {
           slog("init", `wallet SOL = ${(lamports / 1e9).toFixed(4)}`);
           if (lamports < 3_000_000) {
             setError("Your wallet has almost no devnet SOL — airdrop some SOL (for fees/rent) and retry.");
-            return;
+            return false;
           }
         } catch {
           /* non-fatal */
@@ -443,7 +443,7 @@ export function useSession(marketIndex: number = 0) {
           slog("init", "nothing to do (already set up)");
           setNotice("Already initialized.");
           await refresh();
-          return;
+          return true;
         }
 
         setStep("Awaiting wallet signature…");
@@ -456,12 +456,14 @@ export function useSession(marketIndex: number = 0) {
         slog("init", `CONFIRMED: ${sig}`);
         setNotice(depositAmount > 0n ? `Deposited $${depositUsdc} and initialized.` : "Initialized.");
         await refresh();
+        return true;
       } catch (err) {
         const msg = humanizeError(err);
         setError(msg);
         slog("init", `FAILED: ${msg}`, err);
         // eslint-disable-next-line no-console
         console.error("[session] initialize failed:", err);
+        return false;
       } finally {
         setStep(null);
         setBusy(false);
@@ -508,19 +510,28 @@ export function useSession(marketIndex: number = 0) {
 
   // fund_trading_credit (0x0e) — base layer.
   const fund = useCallback(
-    async (amountUsdc: number) => {
-      if (!publicKey) return;
+    async (amountUsdc: number): Promise<boolean> => {
+      if (!publicKey) return false;
       setBusy(true);
       setError(null);
       setNotice(null);
       try {
         const amount = BigInt(Math.round(amountUsdc * PRICE_SCALE));
         slog("fund", `funding credit with $${amountUsdc}`);
-        if (amount > state.freeCollateral) {
-          const msg = `Not enough deposited collateral: have $${(Number(state.freeCollateral) / PRICE_SCALE).toFixed(2)}, need $${amountUsdc}.`;
+        // Read the deposit balance from chain rather than React state: when
+        // this runs straight after a deposit (the one-click flow), `state` has
+        // not re-rendered yet and would still report the pre-deposit balance.
+        const [userPdaForFund] = findUserAccountPda(publicKey, PROGRAM_ID);
+        const uInfoForFund = await connection.getAccountInfo(userPdaForFund);
+        const freeCollateral =
+          uInfoForFund && uInfoForFund.data[0] === DISC_USER_ACCOUNT
+            ? decodeUserAccount(uInfoForFund.data as Buffer).freeCollateral
+            : 0n;
+        if (amount > freeCollateral) {
+          const msg = `Not enough deposited collateral: have $${(Number(freeCollateral) / PRICE_SCALE).toFixed(2)}, need $${amountUsdc}.`;
           setError(msg);
           slog("fund", `BLOCKED: ${msg}`);
-          return;
+          return false;
         }
         const ix = createFundTradingCreditInstruction(
           publicKey,
@@ -537,16 +548,18 @@ export function useSession(marketIndex: number = 0) {
         slog("fund", `CONFIRMED: ${sig}`);
         setNotice(`Funded $${amountUsdc} into trading credit.`);
         await refresh();
+        return true;
       } catch (err) {
         const msg = humanizeError(err);
         setError(msg);
         slog("fund", `FAILED: ${msg}`, err);
+        return false;
       } finally {
         setStep(null);
         setBusy(false);
       }
     },
-    [publicKey, sendTransaction, connection, marketIndex, refresh, state.freeCollateral]
+    [publicKey, sendTransaction, connection, marketIndex, refresh]
   );
 
   // delegate_trading_credit (0x0f) — BASE layer. THE ONE SIGNATURE.
@@ -560,8 +573,8 @@ export function useSession(marketIndex: number = 0) {
   //   4. funds the session key with a tiny SOL float so it can pay ER fees.
   // After this, order-form signs every place_order locally with the session key
   // — zero wallet popups per order.
-  const delegate = useCallback(async () => {
-    if (!publicKey) return;
+  const delegate = useCallback(async (): Promise<boolean> => {
+    if (!publicKey) return false;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -606,15 +619,64 @@ export function useSession(marketIndex: number = 0) {
       storeSession(publicKey, marketIndex, sessionKp, expiry);
       setNotice("Trading session active — you can place orders now.");
       await refresh();
+      return true;
     } catch (err) {
       const msg = humanizeError(err);
       setError(msg);
       slog("delegate", `FAILED: ${msg}`, err);
+      return false;
     } finally {
       setStep(null);
       setBusy(false);
     }
   }, [publicKey, sendTransaction, connection, marketIndex, refresh]);
+
+  // autoStart — the whole onboarding in ONE click: deposit collateral, move it
+  // into trading credit, then delegate to the ER with a fresh session key.
+  //
+  // Resumable by design: each step is skipped when it is already done, so a
+  // user whose wallet rejected step 2 of 3 can simply press the button again
+  // rather than being stranded in a half-set-up state with no way forward.
+  const autoStart = useCallback(
+    async (depositUsdc: number): Promise<boolean> => {
+      if (!publicKey) return false;
+      try {
+        const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+        const creditInfo = await connection.getAccountInfo(creditPda);
+        if (creditInfo?.owner.toBase58() === DELEGATION_PROGRAM) {
+          slog("autostart", "already delegated — nothing to do");
+          await refresh();
+          return true;
+        }
+
+        slog("autostart", `starting one-click setup (deposit $${depositUsdc})`);
+        if (!(await initialize(depositUsdc))) return false;
+
+        // Move everything deposited into trading credit. Read the balance from
+        // chain — the deposit above landed moments ago and React state lags it.
+        const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+        const uInfo = await connection.getAccountInfo(userPda);
+        const free =
+          uInfo && uInfo.data[0] === DISC_USER_ACCOUNT
+            ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
+            : 0n;
+        if (free > 0n && !(await fund(Number(free) / PRICE_SCALE))) return false;
+
+        if (!(await delegate())) return false;
+
+        slog("autostart", "setup complete");
+        setNotice("You're ready to trade — orders sign instantly, no wallet popups.");
+        await refresh();
+        return true;
+      } catch (err) {
+        const msg = humanizeError(err);
+        setError(msg);
+        slog("autostart", `FAILED: ${msg}`, err);
+        return false;
+      }
+    },
+    [publicKey, connection, marketIndex, initialize, fund, delegate, refresh]
+  );
 
   // rotate — issue a fresh session key and re-authorize it on the (already
   // delegated) credit via authorize_session. ONE wallet signature. Used when the
@@ -708,6 +770,7 @@ export function useSession(marketIndex: number = 0) {
     requestFaucet,
     fund,
     delegate,
+    autoStart,
     rotate,
     refresh,
     getSessionKeypair,
