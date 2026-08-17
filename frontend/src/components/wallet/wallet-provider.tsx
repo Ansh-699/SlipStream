@@ -43,9 +43,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         : ["injected"]) as AuthProviderType[],
       appId,
       addressTypes: [AddressType.solana],
-      // App-scoped wallet: created for SlipStream rather than the user's
-      // personal Phantom account, which is what makes it feel "in-app".
-      embeddedWalletType: "app-wallet" as const,
+      // Must be "user-wallet": Phantom rejects "app-wallet" at provider init
+      // ("app-wallet type is not currently supported"), which takes the whole
+      // page down rather than degrading. The sign-in experience is the same --
+      // Google/Apple, no extension -- the wallet is just the user's Phantom
+      // account rather than one scoped to this app.
+      embeddedWalletType: "user-wallet" as const,
       autoConnect: true,
       ...(redirectUrl ? { authOptions: { redirectUrl } } : {}),
     };
