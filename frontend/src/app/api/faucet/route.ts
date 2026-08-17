@@ -15,7 +15,15 @@
 import { NextRequest } from "next/server";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  Keypair,
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  Transaction,
+  sendAndConfirmTransaction,
+} from "@solana/web3.js";
 import {
   getOrCreateAssociatedTokenAccount,
   mintTo,
@@ -26,6 +34,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const FAUCET_USDC = Number(process.env.FAUCET_USDC_AMOUNT || "10000"); // 10k test USDC
+
+// Test USDC alone is not enough to get started: a freshly created embedded
+// wallet holds no SOL, so it cannot pay the fees or the PDA rent that setup
+// needs, and every deposit would fail at signing time. Top it up from the
+// operator rather than the devnet airdrop faucet, which is aggressively rate
+// limited and regularly refuses outright.
+const FAUCET_SOL = Number(process.env.FAUCET_SOL_AMOUNT || "0.05");
+/** Only top up below this, so repeat drips can't drain the operator. */
+const SOL_TOPUP_FLOOR = Number(process.env.FAUCET_SOL_FLOOR || "0.02");
 const COOLDOWN_MS = 60_000; // one drip per wallet per minute
 const BASE_RPC =
   process.env.BASE_RPC_UPSTREAM ||
@@ -167,19 +184,64 @@ export async function POST(req: NextRequest): Promise<Response> {
     const atoms = BigInt(Math.round(FAUCET_USDC * 1_000_000));
     const sig = await mintTo(conn, operator, mint, ata.address, operator.publicKey, atoms);
 
+    // Give the wallet enough SOL to actually use the USDC it just received.
+    // Best-effort: the tokens are already minted, so a failure here should not
+    // fail the whole request -- it just means the user tops up by hand.
+    let solSignature: string | null = null;
+    if (FAUCET_SOL > 0) {
+      try {
+        const bal = await conn.getBalance(wallet);
+        if (bal < SOL_TOPUP_FLOOR * LAMPORTS_PER_SOL) {
+          solSignature = await sendAndConfirmTransaction(
+            conn,
+            new Transaction().add(
+              SystemProgram.transfer({
+                fromPubkey: operator.publicKey,
+                toPubkey: wallet,
+                lamports: Math.round(FAUCET_SOL * LAMPORTS_PER_SOL),
+              })
+            ),
+            [operator]
+          );
+        }
+      } catch (e) {
+        console.error("[faucet] SOL top-up failed:", e instanceof Error ? e.message : String(e));
+      }
+    }
+
     // (the cooldown slot was already reserved before the mint)
     return json({
       ok: true,
       signature: sig,
       ata: ata.address.toBase58(),
       amount: FAUCET_USDC,
+      solSignature,
+      sol: solSignature ? FAUCET_SOL : 0,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     // Log the detail server-side only: RPC errors can embed the upstream URL, and
     // BASE_RPC_UPSTREAM may carry a private API key (the RPC proxy hides this for
-    // the same reason).
+    // the same reason). Classify into safe categories instead of echoing it --
+    // "Faucet mint failed" alone sends people hunting for a bug in the faucet
+    // when the actual cause is usually the public devnet RPC throttling us.
     console.error("[faucet] mint failed:", msg);
+    if (/\b429\b|too many requests|rate limit/i.test(msg)) {
+      return json(
+        {
+          ok: false,
+          error:
+            "The devnet RPC is rate limiting us. Wait a few seconds and try again — or configure a dedicated RPC via BASE_RPC_UPSTREAM.",
+        },
+        503
+      );
+    }
+    if (/insufficient (lamports|funds)/i.test(msg)) {
+      return json(
+        { ok: false, error: "The faucet operator is out of devnet SOL. Top it up and retry." },
+        503
+      );
+    }
     return json({ ok: false, error: "Faucet mint failed." }, 502);
   }
 }

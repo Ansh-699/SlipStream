@@ -543,7 +543,11 @@ export function useSession(marketIndex: number = 0) {
         return;
       }
       slog("faucet", `minted ${body.amount} USDC, sig=${body.signature}`);
-      setNotice(`Received ${body.amount} test USDC. You can deposit now.`);
+      setNotice(
+        body.sol
+          ? `Received ${body.amount} test USDC and ${body.sol} SOL for fees. You're ready to start.`
+          : `Received ${body.amount} test USDC. You can start trading now.`
+      );
       // Give the RPC a moment to reflect the mint, then refresh balances.
       await new Promise((r) => setTimeout(r, 1500));
       await refresh();

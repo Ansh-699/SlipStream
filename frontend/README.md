@@ -27,12 +27,16 @@ npm run dev        # http://localhost:3000  (runs copy-manifest first)
 
 ## Environment variables
 
-All optional — the build falls back to the committed `deploy.json`. Set these to
-point at a different deployment without editing code:
+Mostly optional — the build falls back to the committed `deploy.json`. The one
+worth setting on any real deployment is `BASE_RPC_UPSTREAM`: Solana's public
+devnet endpoint rate-limits aggressively, and when it does the faucet returns
+503 and balances stop loading. A free devnet key from Helius, Alchemy or
+QuickNode resolves it, and the same value serves both the RPC proxy and the
+faucet.
 
 | Variable | Purpose | Default |
 |---|---|---|
-| `BASE_RPC_UPSTREAM` | L1 RPC the `/api/rpc/base` proxy forwards to | `https://api.devnet.solana.com` |
+| `BASE_RPC_UPSTREAM` | L1 RPC used by both the `/api/rpc/base` proxy and the faucet. **Set this** — the default public endpoint throttles hard (HTTP 429) and the faucet fails with it | `https://api.devnet.solana.com` |
 | `ER_RPC_UPSTREAM` | ER RPC the `/api/rpc/er` proxy forwards to | `https://devnet.magicblock.app` |
 | `PYTH_BENCHMARKS_UPSTREAM` | Pyth Benchmarks history upstream | Pyth public endpoint |
 | `NEXT_PUBLIC_PROGRAM_ID` | Override program ID | from `deploy.json` |
