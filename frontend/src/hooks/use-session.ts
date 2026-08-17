@@ -107,6 +107,10 @@ export interface SessionState {
   freeCollateral: bigint;
   /** The wallet's SPL USDC balance (atoms, 6-dp). 0n if no ATA / no balance. */
   usdcBalance: bigint;
+  /** The wallet's native SOL balance in lamports — needed for fees and PDA
+   *  rent. A freshly created embedded wallet starts at zero, so the panel has
+   *  to be able to say so rather than letting setup fail at signing time. */
+  solBalance: bigint;
   userInitialized: boolean;
   /** The persisted session key's pubkey (base58), or null if none stored. */
   sessionPublicKey: string | null;
@@ -207,6 +211,7 @@ export function useSession(marketIndex: number = 0) {
     activeOrders: 0,
     freeCollateral: 0n,
     usdcBalance: 0n,
+    solBalance: 0n,
     userInitialized: false,
     sessionPublicKey: null,
     sessionActive: false,
@@ -266,6 +271,13 @@ export function useSession(marketIndex: number = 0) {
         }
       }
 
+      let solBalance = 0n;
+      try {
+        solBalance = BigInt(await connection.getBalance(publicKey));
+      } catch {
+        solBalance = 0n;
+      }
+
       const stored = loadStoredSession(publicKey, marketIndex);
       const sessionPublicKey = stored ? stored.keypair.publicKey.toBase58() : null;
 
@@ -277,6 +289,7 @@ export function useSession(marketIndex: number = 0) {
           initialized: false,
           freeCollateral,
           usdcBalance,
+          solBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -294,6 +307,7 @@ export function useSession(marketIndex: number = 0) {
           initialized: false,
           freeCollateral,
           usdcBalance,
+          solBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -330,6 +344,7 @@ export function useSession(marketIndex: number = 0) {
           activeOrders: 0,
           freeCollateral,
           usdcBalance,
+          solBalance,
           userInitialized,
           sessionPublicKey,
           sessionActive: false,
@@ -371,6 +386,7 @@ export function useSession(marketIndex: number = 0) {
         activeOrders: credit.activeOrders,
         freeCollateral,
         usdcBalance,
+        solBalance,
         userInitialized,
         sessionPublicKey,
         sessionActive,
@@ -671,7 +687,7 @@ export function useSession(marketIndex: number = 0) {
   // user whose wallet rejected step 2 of 3 can simply press the button again
   // rather than being stranded in a half-set-up state with no way forward.
   const autoStart = useCallback(
-    async (depositUsdc: number): Promise<boolean> => {
+    async (depositUsdc?: number): Promise<boolean> => {
       if (!publicKey) return false;
       try {
         const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
@@ -682,8 +698,23 @@ export function useSession(marketIndex: number = 0) {
           return true;
         }
 
-        slog("autostart", `starting one-click setup (deposit $${depositUsdc})`);
-        if (!(await initialize(depositUsdc))) return false;
+        // With no amount given, move the wallet's entire USDC balance in. Read
+        // it from chain rather than from a UI field: there is no deposit input
+        // any more, and React state can lag a faucet drip by a whole poll.
+        let deposit = depositUsdc;
+        if (deposit === undefined && USDC_MINT) {
+          let bal = 0n;
+          try {
+            const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+            bal = (await getAccount(connection, ata)).amount;
+          } catch {
+            bal = 0n;
+          }
+          deposit = Number(bal) / PRICE_SCALE;
+        }
+
+        slog("autostart", `starting one-click setup (deposit $${deposit ?? 0})`);
+        if (!(await initialize(deposit ?? 0))) return false;
 
         // Move everything deposited into trading credit. Read the balance from
         // chain — the deposit above landed moments ago and React state lags it.
