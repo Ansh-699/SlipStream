@@ -1,0 +1,21 @@
+# Scratch audit reproduction crate for run `audit-e2e`, slice S2.
+# NOT part of the product workspace (own empty [workspace] table detaches it).
+# Never wired into `cargo test --workspace`; run explicitly, see README.md.
+[workspace]
+
+[package]
+name = "s2-repro"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slipstream = { path = "../../../../../programs/slipstream", features = ["no-entrypoint"] }
+bytemuck = { version = "1.14", features = ["derive", "min_const_generics"] }
+
+[dev-dependencies]
+mollusk-svm = "0.12"
+solana-account = "3"
+solana-address = "1"
+solana-instruction = "3"
+solana-program-error = "3"

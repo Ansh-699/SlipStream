@@ -1,0 +1,29 @@
+Light mode (:root:not(.dark)) — the terminal ground stays dark (globals.css:1352,:1363),
+but the text utilities are remapped to dark ink. Resulting contrast:
+
+FAIL   3.35:1  (needs 4.5:1)  text-emerald-400 on #121516  12px bold
+        frontend/src/components/trading/fill-toasts.tsx:90   "Bought 1.00 SOL"   remap at globals.css:597
+FAIL   2.92:1  (needs 4.5:1)  text-rose-400 on #121516  12px bold
+        frontend/src/components/trading/fill-toasts.tsx:90   "Sold 1.00 SOL"   remap at globals.css:600
+FAIL   1.01:1  (needs 4.5:1)  text-white/55 on #121516  10px bold
+        frontend/src/components/trading/fill-toasts.tsx:94   "MAKER" / "TAKER"   remap at globals.css:576
+FAIL   1.01:1  (needs 4.5:1)  text-white/60 on #121516  11px
+        frontend/src/components/trading/fill-toasts.tsx:98   "@ $91.064 · fill #12"   remap at globals.css:575
+FAIL   3.23:1  (needs 4.5:1)  text-white on #16794f  14px bold
+        frontend/src/components/trading/order-form.tsx:461   "Long 5.5 SOL"   remap at globals.css:569
+FAIL   2.73:1  (needs 4.5:1)  text-white on #a93436  14px bold
+        frontend/src/components/trading/order-form.tsx:462   "Short 5.5 SOL"   remap at globals.css:569
+FAIL   3.23:1  (needs 4.5:1)  text-white on #16794f  13px bold
+        frontend/src/components/trading/session-panel.tsx:23   "Start trading"   remap at globals.css:569
+
+Same pairs in dark mode (no remap applies):
+
+       9.54:1  text-emerald-400 on #121516   frontend/src/components/trading/fill-toasts.tsx:90
+       6.82:1  text-rose-400 on #121516   frontend/src/components/trading/fill-toasts.tsx:90
+       6.16:1  text-white/55 on #121516   frontend/src/components/trading/fill-toasts.tsx:94
+       7.12:1  text-white/60 on #121516   frontend/src/components/trading/fill-toasts.tsx:98
+       5.41:1  text-white on #16794f   frontend/src/components/trading/order-form.tsx:461
+       6.50:1  text-white on #a93436   frontend/src/components/trading/order-form.tsx:462
+       5.41:1  text-white on #16794f   frontend/src/components/trading/session-panel.tsx:23
+
+7 of 7 pairs fail WCAG AA in light mode.

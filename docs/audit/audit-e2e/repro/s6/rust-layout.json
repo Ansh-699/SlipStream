@@ -1,0 +1,248 @@
+{
+  "GlobalState": {
+    "size": 104,
+    "align": 2,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_count": 2,
+      "paused": 4,
+      "_padding1": 5,
+      "authority": 8,
+      "treasury": 40,
+      "insurance_vault": 72
+    }
+  },
+  "Market": {
+    "size": 2064,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_index": 2,
+      "max_leverage": 4,
+      "circuit_breaker_active": 5,
+      "taker_fee_bps": 6,
+      "maker_rebate_bps": 8,
+      "twap_write_index": 10,
+      "twap_count": 12,
+      "_padding1": 14,
+      "base_mint": 16,
+      "quote_mint": 48,
+      "pyth_feed": 80,
+      "quote_vault": 112,
+      "tick_size": 144,
+      "lot_size": 152,
+      "funding_interval_secs": 160,
+      "last_funding_ts": 168,
+      "open_interest_long": 176,
+      "open_interest_short": 184,
+      "insurance_fund_balance": 192,
+      "last_mark_price": 200,
+      "cumulative_funding_index_lo": 208,
+      "cumulative_funding_index_hi": 216,
+      "twap_prices": 224,
+      "switchboard_feed": 2024,
+      "restricted_mode": 2056,
+      "agreement_streak": 2057,
+      "_padding2": 2058
+    }
+  },
+  "UserAccount": {
+    "size": 56,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "pending_fills": 2,
+      "_padding1": 4,
+      "owner": 8,
+      "free_collateral": 40,
+      "reserved_margin": 48
+    }
+  },
+  "Position": {
+    "size": 96,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_index": 2,
+      "_padding1": 4,
+      "owner": 8,
+      "size": 40,
+      "entry_price": 48,
+      "collateral": 56,
+      "realized_pnl": 64,
+      "open_slot": 72,
+      "funding_index_snapshot_lo": 80,
+      "funding_index_snapshot_hi": 88
+    }
+  },
+  "TradingCredit": {
+    "size": 96,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_index": 2,
+      "active_orders": 4,
+      "_padding": 6,
+      "owner": 8,
+      "credit": 40,
+      "committed": 48,
+      "session_authority": 56,
+      "session_expiry": 88
+    }
+  },
+  "LiquidationIntent": {
+    "size": 64,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "_padding": 2,
+      "position": 8,
+      "created_ts": 40,
+      "deadline_ts": 48,
+      "initial_health_factor": 56
+    }
+  },
+  "TriggerOrder": {
+    "size": 56,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "kind": 2,
+      "trigger_above": 3,
+      "market_index": 4,
+      "_padding": 6,
+      "owner": 8,
+      "trigger_price": 40,
+      "created_ts": 48
+    }
+  },
+  "OrderBookHeader": {
+    "size": 48,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_index": 2,
+      "orders_per_user": 4,
+      "_pad1": 5,
+      "max_order_slots": 8,
+      "max_price_levels_per_side": 10,
+      "max_fill_events": 12,
+      "active_order_count": 14,
+      "bid_level_count": 16,
+      "ask_level_count": 18,
+      "fill_event_head": 20,
+      "fill_event_tail": 22,
+      "fill_event_count": 24,
+      "free_list_head": 26,
+      "free_slot_count": 28,
+      "_pad2": 30,
+      "next_order_id": 32,
+      "next_fill_sequence": 40
+    }
+  },
+  "OrderSlot": {
+    "size": 88,
+    "align": 8,
+    "fields": {
+      "active": 0,
+      "side": 1,
+      "order_type": 2,
+      "_pad1": 3,
+      "next_at_level": 4,
+      "prev_at_level": 6,
+      "order_id": 8,
+      "owner": 16,
+      "price": 48,
+      "size": 56,
+      "remaining_size": 64,
+      "expiry_ts": 72,
+      "margin_reserved": 80
+    }
+  },
+  "PriceLevel": {
+    "size": 16,
+    "align": 8,
+    "fields": {
+      "price": 0,
+      "head_slot": 8,
+      "tail_slot": 10,
+      "order_count": 12,
+      "_pad": 14
+    }
+  },
+  "FillEvent": {
+    "size": 104,
+    "align": 8,
+    "fields": {
+      "sequence": 0,
+      "maker": 8,
+      "taker": 40,
+      "price": 72,
+      "quantity": 80,
+      "filled_margin": 88,
+      "taker_fee_bps_snapshot": 96,
+      "maker_rebate_bps_snapshot": 98,
+      "maker_side": 100,
+      "_pad": 101
+    }
+  },
+  "FillLogHeader": {
+    "size": 24,
+    "align": 8,
+    "fields": {
+      "discriminator": 0,
+      "bump": 1,
+      "market_index": 2,
+      "epoch": 4,
+      "capacity": 8,
+      "count": 10,
+      "head": 12,
+      "_pad": 14,
+      "last_mirrored_sequence": 16
+    }
+  }
+,
+  "_derived": {
+    "TWAP_BUFFER_SIZE": 225,
+    "FILL_LOG_CAPACITY": 80,
+    "SENTINEL": 65535,
+    "fill_log_account_size(FILL_LOG_CAPACITY)": 8344,
+    "OrderBookHeader::default_account_size()": 626736,
+    "DEFAULT_MAX_ORDER_SLOTS": 2048,
+    "DEFAULT_MAX_PRICE_LEVELS": 512,
+    "DEFAULT_MAX_FILL_EVENTS": 4096
+  },
+  "_disc": {
+    "DISC_GLOBAL_STATE": 1,
+    "DISC_MARKET": 2,
+    "DISC_USER_ACCOUNT": 3,
+    "DISC_POSITION": 4,
+    "DISC_ORDER_BOOK": 5,
+    "DISC_TRADING_CREDIT": 6,
+    "DISC_LIQUIDATION_INTENT": 7,
+    "DISC_FILL_LOG": 8,
+    "DISC_TRIGGER_ORDER": 9
+  },
+  "_seeds": {
+    "SEED_GLOBAL": "global",
+    "SEED_MARKET": "market",
+    "SEED_USER": "user",
+    "SEED_POSITION": "position",
+    "SEED_ORDERBOOK": "orderbook",
+    "SEED_VAULT_AUTHORITY": "vault_authority",
+    "SEED_CREDIT": "credit",
+    "SEED_LIQ_INTENT": "liq_intent",
+    "SEED_FILL_LOG": "fill_log",
+    "SEED_TRIGGER": "trigger",
+    "SEED_DELEGATE_BUFFER": "buffer",
+    "_end": null
+  }
+}

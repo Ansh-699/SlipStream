@@ -1,0 +1,55 @@
+=== live devnet read, 2026-08-21T19:41:26.437Z ===
+market             ECUp8pXzVLzxjVs8mtKBJma3mdcHf8zSC4cqPeBy8MPy
+last_mark_price    74114120 => $74.114
+last_funding_ts    1785938600 = 2026-08-05T14:03:20.000Z
+                   (16.2 days ago)
+open_interest_long  87400000000
+open_interest_short 94300000000
+pyth feed          7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE
+pyth price         $90.987 published 2026-08-21T19:41:18.000Z (8s ago)
+
+divergence mark vs oracle: 18.54%
+
+=== rendered strings ===
+market-bar.tsx:86   headline        "90.99"
+market-bar.tsx:102  Mark stat       "74.114"  label "Mark (stale)"
+market-bar.tsx:109  OI Long         "87.40"
+market-bar.tsx:113  OI Short        "94.30"
+status-panel:188    Mark freshness  "18.54% off oracle"  level down
+positions-table:355 Mark column     "$74.11"   <- frozen value, no stale treatment
+
+=== 1.0 SOL long, entry = today's oracle $90.99 ===
+  health rendered with the FROZEN mark: -5.42 (RED)
+  health at the true oracle price     : 2.00 (green)
+  uPnL rendered: -$16.87   true uPnL: +$0.00
+
+=== order-form.tsx: 'Margin at risk' vs place_order.rs:171 ===
+  lev  1x  size 1.1 SOL  notional $100.09  | shown "Margin at risk" $100.09  | program reserves $5.00  | liquidates on a 2.50% adverse move
+  lev  2x  size 2.2 SOL  notional $200.17  | shown "Margin at risk" $100.09  | program reserves $10.01  | liquidates on a 2.50% adverse move
+  lev  5x  size 5.5 SOL  notional $500.43  | shown "Margin at risk" $100.09  | program reserves $25.02  | liquidates on a 2.50% adverse move
+  lev 10x  size 11.0 SOL  notional $1000.86  | shown "Margin at risk" $100.09  | program reserves $50.04  | liquidates on a 2.50% adverse move
+  lev 20x  size 22.0 SOL  notional $2001.71  | shown "Margin at risk" $100.09  | program reserves $100.09  | liquidates on a 2.50% adverse move
+
+=== positions-table.tsx:83 flatten cross price, built off the frozen mark ===
+  closing a LONG  -> IOC ASK limit $70.408  (best bid is near $90.99) -> fills
+  closing a SHORT -> IOC BID limit $77.820  (best ask is near $90.99) -> DOES NOT CROSS, silently no-fills
+
+order_book account bytes: [33m626736[39m = 612.05 KB  (landing-view.tsx:35 claims "612 KB") -> accurate
+
+=== ER order book, what order-book-display.tsx renders ===
+  activeOrderCount [33m12[39m  bidLevels [33m6[39m  askLevels [33m6[39m
+  order-book-display.tsx:128  "mid" = 74.154   spread 0.208
+  oracle now $90.987 -> the rendered mid is 18.5% away
+  the empty-state branch (:100-104) only knows loading / unavailable / empty;
+  a 16-day-old ladder renders identically to a live one.
+  active slots 12; slots carrying a non-zero expiry_ts: 0
+  -> OrderSlot has no creation timestamp (accounts.ts:416-430), so age cannot be
+     derived from the book; a mid-vs-oracle check is the only available signal.
+
+=== UI health vs liquidate_position.rs, at the live prices above ===
+  SHORT 1 SOL @ entry $74.114 (the terminal's own "Mark")
+    UI    -> health 2.00 GREEN, liq $75.97, uPnL +$0.00
+    chain -> health 0.00 *** LIQUIDATABLE (HEALTH_FACTOR_LIQUIDATION_THRESHOLD = 1.0) ***, uPnL -$16.87
+  LONG 1 SOL @ entry $74.114 (the terminal's own "Mark")
+    UI    -> health 2.00 GREEN, liq $72.26, uPnL +$0.00
+    chain -> health 9.05 safe, uPnL +$16.87

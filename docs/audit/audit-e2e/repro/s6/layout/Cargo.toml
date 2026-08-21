@@ -1,0 +1,10 @@
+[workspace]
+
+[package]
+name = "s6-layout-dump"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slipstream = { path = "../../../../../../programs/slipstream", features = ["no-entrypoint"] }

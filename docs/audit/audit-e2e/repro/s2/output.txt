@@ -1,0 +1,53 @@
+   Compiling s2-repro v0.0.0 (/home/anshtyagi/Documents/slip-grant/SlipStream/docs/audit/audit-e2e/repro/s2)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.38s
+     Running unittests src/lib.rs (/tmp/s2-repro/debug/deps/s2_repro-e9d21272f02b5f6e)
+
+running 9 tests
+test s2_01_fill_ring_overwrites_without_signalling ... ring at capacity      : [1, 2, 3, 4] count=4 head=0 tail=0
+after two more pushes : [5, 6, 3, 4] count=4 head=2 tail=2
+LOST: sequences 1,2 are unrecoverable; header exposes only count=4 head=2 tail=2
+ok
+place_order against an order expired at 1699996400 (clock 1700000000): Success
+after: fill_event_count=1 ask_level_count=0 active_order_count=0 fill.qty=100000000 fill.price=150000000
+ok
+test s2_03_taker_debit_can_differ_from_credited_filled_margin ... fill qty=100000000: taker debited 4966666, taker credited 4966666
+fill qty=100000000: taker debited 4966666, taker credited 4966667
+fill qty=100000000: taker debited 4966666, taker credited 4966667
+maker margin drained  : 14900000 (credited to maker positions: 14900000)
+taker debited (ER)    : 14899998
+taker credited (L1)   : 14900000
+delta minted from air : 2
+ok
+owner already holds 511 active slots (orders_per_user = 20, 511 as u8 = 255): Failure(Custom(291))  CU = 32561
+owner already holds 512 active slots (orders_per_user = 20, 512 as u8 = 0): Success  CU = 33127
+  -> order accepted; owner now holds 513 active slots, 25x the declared cap of 20
+ok
+clock = 1700000000 (honest, expiry 1699996400): Failure(Custom(257))
+clock = 1699992800 (rewound by the sequencer):        Success
+  -> order rested: active_order_count=1 owner=the CREDIT OWNER
+ok
+posted: active=6 bids=3 asks=2 best_bid=Some(150000000) best_ask=Some(151000000)
+sweep fills: [0] px=151000000 qty=300000000 · [1] px=152000000 qty=100000000 (count=2)
+final: active=2 free=14 bids=2 asks=0 — all invariants held at every step
+ok
+place_order on a 2048-slot / 511-ask-level book: Success  CU = 22371
+cancel_order on the same book:                  Success  CU = 21655
+ok
+test s2_negative_partially_grown_book_is_rejected ... len      47 -> rejected
+len      48 -> rejected
+len   10240 -> rejected
+len  626735 -> rejected
+len  626736 -> ACCEPTED (full size only)
+ok
+POST_ONLY crossing  -> Failure(Custom(277))
+self-trade          -> Failure(Custom(310))
+ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+
+   Doc-tests s2_repro
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

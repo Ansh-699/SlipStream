@@ -1,0 +1,28 @@
+read at 2026-08-21T19:29:01Z
+-- OrderBookHeader (ER slot 546316629) orders_per_user=20
+   max_order_slots              2048
+   max_price_levels_per_side    512
+   max_fill_events              4096
+   active_order_count           12
+   bid_level_count              6
+   ask_level_count              6
+   fill_event_head              3229
+   fill_event_tail              3229
+   fill_event_count             4096
+   free_list_head               37
+   free_slot_count              2036
+   next_order_id                765434
+   next_fill_sequence           44190
+-- Market (L1 slot 486305361)
+   last_mark_price              74114120
+   last_funding_ts              1785938600 (2026-08-05 14:03:20+00:00)
+   last_settled_sequence        44173
+-- ring holds sequences 40094 .. 44189; 16 fill(s) produced but not settled
+-- 4079 already-settled entries stand between the write head and the oldest unsettled fill
+-- free-list walk length 2036 vs header free_slot_count 2036: MATCH; no cycle, no out-of-range index
+-- active slots 12 vs header active_order_count 12: MATCH; active+free = 2048 of 2048
+-- resting orders already past their own expiry_ts: 0 []
+-- bid levels (6) sorted descending: OK -> [74050000, 74035000, 74020000, 74006000, 73991000, 73976000]
+   every bid level head_slot points at an ACTIVE slot at the level's own price
+-- ask levels (6) sorted ascending: OK -> [74258000, 74273000, 74287000, 74302000, 74317000, 74332000]
+   every ask level head_slot points at an ACTIVE slot at the level's own price

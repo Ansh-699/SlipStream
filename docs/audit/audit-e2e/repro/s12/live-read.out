@@ -1,0 +1,25 @@
+read at: 2026-08-21T19:41:27.718304+00:00
+
+[market]
+  max_leverage        = 20
+  taker_fee_bps       = 6
+  maker_rebate_bps    = 1
+  tick_size           = 1000
+  lot_size            = 100000000
+  funding_interval_s  = 28800
+  last_funding_ts     = 1785938600 2026-08-05T14:03:20+00:00
+  last_mark_price     = 74114120  ($74.114)
+  open_interest L/S   = 87400000000 / 94300000000
+  age of last funding = 16.2 days
+
+[pyth 7UVimf...]
+  price               = $91.05
+  publish_time        = 1787341158 2026-08-21T19:39:18+00:00
+  feed age            = 130 s
+  mark vs pyth        = 18.6% low
+
+[orderbook 83zMFL...]
+  owner               = DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
+  space               = 626736
+
+ALL ASSERTIONS HELD
