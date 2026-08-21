@@ -46,11 +46,11 @@ export function OrderBookDisplay() {
     <div className="panel h-full flex flex-col">
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
         <span className="panel-title">Order Book</span>
-        <span className="text-[10px] text-white/30 font-medium">SOL-PERP</span>
+        <span className="text-[10px] text-white/50 font-medium">SOL-PERP</span>
       </div>
 
       {/* Column header */}
-      <div className="grid grid-cols-3 px-4 pt-2 pb-1.5 text-[9px] text-white/35 font-semibold uppercase tracking-wider shrink-0">
+      <div className="grid grid-cols-3 px-4 pt-2 pb-1.5 text-[10px] text-white/50 font-semibold uppercase tracking-wider shrink-0">
         <span>Price</span>
         <span className="text-right">Size</span>
         <span className="text-right">Total</span>
@@ -58,7 +58,7 @@ export function OrderBookDisplay() {
 
       <div className="flex-1 flex flex-col min-h-0 px-1.5 pb-1.5">
         {empty ? (
-          <div className="flex-1 flex items-center justify-center text-xs text-white/40 font-medium">
+          <div className="flex-1 flex items-center justify-center text-xs text-white/55 font-medium">
             No orders yet
           </div>
         ) : (
@@ -71,15 +71,14 @@ export function OrderBookDisplay() {
               ))}
             </div>
 
-            {/* Mid / spread */}
-            <div className="flex items-center gap-2 px-2.5 py-1.5 shrink-0">
-              <span className="text-base font-bold tnum text-rose-400">
+            {/* Mid / spread. The mid is neither a bid nor an ask, so it stays
+                neutral — emerald and rose mean side in this panel. */}
+            <div className="flex items-baseline gap-2 px-2.5 py-1.5 shrink-0">
+              <span className="text-base font-bold tnum text-white">
                 {mid !== null ? mid.toFixed(3) : "—"}
               </span>
-              <span className="text-xs tnum text-white/35">
-                {askRows.length ? askRows[0].price.toFixed(3) : ""}
-              </span>
-              <span className="ml-auto text-[10px] text-white/40 font-medium">
+              <span className="text-[10px] text-white/55 font-medium">mid</span>
+              <span className="ml-auto text-[10px] text-white/55 font-medium tnum">
                 {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
               </span>
             </div>
@@ -93,7 +92,11 @@ export function OrderBookDisplay() {
 
             {/* Buy / Sell ratio bar */}
             <div className="shrink-0 px-1.5 pt-1.5">
-              <div className="flex items-center h-4 rounded-sm overflow-hidden text-[10px] font-bold">
+              <div
+                role="img"
+                aria-label={`Resting depth: ${buyPct.toFixed(0)}% bids, ${(100 - buyPct).toFixed(0)}% asks`}
+                className="flex items-center h-4 rounded-sm overflow-hidden text-[10px] font-bold"
+              >
                 <div
                   className="h-full bg-emerald-500/25 text-emerald-300 flex items-center pl-1.5"
                   style={{ width: `${buyPct}%` }}

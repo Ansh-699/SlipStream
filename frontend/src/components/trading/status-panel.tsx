@@ -95,7 +95,7 @@ export function StatusPanel() {
     <div className="panel px-4 pt-3.5 pb-3">
       <div className="flex flex-col pb-1.5 border-b border-white/[0.06]">
         <span className="panel-title">System Status</span>
-        <span className="text-[9px] text-white/35 font-medium">All signals verifiable on-chain</span>
+        <span className="text-[10px] text-white/50 font-medium">All signals verifiable on-chain</span>
       </div>
       <div className="pt-1.5">
         <Row label="Solana RPC" level={baseLevel} detail={baseDetail} />

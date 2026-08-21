@@ -38,10 +38,10 @@ export function DocsShell({
           </Link>
           <div className="ml-auto flex items-center gap-3">
             <Link
-              href="/"
+              href="/trade"
               className="text-xs font-medium text-white/60 hover:text-white transition-colors"
             >
-              ← Back to app
+              ← Back to the terminal
             </Link>
             <ThemeToggle />
             <button

@@ -331,6 +331,63 @@
   }
 }
 
+/* Browser-drawn surfaces. These ship with defaults that belong to no design
+   system, so they are themed from the emerald accent like everything else. */
+::selection {
+  background: rgba(16, 185, 129, 0.28);
+  color: inherit;
+}
+:root:not(.dark) ::selection {
+  background: rgba(16, 185, 129, 0.24);
+}
+
+input,
+textarea,
+[contenteditable] {
+  caret-color: #10b981;
+}
+
+/* The default focus ring is invisible against the dark canvas. Keyboard users
+   get an emerald ring; pointer users are unaffected. */
+:focus-visible {
+  outline: 2px solid rgba(16, 185, 129, 0.75);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Page scrollbar. `.slim-scroll` keeps its own tighter treatment below. */
+html {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+:root:not(.dark) html {
+  scrollbar-color: rgba(15, 23, 23, 0.22) transparent;
+}
+body::-webkit-scrollbar {
+  width: 11px;
+}
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+body::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.45);
+  background-clip: content-box;
+}
+:root:not(.dark) body::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 23, 0.2);
+  background-clip: content-box;
+}
+
+/* Links inside prose sit closer to their underline than the browser default. */
+a {
+  text-underline-offset: 0.18em;
+}
+
 
 /* Slim, visible scrollbar for the order-form/session column so the session-key
    controls at the bottom are always reachable inside the viewport lock. */
@@ -430,11 +487,14 @@ input[type="number"] {
 .doc-prose ol {
   list-style: decimal;
 }
+/* brand.md: emerald is load-bearing signal, never decoration. A blockquote is
+   not a status, so it gets a neutral hairline and surface rather than an accent
+   bar on every pull-quote in the docs. */
 .doc-prose blockquote {
   margin: 1.1rem 0;
-  padding: 0.6rem 1rem;
-  border-left: 3px solid rgba(16, 185, 129, 0.5);
-  background: rgba(16, 185, 129, 0.06);
+  padding: 0.7rem 1.1rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.035);
   border-radius: 0 0.5rem 0.5rem 0;
   color: rgba(255, 255, 255, 0.85);
 }
@@ -577,7 +637,11 @@ input[type="number"] {
 }
 :root:not(.dark) .doc-prose pre code { color: rgba(15, 23, 23, 0.85); }
 :root:not(.dark) .doc-prose a { color: #0f766e; }
-:root:not(.dark) .doc-prose blockquote { color: rgba(15, 23, 23, 0.8); }
+:root:not(.dark) .doc-prose blockquote {
+  color: rgba(15, 23, 23, 0.8);
+  border-left-color: rgba(15, 23, 23, 0.18);
+  background: rgba(15, 23, 23, 0.035);
+}
 :root:not(.dark) .doc-prose th,
 :root:not(.dark) .doc-prose td { border-color: rgba(15, 23, 23, 0.12); }
 :root:not(.dark) .doc-prose hr { border-color: rgba(15, 23, 23, 0.1); }

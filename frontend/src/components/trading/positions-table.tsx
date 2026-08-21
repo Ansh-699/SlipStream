@@ -229,13 +229,13 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
     <div className="panel">
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
         <span className="panel-title">Positions</span>
-        <span className="text-[10px] text-white/30 font-medium">
+        <span className="text-[10px] text-white/50 font-medium">
           {positions.length + (erPosition ? 1 : 0)} open
         </span>
       </div>
       <div className="px-2 pb-2">
         {positions.length === 0 && !erPosition ? (
-          <div className="text-center text-xs text-white/40 font-medium py-8">
+          <div className="text-center text-xs text-white/55 font-medium py-8">
             {publicKey ? "No open positions" : "Connect wallet to view positions"}
           </div>
         ) : (
@@ -260,7 +260,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                   <td className="px-2 py-2.5">
                     <div className="flex flex-col gap-1">
                       <SideBadge isLong={erPosition.isLong} />
-                      <span className="text-[8px] text-amber-400/90 font-semibold uppercase tracking-wide flex items-center gap-1">
+                      <span className="text-[10px] text-amber-400/90 font-semibold uppercase tracking-wide flex items-center gap-1">
                         <span className="h-1 w-1 rounded-full bg-amber-400 animate-pulse" />
                         Pending
                       </span>
@@ -453,7 +453,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                           Clear TP
                         </button>
                       )}
-                      <span className="text-[10px] text-white/35">
+                      <span className="text-[10px] text-white/50">
                         Executed by keepers when the mark price crosses — works even if you close this tab.
                       </span>
                     </div>
@@ -539,7 +539,7 @@ function liqAndHealth(
 }
 
 function HealthCell({ health }: { health: number | null }) {
-  if (health === null) return <span className="text-white/40">—</span>;
+  if (health === null) return <span className="text-white/55">—</span>;
   const color =
     health >= 2 ? "text-emerald-400" : health >= 1.3 ? "text-amber-400" : "text-rose-400";
   const bar =
@@ -562,7 +562,7 @@ function TriggerBadge({ label, price, tone }: { label: string; price: number; to
       ? "bg-rose-500/10 text-rose-300/90 border-rose-500/20"
       : "bg-emerald-500/10 text-emerald-300/90 border-emerald-500/20";
   return (
-    <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded-sm border text-[8px] font-bold tracking-wide ${cls}`}>
+    <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded-sm border text-[10px] font-bold tracking-wide ${cls}`}>
       {label} <span className="font-mono tnum">${price.toFixed(2)}</span>
     </span>
   );

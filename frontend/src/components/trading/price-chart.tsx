@@ -100,7 +100,7 @@ export function PriceChart() {
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-white/50">
             <span>{loading ? "Loading Pyth history…" : error ? `Error: ${error}` : "No candles"}</span>
-            <span className="text-[11px] text-white/30">Crypto.SOL/USD · Pyth Benchmarks</span>
+            <span className="text-[11px] text-white/50">Crypto.SOL/USD · Pyth Benchmarks</span>
           </div>
         )}
       </div>
@@ -375,7 +375,7 @@ function CandleCanvas({
           <span>H <span className="text-emerald-400">{hoverCandle.h.toFixed(3)}</span></span>
           <span>L <span className="text-rose-400">{hoverCandle.l.toFixed(3)}</span></span>
           <span>C <span className="text-white/80">{hoverCandle.c.toFixed(3)}</span></span>
-          <span className="text-white/40">
+          <span className="text-white/55">
             {new Date(hoverCandle.t * 1000).toLocaleString([], {
               month: "short",
               day: "numeric",

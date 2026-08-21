@@ -67,11 +67,11 @@ export function OpenOrders() {
     <div className="panel">
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
         <span className="panel-title">Open Orders</span>
-        <span className="text-[10px] text-white/30 font-medium">{orders.length} resting</span>
+        <span className="text-[10px] text-white/50 font-medium">{orders.length} resting</span>
       </div>
       <div className="px-2 pb-2">
         {orders.length === 0 ? (
-          <div className="text-center text-xs text-white/40 font-medium py-8">
+          <div className="text-center text-xs text-white/55 font-medium py-8">
             {publicKey ? "No open orders" : "Connect wallet to view open orders"}
           </div>
         ) : (

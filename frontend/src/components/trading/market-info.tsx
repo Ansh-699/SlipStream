@@ -15,7 +15,7 @@ function Brand() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.png" alt="Slipstream" className="h-full w-full object-cover" />
       </div>
-      <span className="text-base font-bold tracking-tight bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent hidden sm:inline">
+      <span className="text-base font-bold tracking-tight text-white hidden sm:inline">
         Slipstream
       </span>
     </div>
@@ -78,19 +78,19 @@ export function MarketInfo() {
           ) : market.restrictedMode ? (
             <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">CLOSES ONLY</Badge>
           ) : (
-            <span className="inline-flex items-center gap-1 text-[9px] font-semibold text-emerald-300/80 uppercase tracking-wider">
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-300/80 uppercase tracking-wider">
               <span className="live-dot" /> Live
             </span>
           )}
         </div>
-        <span className="text-[9px] text-white/40 font-medium">Perpetual · ER</span>
+        <span className="text-[10px] text-white/55 font-medium">Perpetual · ER</span>
       </div>
 
       <div className="flex flex-col shrink-0">
         <span className="text-[22px] leading-none font-bold tnum text-white tracking-tight">
           ${markPrice > 0 ? markPrice.toFixed(3) : "—"}
         </span>
-        <span className="text-[9px] text-white/40 font-medium uppercase tracking-wider mt-1">Mark</span>
+        <span className="text-[10px] text-white/55 font-medium uppercase tracking-wider mt-1">Mark</span>
       </div>
 
       <Stat label="OI Long" value={`${oiLong.toFixed(2)}`} accent="emerald" />
@@ -126,7 +126,7 @@ function Stat({
   return (
     <div className="flex flex-col shrink-0">
       <span className={`text-sm font-bold tnum ${color}`}>{value}</span>
-      <span className="text-[9px] text-white/40 font-medium uppercase tracking-wider mt-0.5">
+      <span className="text-[10px] text-white/55 font-medium uppercase tracking-wider mt-0.5">
         {label}
       </span>
     </div>

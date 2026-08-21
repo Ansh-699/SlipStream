@@ -125,7 +125,7 @@ export function SessionPanel() {
               <div className="space-y-2 pt-0.5">
                 <div className="flex items-center gap-2">
                   <div className="h-px flex-1 bg-white/[0.06]" />
-                  <span className="text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                     In the market
                   </span>
                   <div className="h-px flex-1 bg-white/[0.06]" />
@@ -227,7 +227,7 @@ function WalletIdentity({ address }: { address: string | null }) {
   return (
     <div className="flex items-center justify-between rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
       <div className="flex flex-col min-w-0">
-        <span className="text-[9px] uppercase tracking-wider text-muted-foreground font-semibold">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
           Your wallet
         </span>
         <span className="font-mono text-xs text-foreground truncate" title={address}>
@@ -347,11 +347,11 @@ function Stat({
       : "text-foreground";
   return (
     <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
-      <div className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider">
+      <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
         {label}
       </div>
       <div className={`font-mono font-bold text-sm tnum ${color}`}>{value}</div>
-      <div className="text-[9px] text-muted-foreground/70 font-medium mt-0.5">{hint}</div>
+      <div className="text-[10px] text-muted-foreground/70 font-medium mt-0.5">{hint}</div>
     </div>
   );
 }

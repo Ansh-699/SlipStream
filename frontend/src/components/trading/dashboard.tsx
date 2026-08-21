@@ -62,7 +62,7 @@ export function TradingDashboard() {
             {/* Open Orders + Positions — now to the LEFT of the session panel. */}
             <div className="flex items-center gap-2 mt-1">
               <div className="h-px flex-1 bg-white/[0.06]" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/30">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/50">
                 Your Activity
               </span>
               <div className="h-px flex-1 bg-white/[0.06]" />

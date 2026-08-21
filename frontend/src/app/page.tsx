@@ -1,5 +1,5 @@
-import { TradingDashboard } from "@/components/trading/dashboard";
+import { LandingView } from "@/components/landing/landing-view";
 
 export default function Home() {
-  return <TradingDashboard />;
+  return <LandingView />;
 }

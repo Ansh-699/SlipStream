@@ -230,7 +230,7 @@ export function OrderForm() {
 
   const showPriceInput = orderType !== "market";
   const inputCls =
-    "h-9 text-sm bg-black/5 dark:bg-black/20 border-black/10 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/40 focus-visible:ring-ring/40";
+    "h-9 text-sm bg-black/5 dark:bg-black/20 border-black/10 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/55 focus-visible:ring-ring/40";
 
   return (
     <LiquidGlassCard shadowIntensity="none" glowIntensity="none" borderRadius="14px" className="glass-surface backdrop-blur-xl text-zinc-900 dark:text-white">
@@ -309,7 +309,7 @@ export function OrderForm() {
             onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
             className="w-full accent-emerald-500 cursor-pointer"
           />
-          <div className="flex justify-between text-[9px] text-zinc-400 dark:text-white/40 font-medium">
+          <div className="flex justify-between text-[10px] text-zinc-400 dark:text-white/55 font-medium">
             <span>1x</span><span>5x</span><span>10x</span><span>20x</span>
           </div>
         </div>

@@ -64,7 +64,7 @@ export function TradeHistory() {
       <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06] shrink-0">
         <div className="flex flex-col">
           <span className="panel-title">Trade History</span>
-          <span className="text-[9px] text-white/35 font-medium">
+          <span className="text-[10px] text-white/50 font-medium">
             {wallet ? "Your settled fills" : "All settled fills"} · from the L1 settlement pipeline
           </span>
         </div>
@@ -76,7 +76,7 @@ export function TradeHistory() {
       </div>
 
       <div className="px-3 pt-2 pb-2 flex-1 min-h-0 flex flex-col">
-        <div className="grid grid-cols-[0.9fr_0.9fr_0.9fr_0.7fr_0.7fr_0.9fr] gap-2 text-[9px] text-white/45 font-semibold pb-1.5 uppercase tracking-wider border-b border-white/[0.05] shrink-0 px-1">
+        <div className="grid grid-cols-[0.9fr_0.9fr_0.9fr_0.7fr_0.7fr_0.9fr] gap-2 text-[10px] text-white/45 font-semibold pb-1.5 uppercase tracking-wider border-b border-white/[0.05] shrink-0 px-1">
           <span>Time</span>
           <span className="text-right">Price</span>
           <span className="text-right">Size (SOL)</span>
@@ -87,7 +87,7 @@ export function TradeHistory() {
 
         <div className="max-h-[220px] overflow-y-auto slim-scroll mt-0.5">
           {fills.length === 0 ? (
-            <div className="text-center text-xs text-white/40 font-medium py-6">
+            <div className="text-center text-xs text-white/55 font-medium py-6">
               {indexed ? "No settled fills yet" : "Indexer warming up…"}
             </div>
           ) : (
@@ -121,7 +121,7 @@ export function TradeHistory() {
                   <span className="text-right">
                     {wallet ? (
                       <span
-                        className={`inline-block text-[9px] font-semibold uppercase tracking-wider px-1.5 py-px rounded-sm ${
+                        className={`inline-block text-[10px] font-semibold uppercase tracking-wider px-1.5 py-px rounded-sm ${
                           isMaker
                             ? "bg-sky-400/10 text-sky-300/80"
                             : "bg-amber-400/10 text-amber-300/80"
@@ -130,7 +130,7 @@ export function TradeHistory() {
                         {isMaker ? "Maker" : "Taker"}
                       </span>
                     ) : (
-                      <span className="text-white/30">—</span>
+                      <span className="text-white/50">—</span>
                     )}
                   </span>
                   <span className="text-right font-mono tnum text-sky-400/80 underline decoration-dotted underline-offset-2">

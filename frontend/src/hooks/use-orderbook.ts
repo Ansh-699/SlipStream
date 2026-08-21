@@ -28,6 +28,14 @@ export interface RecentTrade {
   maker: string;
 }
 
+/**
+ * Why a caller needs this: an empty ladder has three very different causes —
+ * we haven't fetched yet, the book decoded fine but nobody is quoting, or the
+ * account/RPC is unreachable. Rendering all three as "no orders" is a lie, so
+ * the status is reported rather than inferred from `bids.length === 0`.
+ */
+export type OrderBookStatus = "loading" | "live" | "stale" | "empty" | "unavailable";
+
 export interface OrderBookData {
   bids: OrderBookLevel[];
   asks: OrderBookLevel[];
@@ -35,6 +43,9 @@ export interface OrderBookData {
   trades: RecentTrade[];
   /** Matching engine's next fill sequence (settlement-lag numerator). */
   nextFillSequence: number;
+  status: OrderBookStatus;
+  /** Epoch ms of the last successful decode, or null if we never got one. */
+  updatedAt: number | null;
 }
 
 const EMPTY: OrderBookData = {
@@ -43,6 +54,8 @@ const EMPTY: OrderBookData = {
   spread: null,
   trades: [],
   nextFillSequence: 0,
+  status: "loading",
+  updatedAt: null,
 };
 
 export function useOrderBook(marketIndex: number = 0) {
@@ -73,7 +86,8 @@ export function useOrderBook(marketIndex: number = 0) {
         info = await baseConn.getAccountInfo(pda);
       }
       if (!info) {
-        setData(EMPTY);
+        // Neither the ER nor the base layer returned the account.
+        setData((prev) => ({ ...prev, status: "unavailable" }));
         return;
       }
 
@@ -98,9 +112,17 @@ export function useOrderBook(marketIndex: number = 0) {
         spread,
         trades,
         nextFillSequence: Number(book.header.nextFillSequence),
+        status: bids.length || asks.length ? "live" : "empty",
+        updatedAt: Date.now(),
       });
     } catch {
-      // Transient RPC/decoding error — keep last good state and retry.
+      // Transient RPC/decode error. Keep the last good ladder on screen — a
+      // single blip should not blank the book — but stop calling it live, so
+      // callers can say "stale" instead of showing frozen quotes as current.
+      setData((prev) => {
+        if (prev.updatedAt === null) return { ...prev, status: "unavailable" };
+        return prev.status === "stale" ? prev : { ...prev, status: "stale" };
+      });
     }
   }, [marketIndex]);
 

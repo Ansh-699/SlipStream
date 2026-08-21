@@ -91,7 +91,7 @@ export function FillToasts() {
               >
                 {t.side === "buy" ? "Bought" : "Sold"} {t.size.toFixed(2)} SOL
               </span>
-              <span className="text-[9px] font-semibold uppercase tracking-wider text-white/40">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-white/55">
                 {t.role}
               </span>
             </div>

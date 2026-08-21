@@ -21,3 +21,9 @@ id.json
 
 # Fills indexer SQLite DB (keepers/src/shared/fill-db.ts)
 keepers/data/
+
+# Impeccable tool state (live-mode session tokens, generated design snapshot)
+.impeccable/
+
+# Playwright MCP screenshots/snapshots
+.playwright-mcp/
