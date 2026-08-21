@@ -1,0 +1,128 @@
+S1	S1-C1	Missing or bypassable signer check
+S1	S1-C2	Account-ownership validation
+S1	S1-C3	Discriminator validation
+S1	S1-C4	PDA seed correctness and substitution
+S1	S1-C5	Owner-vs-session-key boundary (producer)
+S1	S1-C6	Vault accounting
+S1	S1-C7	Account-closing safety
+S1	S1-C8	fund_trading_credit capping
+S1	S1-C9	Authority rotation
+S1	S1-C10	Global pause coverage
+S1	S1-C11	Instruction-data parsing
+S1	S1-C12	CPI target validation and duplicate-account aliasing
+S2	S2-C1	Zero-copy slice safety
+S2	S2-C2	Free-list integrity
+S2	S2-C3	Index bounds
+S2	S2-C4	Arithmetic overflow
+S2	S2-C5	Price-time priority
+S2	S2-C6	Self-trade
+S2	S2-C7	POST_ONLY crossing
+S2	S2-C8	Fill-event ring buffer
+S2	S2-C9	Order expiry and orders_per_user
+S2	S2-C10	Session-key boundary, consumer side
+S2	S2-C11	ER-side execution under a hostile sequencer
+S3	S3-C1	Rounding direction
+S3	S3-C2	Precision loss
+S3	S3-C3	Overflow and underflow
+S3	S3-C4	i128 funding-index packing
+S3	S3-C5	Funding sign convention
+S3	S3-C6	Health factor
+S3	S3-C7	Liquidation price
+S3	S3-C8	Liquidation economics
+S3	S3-C9	liquidation_intent lifecycle
+S3	S3-C10	Trigger orders
+S3	S3-C11	close_position slippage bound
+S3	S3-C12	Market parameter sanity
+S3	S3-C13	mark_price_for_close and its three callers
+S4	S4-C1	Exactly-once settlement
+S4	S4-C2	Ordering
+S4	S4-C3	Epoch rotation
+S4	S4-C4	Replay and authorization
+S4	S4-C5	Capacity and backpressure
+S4	S4-C6	Value conservation across the boundary
+S4	S4-C7	settle_trades / settle_from_log duality
+S4	S4-C8	Trust in ER-authored data (producer)
+S4	S4-C9	Arithmetic
+S4	S4-C10	Partial-failure atomicity
+S5	S5-C1	Delegation inventory (producer)
+S5	S5-C2	Malicious-ER capability list
+S5	S5-C3	Oracle account binding
+S5	S5-C4	Staleness gates
+S5	S5-C5	Dual-oracle disagreement
+S5	S5-C6	Pyth parse correctness
+S5	S5-C7	Mark-price staleness contract (producer for S3-C13)
+S5	S5-C8	crank_twap manipulability
+S5	S5-C9	Undelegation asymmetry and the K5 deadlock root cause
+S5	S5-C10	emergency_undelegate
+S5	S5-C11	commit_orderbook reachability
+S6	S6-C1	Byte-offset drift
+S6	S6-C2	Padding and alignment
+S6	S6-C3	Endianness and signedness
+S6	S6-C4	Struct size constants
+S6	S6-C5	Discriminator constants
+S6	S6-C6	PDA seeds
+S6	S6-C7	Instruction encoding
+S6	S6-C8	Divergence between the two copies
+S6	S6-C9	Coverage gaps
+S7	S7-C1	Key handling
+S7	S7-C2	Idempotence
+S7	S7-C3	Crash-loop and restart behaviour
+S7	S7-C4	RPC usage and quota
+S7	S7-C5	No liveness monitoring
+S7	S7-C6	Half-delegated deadlock, operational half
+S7	S7-C7	Error handling and silent failure
+S7	S7-C8	shared/fill-db.ts
+S7	S7-C9	shared/manifest.ts and address trust
+S7	S7-C10	The bots are not neutral
+S7	S7-C11	Operational scripts
+S7	S7-C12	settlement-keeper.ts is launched by no supervisor
+S8	S8-C1	Faucet residual gap
+S8	S8-C2	Error text leakage
+S8	S8-C3	RPC proxy as SSRF pivot and free relay
+S8	S8-C4	Rate limiting generally
+S8	S8-C5	Input validation
+S8	S8-C6	Injection into the fills DB
+S8	S8-C7	Data honesty, server half
+S8	S8-C8	Manifest trust
+S8	S8-C9	Caching and headers
+S9	S9-C1	Session-key custody
+S9	S9-C2	XSS reachability of the session key
+S9	S9-C3	The auth callback
+S9	S9-C4	Transaction construction and signing UX
+S9	S9-C5	Async correctness
+S9	S9-C6	Undelegation polling
+S9	S9-C7	Withdrawal precondition gating
+S10	S10-C1	Operator key concentration
+S10	S10-C2	Secret handling
+S10	S10-C3	Committed-secret scan
+S10	S10-C4	NEXT_PUBLIC_ inlining
+S10	S10-C5	CI gate quality
+S10	S10-C6	Supply chain
+S10	S10-C7	CI supply chain
+S10	S10-C8	Deploy reproducibility
+S10	S10-C9	Upgrade authority
+S10	S10-C10	Container and host posture
+S10	S10-C11	Asset licensing
+S11	S11-C1	Money-path coverage map
+S11	S11-C2	Assertion quality
+S11	S11-C3	Adversarial coverage
+S11	S11-C4	The two Rust test binaries
+S11	S11-C5	The unrun integration suite
+S11	S11-C6	Flakiness and determinism
+S11	S11-C7	Mollusk fidelity
+S11	S11-C8	Coverage of the ER boundary
+S12	S12-C1	Claim verification
+S12	S12-C2	The capability table
+S12	S12-C3	Doc/behaviour splits routed from other slices
+S12	S12-C4	The known-stale onboarding flow
+S12	S12-C5	Mirror drift and DESIGN.md
+S12	S12-C6	Address and constant accuracy
+S12	S12-C7	Architecture diagrams
+S12	S12-C8	Glossary conformance
+S12	S12-C9	Overstatement
+S12	S12-C10	Missing docs
+S13	S13-C1	Data honesty - per-number source table
+S13	S13-C2	Stale and error states
+S13	S13-C3	Number formatting
+S13	S13-C4	Accessibility floor
+S13	S13-C5	Custom ui/ components

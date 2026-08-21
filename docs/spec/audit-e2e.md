@@ -3,7 +3,11 @@
 - **Run slug:** `audit-e2e`
 - **Factory branch:** `factory/audit-e2e`
 - **Base commit:** `698dd4f`
-- **Stage:** spec (strategist). Decomposition into issues and frozen checks follows.
+- **Audit base:** `d047658` (branch tip). The only delta from `698dd4f` is `.gitignore`
+  (one hunk adding `docs/runs/` + `docs/jobs/`; owned by S10) and this spec file. Every
+  slice audits the tree at the branch tip, not at `698dd4f`.
+- **Stage:** hardened (strategist, adversarial-review). Issue drafts at
+  `docs/runs/audit-e2e/issues/`, frozen checks at `docs/checks/audit-e2e/`.
 
 ---
 
@@ -58,6 +62,10 @@ Per-slice deliverable — one file, path fixed:
 docs/audit/audit-e2e/<slice-id>.md
 ```
 
+`<slice-id>` is **lowercase**: `s1.md` … `s13.md`. Nothing else. Record identifiers
+inside the file are **uppercase** (`S1-01`, `S1-X01`) — see §4. The frozen check
+resolves the path literally; `S1.md`, `s01.md`, and `s1-authorization.md` all fail.
+
 The only files a slice may create or modify are its own findings file and, where a
 finding needs a reproduction, files under `docs/audit/audit-e2e/repro/<slice-id>/`.
 **Any diff touching product code, tests, or docs outside those two paths fails the
@@ -65,7 +73,7 @@ slice.** A slice that believes a fix is trivial still does not apply it; it writ
 fix as a `Suggested remediation` line inside the finding.
 
 Rationale (`codebase-design`: *interface*): the findings file is the slice's interface.
-Twelve auditors run in parallel and never read each other's work, so the record format
+Thirteen auditors run in parallel and never read each other's work, so the record format
 below is the entire contract that makes their output mergeable.
 
 ---
@@ -73,7 +81,7 @@ below is the entire contract that makes their output mergeable.
 ## 2. Calibration — reproduce verbatim in every slice
 
 Every slice operates under this single calibration statement. It is quoted here once and
-is binding on all twelve:
+is binding on all thirteen:
 
 > Flag only gaps that affect correctness, the stated requirements, or documented project invariants -- cite file:line evidence for every finding. Do not report stylistic preferences.
 
@@ -88,6 +96,24 @@ Consequences that are not negotiable:
 - No architectural preference findings ("this should have used Anchor", "this should be
   an AMM", "split this crate"). The architecture is a given.
 - A finding with no `file:line` is not a finding. It is deleted before merge.
+
+### The calibration example — what a genuine finding looks like
+
+`Cargo.toml:8-13` records a real, already-fixed defect of exactly the class this run
+hunts. `[profile.release]` sat in the non-root member manifest
+`programs/slipstream/Cargo.toml`; Cargo silently ignores `[profile.*]` outside the
+workspace root, so `overflow-checks` was **off** in the deployed program and arithmetic
+wrapped instead of aborting. Nothing errored. Nothing was slow. Nothing looked wrong.
+
+That is the bar. A finding of this class has all four properties, and a slice should ask
+them of every candidate before filing it:
+
+1. a written invariant it violates (here: "the program aborts on overflow"),
+2. a mechanism explaining *why* nothing surfaced it,
+3. a `file:line` that a reader can open and see the defect at, and
+4. a consequence stated in money or in a wrong number, not in adjectives.
+
+A candidate that fails (2) is usually a stylistic preference in disguise.
 
 ---
 
@@ -121,7 +147,37 @@ Do not downgrade severity to express this. Use the tag.
 
 ---
 
-## 4. Finding record format
+## 4. Findings document format
+
+### 4.0 Document skeleton — four headings, exactly these strings
+
+The frozen check greps for these four literal level-2 headings. All four are required
+even when a section's body is `None.`:
+
+```markdown
+# S<n> — <slice title>
+
+## Calibration
+> <the §2 sentence, verbatim — the check compares it byte for byte>
+
+## Findings
+### S<n>-01 · ...        <- one record per finding, ids zero-padded and sequential
+
+## Cross-slice notes
+### S<n>-X01 · ...       <- records ROUTED ELSEWHERE. Note the `X`.
+
+## Cleared
+- **S<n>-C1** <what was checked, and a resolving `path:line`>
+- ... one bullet per threat class in this slice's list, no exceptions
+```
+
+A cross-slice note carries the **authoring** slice's prefix with an `X` infix
+(`S5-X01`, authored by S5), a `- **Routed to:** S3` line, and the **target** slice's
+class id in its `Class` field. This is what lets the merge step distinguish a slice's
+own findings from its routed notes mechanically. An `X` record placed above the
+`## Cross-slice notes` heading fails the check.
+
+### 4.1 Record shape
 
 Every finding in every slice file is one record in exactly this shape. Anything
 that does not parse as this shape is dropped at merge.
@@ -131,9 +187,9 @@ that does not parse as this shape is dropped at merge.
 
 - **Status:** CONFIRMED | SUSPECTED
 - **Severity:** P0 | P1 | P2 | P3
-- **Tag:** [reachable-now] | [mainnet-only]     <!-- P0/P1 only; omit for P2/P3 -->
-- **Class:** <one threat/defect class from this slice's §7 list>
-- **Evidence:** `path/to/file.rs:120-134`  (one or more; absolute-from-repo-root paths)
+- **Tag:** [reachable-now] | [mainnet-only]     <!-- P0/P1 only; ABSENT for P2/P3 -->
+- **Class:** <one class id from docs/checks/audit-e2e/classes.tsv>
+- **Evidence:** `path/to/file.rs:120-134`  (one or more; repo-root-relative paths)
 
 **What is wrong.** Two to five sentences. State the invariant that is violated and
 where the invariant is written down (a doc line, a code comment, a test, or a
@@ -178,21 +234,56 @@ the file sets disjoint without blinding anyone.
 
 ### Negative results are required
 
-Each slice's findings file ends with a `## Cleared` section listing, per threat class in
-its §7 list, what was checked and found sound, with `file:line`. An audit that reports
-only positives is unfalsifiable. A slice with zero findings in a class must show it
-looked.
+Each slice's findings file ends with a `## Cleared` section listing, **per threat class
+id in `docs/checks/audit-e2e/classes.tsv` for that slice**, what was checked and found
+sound, with a `path:line` that resolves. An audit that reports only positives is
+unfalsifiable. A slice with zero findings in a class must show it looked.
+
+The check greps for each class id literally and then requires a resolving `path:line`
+within the id's line or the two lines after it. A class covered by a filed finding still
+needs its `## Cleared` bullet — write "covered by S5-01" plus the citation.
+
+### The minimum-one-finding rule
+
+§6 establishes defects that are already on the record. Six slices own the code half of
+one of them, so a zero-finding return from any of them is a failure to look, not a clean
+result. The frozen check enforces `>= 1` own finding (cross-slice notes do not count) for:
+
+| Slice | Established state it owns |
+|---|---|
+| S5 | K5 — the half-delegated deadlock's root cause in program code |
+| S6 | K7 — the twice-vendored SDK, byte half |
+| S7 | K1 — why a 17-day keeper outage was possible |
+| S8 | K3 — the faucet's mint authority in a server route |
+| S10 | K2 — the operator key holding three capabilities at once |
+| S12 | the pre-admitted stale onboarding flow, and the §6 doc/behaviour splits |
+
+The other seven slices may legitimately return zero findings if their `## Cleared`
+section is complete. Nothing in this rule licenses inventing a finding: a slice that
+genuinely cannot produce one files a `P3` recording what it looked for and why the
+established state does not reach its owned file set — that is a defensible answer and
+the check accepts it.
 
 ---
 
 ## 5. File partition
 
-The partition is **total and disjoint over all 251 tracked files at `698dd4f`**. Every
-tracked file has exactly one owner. Verify with:
+The partition is **total and disjoint over all 251 audited tracked files**. Every audited
+tracked file has exactly one owner.
+
+`git ls-files | wc -l` returns **252** at the branch tip, not 251 — the run's own spec
+file is tracked and is not audited, and the frozen checks add more under
+`docs/checks/audit-e2e/`. The stable verification command excludes run artifacts:
 
 ```bash
-git ls-files | wc -l    # 251
+git ls-files | grep -vE '^docs/(spec|checks|audit|runs|jobs)/' | wc -l    # 251
 ```
+
+One clause of "exactly one owner" is qualified: S11 owns test code wherever it lives, so
+the inline `#[cfg(test)]` modules inside `programs/slipstream/src/**` are S11's to assess
+while the production code in those same files stays with S1–S5. That is an ownership
+split *within* files, not a second writer of them — no slice writes source at all, so it
+creates no collision. It is the only such split.
 
 Two global rules resolve the boring cases:
 
@@ -231,9 +322,33 @@ audited by S10; its contents are never published into a findings file).
 
 ### Verification
 
-The partition was checked mechanically against `git ls-files` at `698dd4f`: 251 tracked
-files, zero overlaps, zero unassigned. Slice sizes: S1 22, S2 6, S3 14, S4 7, S5 11,
-S6 11, S7 32, S8 6, S9 50, S10 44, S11 30, S12 18 (+2 untracked per R3).
+The partition was re-checked mechanically at harden against `git ls-tree -r 698dd4f`:
+251 tracked files, **zero overlaps, zero unassigned**. Confirmed.
+
+Slice sizes after the S9 split (below): S1 22, S2 6, S3 14, S4 7, S5 11, S6 11, S7 32,
+S8 6, S9 22, S10 44, S11 30, S12 18 (+2 untracked per R3), S13 28. Total 251.
+
+**S9 was split.** At draft, S9 was 50 files / 8,342 lines and carried an obligation to
+source-trace *every number rendered by the trading components* — the largest single
+reading load in the run, on the slice whose deliverable is the most skimmable. It is now
+two slices with disjoint file sets:
+
+- **S9** — session-key custody and transaction integrity: `components/wallet/**`,
+  `app/auth/callback/`, the docs renderer (`app/docs/**`, `lib/docs.ts`),
+  `lib/confirm.ts`, `lib/utils.ts`, and all 11 `hooks/*.ts`. 22 files.
+- **S13** — rendered-data honesty and the accessibility floor: `app/layout.tsx`,
+  `app/page.tsx`, `app/globals.css`, `app/trade/page.tsx`, `app/landing/page.tsx`,
+  `components/landing/`, `components/theme-toggle.tsx`, `components/trading/*.tsx` (14),
+  `components/ui/*.tsx` (7). 28 files.
+
+The seam is real: S9 owns where a value *comes from* and what the client is able to
+sign; S13 owns what the screen *says about it*. S13 reads the hooks to build its
+per-number source table — cross-slice reading is unrestricted (§4) — and routes any
+defect it finds *in* a hook to S9 as a cross-slice note.
+
+The draft's `frontend/src/components/ui/*.tsx (6 files)` was wrong: there are **7**
+(`badge`, `button`, `card`, `liquid-glass-button`, `liquid-weather-glass`, `separator`,
+`table`). The draft's 50-file S9 total was right; only the parenthetical was wrong.
 
 ---
 
@@ -247,7 +362,7 @@ not spend the slice re-deriving them and do not file them as novel findings. Eac
 at `$74.11` while the Pyth feed the market is configured with reads `$91.85` fresh.
 `crank_twap` is the only writer of `last_mark_price`. The apparent root-cause chain:
 public devnet RPC quota exhausted → keepers crash-looped → pm2 gave up at
-`max_restarts: 50` (`keepers/ecosystem.config.js:31`).
+`max_restarts: 50` (`keepers/ecosystem.config.js:33`).
 
 **K2 — operator key concentration.** `A5sV4Pkk…` is simultaneously the program upgrade
 authority, the USDC mint authority, and the faucet signer. `PRODUCT.md` lists splitting
@@ -261,8 +376,9 @@ it as an open, undecided question.
 **K5 — half-delegated TradingCredits.** The `mm-0`/`mm-1`/`taker-0`/`taker-1` bot
 credits are stuck: L1 reports them delegated so `fund_trading_credit` refuses, while the
 ER never took ownership so the delegation program refuses to undelegate. The workaround
-in tree is fresh wallet prefixes (`mm-v2`, `taker-v2`) — see
-`keepers/ecosystem.config.js:52-56` and `keepers/.env.example`.
+in tree is fresh wallet prefixes (`mm-v2`, `taker-v2`) — see `BOT_MM_PREFIX`
+at `keepers/ecosystem.config.js:59` and `BOT_TAKER_PREFIX` at
+`keepers/ecosystem.config.js:73`, plus `keepers/.env.example`.
 
 **K6 — already-mitigated surfaces.** Do not report these as missing; report only
 residual gaps in them, with the existing mitigation quoted:
@@ -271,7 +387,7 @@ residual gaps in them, with the existing mitigation quoted:
   only.
 - `/api/faucet` has a per-wallet cooldown, a global hourly cap, a SOL top-up floor, and a
   fixed mint amount.
-- CI runs `cargo audit` and does *not* run `npm audit`; `.github/workflows/ci.yml:44-52`
+- CI runs `cargo audit` and does *not* run `npm audit`; `.github/workflows/ci.yml:47-52`
   states this is deliberate and why.
 - The two `clippy -A` suppressions are documented in `README.md` as intentional.
 
@@ -288,19 +404,36 @@ in `PRODUCT.md`. The integration suite under `tests/integration/` is not run by 
 
 ---
 
-## 7. The twelve slices
+## 7. The thirteen slices
 
 Each slice below gives: the **module** under audit and its **interface** (the seam its
 correctness is judged at), the **exact owned file set**, the **threat/defect classes**
 that must be covered, and **done**.
 
+### Class ids are normative
+
+Every numbered threat class in the lists below has the stable id `<SID>-C<n>` — the
+first class under S3 is `S3-C1`, the eleventh under S7 is `S7-C11`. The complete
+enumeration lives at **`docs/checks/audit-e2e/classes.tsv`** and that file, not this
+prose, is what the frozen check reads. If the two ever disagree, the TSV wins and the
+disagreement is itself a defect to raise as a ruling.
+
+Those ids are what make `## Cleared` gradeable: without them "names every threat class"
+is unfalsifiable prose, and a check cannot tell a complete negative-results section from
+an empty gesture.
+
 `Done` is the same skeleton everywhere and is stated once, then specialised:
 
-> **Done (all slices):** `docs/audit/audit-e2e/<slice-id>.md` exists; every record parses
-> as §4; every record carries `file:line`; every CONFIRMED carries proof of a §4 type;
-> every P0/P1 carries a tag; the `## Cleared` section names every threat class in the
-> slice's list with evidence it was checked; the working tree contains no diff outside
-> `docs/audit/audit-e2e/`.
+> **Done (all slices):** `docs/audit/audit-e2e/s<n>.md` exists (lowercase); it carries
+> the four §4.0 headings; the §2 calibration sentence is reproduced verbatim; every
+> record parses as §4.1; every record's `Class` is one of this slice's ids in
+> `classes.tsv`; every record's `Evidence` carries at least one `path:line` that
+> resolves to a real file at a line that exists; every CONFIRMED carries proof of a §4
+> type; every P0/P1 carries exactly one tag and every P2/P3 carries none; the
+> `## Cleared` section accounts for every class id with a resolving citation; the six
+> slices under the minimum-one-finding rule have at least one own finding; and the
+> working tree contains no diff outside `docs/audit/audit-e2e/`, `docs/runs/`, and
+> `docs/jobs/`.
 
 ---
 
@@ -374,6 +507,24 @@ programs/slipstream/src/state/trading_credit.rs
     scope; findings against non-owned files go to Cross-slice notes).
 11. **Instruction-data parsing.** Every `process` in the owned set: short-buffer panics,
     unchecked slice indexing, unvalidated enum/flag bytes.
+12. **CPI target validation and duplicate-account aliasing.** *(added at harden — this
+    class fell between S1 and S5 and was owned by nobody.)* Two sub-questions, both
+    classic Solana defect classes that no draft slice named:
+    - **CPI target.** The token program account is bound but discarded:
+      `deposit_collateral.rs:23` and `withdraw_collateral.rs:34` both destructure it as
+      `_token_program`, so nothing in the owned set asserts it is the real SPL Token
+      program. Determine whether the `pinocchio-token` CPI hardcodes the program id (in
+      which case this is `## Cleared` evidence, and say so with the `file:line` in the
+      dependency that does it) or whether it forwards the supplied account (P0). Do the
+      same for every other CPI the owned set makes, system program included. Extend to
+      the mint: does anything assert the deposited mint equals the market's collateral
+      mint, and would a Token-2022 transfer-fee mint break the deposit/withdraw equality
+      of class 6?
+    - **Duplicate-account aliasing.** For every instruction that takes two or more
+      accounts of the same type — vault and user token account, owner and destination,
+      `from` and `to` on a close — can the *same* account be passed for both? Pinocchio
+      does no distinctness checking. Where aliasing lets a balance be double-counted or a
+      rent refund be paid to the drained account, that is P0.
 
 **Adds to known state.** K2 is the operational half of authority concentration; S1 owns
 the *on-chain* half — what `GlobalState.authority` can actually do, and whether
@@ -497,6 +648,17 @@ programs/slipstream/src/state/trigger_order.rs
 12. **`Market` parameter sanity.** `taker_fee_bps`, leverage cap, maintenance margin:
     are values that would break the math rejected at `initialize_market` (owned by S1 —
     route the *check* there, keep the *math consequence* here)?
+13. **`mark_price_for_close` and its three callers.** *(moved here from S5 at harden.)*
+    The draft gave this to S5, but S5 owns none of the files it lives in: the function is
+    defined at `state/market.rs:173` and every caller is an S3 file —
+    `close_position.rs:124`, `claim_funding.rs:62`, `execute_trigger.rs:82`. Under S5 the
+    whole class would have been filed as cross-slice notes while S3's own class 6
+    overlapped it; that is a class two slices half-own, which in practice means neither
+    does. It is S3's. Determine which price it returns, whether the minute-quantised
+    staleness stamp written by `crank_twap` (`crank_twap.rs:72-76`) actually rejects a
+    frozen mark, and what a close, a funding claim, or a trigger execution does when it
+    returns `None`. K1 makes this `[reachable-now]` if the gate does not hold. S5 hands
+    over the oracle-side staleness contract as `S5-C7`; S3 does not block on it.
 
 ---
 
@@ -597,13 +759,18 @@ programs/slipstream/src/instructions/emergency_undelegate.rs
    the documented dual-oracle safety property is not in force, that is a P1 doc/behaviour
    split — and route the doc half to S12.
 6. **Pyth parse correctness.** The hand-rolled `PriceUpdateV2` parser assumes
-   `VerificationLevel::Full` (`oracle.rs:35-37`) and hardcodes offsets. Verify the offset
+   `VerificationLevel::Full` (declared `oracle.rs:33-36`, enforced `oracle.rs:130`) and hardcodes offsets. Verify the offset
    table against the real account layout, verify the exponent handling normalising to 6
    decimals, and verify the `MAX_CONFIDENCE_BPS = 100` gate. A wrong offset is silently
    wrong prices — P0.
-7. **`mark_price_for_close`.** Find its definition and every caller. Which price does it
-   return, is it ER- or L1-sourced, and can a frozen `last_mark_price` (K1) make it
-   return a stale value that a close or liquidation then executes against?
+7. **Mark-price staleness contract (producer for `S3-C13`).** *(rescoped at harden: the
+   `mark_price_for_close` analysis itself moved to S3, which owns all four files it
+   touches.)* S5 owns the *oracle-side* half and publishes it as a contract in its
+   findings file: what `crank_twap` writes into `last_mark_price` and the minute stamp
+   (`crank_twap.rs:72-76`), the clock it reads, the width of the staleness window that
+   stamp can express, and what an ER-controlled clock does to it. State it as a contract
+   S3 can read against. Do not analyse the callers — those are S3's, and a defect found
+   in them goes in Cross-slice notes.
 8. **`crank_twap`.** Sole writer of `last_mark_price` (K1). Who may call it, is the
    accumulator manipulable by call timing or frequency, can it be called repeatedly in
    one slot to skew the TWAP, and what bounds a single update's jump?
@@ -727,7 +894,7 @@ keepers/src/shared/pyth.ts            keepers/src/shared/subscriber.ts
    double-settling a fill or double-applying a funding period is P0 money.
 3. **Crash-loop and restart behaviour.** The direct root-cause slice for K1. Establish
    the full chain in code: what error kills the process, is it caught, is there backoff,
-   and does `max_restarts: 50` (`ecosystem.config.js:31`) mean a boot-time failure is
+   and does `max_restarts: 50` (`ecosystem.config.js:33`) mean a boot-time failure is
    permanently fatal with no alert. The finding must state what would have to change for
    the same failure to self-heal.
 4. **RPC usage and quota.** Per-keeper request rate: polling intervals, whether
@@ -759,6 +926,22 @@ keepers/src/shared/pyth.ts            keepers/src/shared/subscriber.ts
 11. **Operational scripts.** The `check-*`, `inspect-*`, `verify-*`, `fund-user-usdc`,
     `provision-fresh-bots`, `set-market-oracle` scripts: any that mutate on-chain state
     is a privileged tool — assess what it can do if run with wrong arguments.
+12. **`settlement-keeper.ts` is launched by no supervisor.** *(added at harden.)* The
+    draft said "each of the five production keepers", but the owned set has six
+    keeper-named files. `keepers/ecosystem.config.js:43-47` launches exactly five —
+    `fill-log`, `funding`, `liquidation`, `twap`, `expiry` — plus the two bots at `:54`
+    and `:71`. `docker-compose.yml` launches the same five plus the bots.
+    `settlement-keeper.ts` appears only as an npm script
+    (`keepers/package.json:7`) and a README row (`keepers/README.md:12`), which
+    describes it as the thing that "turns fills into positions". Establish which it is:
+    dead code superseded by `fill-log-keeper` + `settle_from_log` (then S4's
+    `settle_trades`/`settle_from_log` duality question has an operational answer, route
+    it), or a live requirement that nothing supervises (then it is a liveness gap of the
+    same shape as K1, and the "five production keepers" framing in `keepers/README.md`
+    is a doc finding — route to S12). Resolve it either way; do not leave it open.
+
+    Classes 2 and 3 read "the five production keepers" as exactly the five at
+    `ecosystem.config.js:43-47`. The two bots are covered by class 10.
 
 ---
 
@@ -816,83 +999,136 @@ frontend/src/lib/deploy-manifest.generated.json    # untracked, generated — R3
 
 ---
 
-### S9 — Frontend browser surface
+### S9 — Browser session-key custody and transaction integrity
 
-**Module.** Everything that runs in the user's browser: session-key custody, transaction
-construction, and every number rendered.
-**Interface.** Two claims: *"the app never holds a key that can move funds on its own"*
-(`README.md`) and *"every claim on screen traces to something a reader can check"*
-(`PRODUCT.md`, Principle 1).
+**Module.** The client-side seam where a key is held and a transaction is built:
+wallet plumbing, the auth callback, the docs renderer that shares the origin with them,
+and the eleven hooks every trading component reads from.
+**Interface.** `README.md`'s claim: *"the app never holds a key that can move funds on
+its own."* S1 and S2 prove the on-chain half; S9 proves the client never *builds* a
+money-moving transaction with the session key, and that nothing on the origin can read
+it.
 
-**Owned files (50).**
+**Owned files (22).**
 ```
-frontend/src/app/layout.tsx              frontend/src/app/page.tsx
-frontend/src/app/globals.css             frontend/src/app/trade/page.tsx
-frontend/src/app/landing/page.tsx        frontend/src/app/auth/callback/page.tsx
+frontend/src/components/wallet/connect-button.tsx
+frontend/src/components/wallet/wallet-provider.tsx
+frontend/src/app/auth/callback/page.tsx
 frontend/src/app/docs/page.tsx           frontend/src/app/docs/layout.tsx
 frontend/src/app/docs/[slug]/page.tsx    frontend/src/app/docs/docs-shell.tsx
 frontend/src/app/docs/mermaid-runner.tsx
-frontend/src/components/landing/landing-view.tsx
-frontend/src/components/theme-toggle.tsx
-frontend/src/components/trading/*.tsx        (14 files)
-frontend/src/components/ui/*.tsx             (6 files)
-frontend/src/components/wallet/connect-button.tsx
-frontend/src/components/wallet/wallet-provider.tsx
-frontend/src/hooks/*.ts                      (11 files)
-frontend/src/lib/confirm.ts
-frontend/src/lib/docs.ts
-frontend/src/lib/utils.ts
+frontend/src/lib/confirm.ts   frontend/src/lib/docs.ts   frontend/src/lib/utils.ts
+frontend/src/hooks/use-er-position.ts    frontend/src/hooks/use-live-price.ts
+frontend/src/hooks/use-market.ts         frontend/src/hooks/use-open-orders.ts
+frontend/src/hooks/use-orderbook.ts      frontend/src/hooks/use-positions.ts
+frontend/src/hooks/use-price-history.ts  frontend/src/hooks/use-pyth-candles.ts
+frontend/src/hooks/use-session.ts        frontend/src/hooks/use-triggers.ts
+frontend/src/hooks/use-wallet-compat.ts
 ```
 (`frontend/src/lib/slipstream/**` → S6. `frontend/src/app/api/**` and
-`frontend/src/lib/manifest.ts` → S8. `frontend/src/content/docs/**` → S12.
-`frontend/src/app/*.png` → S10.)
+`frontend/src/lib/manifest.ts` → S8. `frontend/src/content/docs/**` → S12. Every
+rendering component → S13.)
 
 **Threat / defect classes.**
 1. **Session-key custody.** Where is the session key generated, where is it stored
    (`localStorage`? memory? IndexedDB?), is it ever transmitted, what is its lifetime,
    is it scoped to an origin and an owner, and is it revocable. Then verify the
-   `README.md` claim: prove the session key cannot sign anything but
-   `place_order`/`cancel_order` **from the browser's side** — S1/S2 prove the on-chain
-   side; S9 proves the client never *builds* a money-moving transaction with it.
+   `README.md` claim: prove the client never constructs an instruction other than
+   `place_order`/`cancel_order` signed by it. Enumerate every call site that reaches an
+   instruction builder with the session keypair; that enumeration is the `## Cleared`
+   evidence. Read S1's published owner-vs-session boundary contract if it has landed;
+   re-derive it from `authorize_session.rs` if it has not. Do not block on it.
 2. **XSS reachability of the session key.** If a script runs on the origin, does it get
-   the key? Check `dangerouslySetInnerHTML`, the markdown/mermaid docs renderer
-   (`mermaid-runner.tsx`, `docs.ts`), and any `eval`-adjacent path. A stored session key
-   plus a docs-renderer XSS is a P1 chain even on devnet.
-3. **The auth callback.** `auth/callback/page.tsx`: open-redirect, token/param handling,
-   and origin validation for the Phantom Connect flow.
+   the key? Check `dangerouslySetInnerHTML`, the markdown and mermaid docs renderer
+   (`mermaid-runner.tsx`, `docs.ts`, `docs-shell.tsx`), and any `eval`-adjacent path.
+   The docs renderer sits on the same origin as the key store, which is why it is in
+   this slice and not with the rest of the UI. A stored session key plus a
+   docs-renderer XSS is a P1 chain even on devnet.
+3. **The auth callback.** `auth/callback/page.tsx`: open-redirect, token and parameter
+   handling, and origin validation for the Phantom Connect flow.
 4. **Transaction construction and signing UX.** Does what the user sees on the confirm
    screen match what is being signed? Blind-signing prompts, unvalidated amounts,
-   decimal handling between the form and the instruction builder.
-5. **Data honesty — the central class.** For **every** number rendered by the trading
-   components, name its source: an on-chain read, an API route, a client-side
-   computation, or a constant. Then flag every one that:
+   decimal handling between the form and the instruction builder. `lib/confirm.ts` is
+   the seam; the form itself is S13's, so route presentation defects there.
+5. **Async correctness.** Race conditions between hooks, stale closures over polled
+   data, missing cleanup on unmount, and unbounded polling that contributes to K1's
+   quota problem. Per hook, state the poll interval and whether it backs off.
+6. **Undelegation polling.** `PRODUCT.md`: undelegation is asynchronous and any UI
+   waiting on it must poll, not assume. Verify the withdraw flow actually polls and
+   handles the poll never succeeding (K5's deadlock state).
+7. **Withdrawal precondition gating.** `PRODUCT.md` requires the UI to block withdrawal
+   on a non-idle account "with a clear instruction rather than silently failing."
+   Verify the gating *logic* — the hook-level predicate that decides. Whether the
+   resulting message is clear on screen is S13's half; route it.
+
+---
+
+### S13 — Rendered-data honesty and the accessibility floor
+
+*(S13 is S9's other half — see §5. It is placed here, out of numeric order, to keep the
+split pair together.)*
+
+**Module.** Every pixel that asserts a fact: the trading terminal, the landing page,
+and the seven shared `ui/` primitives they are built from.
+**Interface.** `PRODUCT.md` Principle 1: *"every claim on screen traces to something a
+reader can check."* With the keepers down since 2026-08-05 (K1), this is not a
+hypothetical standard — it is a live test the deployed UI is currently taking.
+
+**Owned files (28).**
+```
+frontend/src/app/layout.tsx    frontend/src/app/page.tsx    frontend/src/app/globals.css
+frontend/src/app/trade/page.tsx    frontend/src/app/landing/page.tsx
+frontend/src/components/landing/landing-view.tsx
+frontend/src/components/theme-toggle.tsx
+frontend/src/components/trading/activity-drawer.tsx    .../dashboard.tsx
+frontend/src/components/trading/fill-toasts.tsx        .../market-bar.tsx
+frontend/src/components/trading/open-orders.tsx        .../order-book-display.tsx
+frontend/src/components/trading/order-form.tsx         .../positions-table.tsx
+frontend/src/components/trading/price-chart.tsx        .../session-panel.tsx
+frontend/src/components/trading/status-panel.tsx       .../status-strip.tsx
+frontend/src/components/trading/terminal-nav.tsx       .../trade-history.tsx
+frontend/src/components/ui/badge.tsx      frontend/src/components/ui/button.tsx
+frontend/src/components/ui/card.tsx       frontend/src/components/ui/separator.tsx
+frontend/src/components/ui/table.tsx      frontend/src/components/ui/liquid-glass-button.tsx
+frontend/src/components/ui/liquid-weather-glass.tsx
+```
+(14 under `trading/`, 7 under `ui/`. The hooks these components read → S9;
+`frontend/src/app/*.png` → S10.)
+
+**Threat / defect classes.**
+1. **Data honesty — the per-number source table.** The primary deliverable. For
+   **every** number rendered by the components above, name its source: an on-chain read,
+   an API route, a client-side computation, or a constant. Then flag every one that:
    - is derived from `last_mark_price` (frozen per K1) but presented as live;
    - is a client-side estimate presented with the same visual weight as a settled
      on-chain value;
    - has no source at all (hardcoded, placeholder, or mock);
    - is stale without any staleness indicator.
+
    `PRODUCT.md` Principle 1 makes an unverifiable number on screen worse than no number.
-   Grade accordingly. The per-number source table is the `## Cleared` evidence.
-6. **Stale and error states.** With the keepers down (K1) — the live condition — what
-   does each panel show? Does the UI distinguish "no data" from "zero" from "loading"?
+   Grade accordingly. The table is the `## Cleared` evidence and it is expected to be
+   long; a table with fewer rows than the terminal has visible figures is not done.
+2. **Stale and error states.** With the keepers down — the live condition — what does
+   each panel show? Does the UI distinguish "no data" from "zero" from "loading"?
    `brand.md`'s load-bearing colour rule makes a wrong emerald a correctness defect, not
-   a style one.
-7. **Number formatting.** Rounding and truncation in display, unit confusion (lots vs.
+   a style one. `status-strip.tsx` and `status-panel.tsx` render what `/api/status`
+   reports (S8 audits the route's honesty; S13 audits whether the UI faithfully shows
+   what it got, including when it got nothing).
+3. **Number formatting.** Rounding and truncation in display, unit confusion (lots vs.
    SOL vs. USD, 6-decimal vs. 9-decimal), and `bigint`→`number` precision loss on any
    value that can exceed 2^53.
-8. **Async correctness.** Race conditions between hooks, stale closures over polled data,
-   missing cleanup on unmount, and unbounded polling that contributes to K1's quota
-   problem.
-9. **Undelegation polling.** `PRODUCT.md`: undelegation is asynchronous and any UI
-   waiting on it must poll, not assume. Verify the withdraw flow actually polls and
-   handles the poll never succeeding (K5's deadlock state).
-10. **The withdrawal precondition.** `PRODUCT.md` requires the UI to block withdrawal on
-    a non-idle account "with a clear instruction rather than silently failing." Verify.
-11. **Accessibility floor.** `PRODUCT.md` establishes WCAG AA contrast on interactive
-    elements, `prefers-reduced-motion` removing motion outright, and live values never
-    signalling direction by colour alone. These are documented project invariants, so
-    violations are in scope — this is the one place a visual finding is not a stylistic
-    preference. Everything else visual is out of scope.
+4. **Accessibility floor.** `PRODUCT.md` establishes WCAG AA contrast on interactive
+   elements, `prefers-reduced-motion` removing motion outright, and live values never
+   signalling direction by colour alone. These are documented project invariants, so
+   violations are in scope — this is the one place a visual finding is not a stylistic
+   preference. Everything else visual is out of scope. `globals.css` is where the
+   reduced-motion and contrast tokens live; check it against what the components use.
+5. **The custom `ui/` primitives.** Five of the seven are stock shadcn shapes;
+   `liquid-glass-button.tsx` and `liquid-weather-glass.tsx` are not. Assess those two
+   for unbounded or always-running animation, `prefers-reduced-motion` compliance, and
+   whether either wraps an interactive element in a way that loses its accessible name
+   or focus ring. This class exists because a custom primitive is where an
+   accessibility floor silently stops applying.
 
 ---
 
@@ -1099,19 +1335,39 @@ frontend/src/content/docs/*.md          # generated by scripts/copy-docs.mjs
 
 ## 8. Dependency and ordering
 
-The twelve slices are **fully parallel**. There are no blocking edges: every slice can be
-dispatched at once and none needs another's output to start.
+The thirteen slices are **fully parallel**. There are no blocking edges: every slice can
+be dispatched at once and none needs another's output to start. The frontier is total —
+thirteen disjoint file sets, thirteen disjoint output paths, no shared mutable state.
 
-Three soft producer/consumer contracts exist. The consumer must not block on the
+**Ruling: S6 is not ordered after S1–S5.** It was proposed at harden that S6 (SDK layout
+parity) should wait for S1–S5 "to establish the true on-chain layouts." Rejected, with a
+reason. S6's Rust side comes from `programs/slipstream/src/state/*.rs` — twelve
+`#[repr(C)]` declarations it reads directly, which §4 explicitly permits — and **no
+S1–S5 deliverable publishes a layout table**. Their findings files carry threat-class
+records, not offsets. The edge would serialise five slices in front of the highest
+value-per-hour slice in the run and hand it nothing it does not already have. If S6
+finds a layout defect it files it; if S1–S5 stumble on one they route it to S6 as a
+cross-slice note. That is the whole coordination requirement.
+
+Six soft producer/consumer contracts exist. The consumer must not block on the
 producer; it re-derives what it needs and the orchestrator reconciles at merge:
 
 | Producer | Artifact | Consumer |
 |---|---|---|
-| S1 | The owner-vs-session-key boundary contract | S2 (on-chain), S9 (client-side) |
-| S4 | The list of fill fields L1 re-validates vs. takes on faith | S5 (ER capability table) |
-| S5 | The delegation inventory (what can be delegated at all) | S11 (is it tested?) |
+| S1 | The owner-vs-session-key boundary contract (`S1-C5`) | S2 (`S2-C10`, on-chain), S9 (`S9-C1`, client-side) |
+| S4 | The list of fill fields L1 re-validates vs. takes on faith (`S4-C8`) | S5 (`S5-C2`, ER capability table) |
+| S5 | The delegation inventory (`S5-C1`) | S11 (`S11-C8`, is it tested?) |
+| S5 | The mark-price staleness contract (`S5-C7`) | S3 (`S3-C13`) |
+| S9 | Per-hook poll interval and data-source map (`S9-C5`) | S13 (`S13-C1`, per-number source table) |
+| S8 | What `/api/status` actually measures (`S8-C7`) | S13 (`S13-C2`, stale and error states) |
 
-S12 receives routed doc-halves from S5, S10, and S11 via Cross-slice notes.
+S12 receives routed doc-halves from S5, S7, S10, and S11 via Cross-slice notes.
+
+Each producer publishes its contract as a clearly headed block inside its own findings
+file so a consumer that *does* run later can read it. A consumer that runs concurrently
+re-derives it from source and notes that it did; the orchestrator reconciles any
+disagreement at merge, and a disagreement between a producer's contract and a consumer's
+re-derivation is itself a finding worth surfacing.
 
 ---
 
@@ -1119,18 +1375,25 @@ S12 receives routed doc-halves from S5, S10, and S11 via Cross-slice notes.
 
 The run is complete when:
 
-1. All twelve findings files exist at `docs/audit/audit-e2e/<slice-id>.md` and each
+1. All thirteen findings files exist at `docs/audit/audit-e2e/s1.md` … `s13.md` and each
    satisfies its slice's Done.
 2. Every Cross-slice note has been routed and either merged into the target slice's file
    or recorded as unresolved with a reason.
-3. The orchestrator has produced a consolidated report — every finding across all twelve
-   slices, sorted by severity then tag, with the CONFIRMED/SUSPECTED split stated per
-   severity band.
+3. The orchestrator has produced a consolidated report — every finding across all
+   thirteen slices, sorted by severity then tag, with the CONFIRMED/SUSPECTED split
+   stated per severity band.
 4. Every CONFIRMED P0 and P1 has a tracker issue. P2 and P3 are batched into thematic
    issues rather than filed individually.
 5. **No product code, test, or doc file has been modified by this run.** The run diff
-   touches only `docs/spec/audit-e2e.md`, `docs/audit/**`, and the tracker.
+   touches only `docs/spec/audit-e2e.md`, `docs/checks/audit-e2e/**`, `docs/audit/**`,
+   and the tracker.
+
+   The draft omitted `docs/checks/audit-e2e/**`, which contradicted the freeze protocol:
+   the frozen checks are committed to the factory branch before any auditor is
+   dispatched, so they are necessarily in the run diff. `docs/runs/` and `docs/jobs/` are
+   gitignored and never appear in it.
 
 An audit that finds nothing is a valid outcome **only** if every slice's `## Cleared`
 section demonstrates it looked. Given K1, K2, K3, K5, and K7 are established before the
-run starts, a slice covering any of them that returns zero findings has not done the work.
+run starts, a slice covering any of them that returns zero findings has not done the
+work — §4's minimum-one-finding rule makes that mechanical for S5, S6, S7, S8, S10, S12.
