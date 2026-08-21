@@ -24,9 +24,19 @@ export interface MarketData {
   restrictedMode: boolean;
 }
 
+/**
+ * Why this exists: `market === null` has three very different causes — we
+ * haven't fetched yet, the RPC answered and the account genuinely isn't there,
+ * or we couldn't reach the chain at all. Rendering all three as "not
+ * initialized" tells a user their market is missing when the truth is usually
+ * that devnet is rate-limiting us.
+ */
+export type MarketStatus = "loading" | "live" | "missing" | "unavailable";
+
 export function useMarket(marketIndex: number = 0) {
   const { connection } = useConnection();
   const [market, setMarket] = useState<MarketData | null>(null);
+  const [status, setStatus] = useState<MarketStatus>("loading");
   const [loading, setLoading] = useState(true);
 
   const fetch = useCallback(async () => {
@@ -60,9 +70,15 @@ export function useMarket(marketIndex: number = 0) {
           lastSettledSequence: m.lastSettledSequence,
           restrictedMode: m.restrictedMode,
         });
+        setStatus("live");
+      } else {
+        // The RPC answered; the account really is absent.
+        setStatus("missing");
       }
     } catch {
-      // Will retry on next poll
+      // Unreachable or rate-limited. Keep the last good market on screen and
+      // retry, but never report this as "not initialized".
+      setStatus((prev) => (prev === "live" ? "live" : "unavailable"));
     } finally {
       setLoading(false);
     }
@@ -74,5 +90,5 @@ export function useMarket(marketIndex: number = 0) {
     return () => clearInterval(id);
   }, [fetch]);
 
-  return { market, loading, refresh: fetch };
+  return { market, status, loading, refresh: fetch };
 }

@@ -72,7 +72,7 @@ export function OpenOrders() {
       <div className="px-2 pb-2">
         {orders.length === 0 ? (
           <div className="text-center text-xs text-white/55 font-medium py-8">
-            {publicKey ? "No open orders" : "Connect wallet to view open orders"}
+            {publicKey ? "No open orders" : "Sign in to see your open orders"}
           </div>
         ) : (
           <table className="w-full">

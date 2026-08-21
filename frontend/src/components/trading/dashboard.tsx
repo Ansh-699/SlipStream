@@ -34,7 +34,12 @@ export function TradingDashboard() {
           the LEFT 9 cols hold the chart + order book on top and the Open Orders
           + Positions tables below; the RIGHT 3 cols hold the Order Form + the
           Trading Session. So Positions sits directly to the LEFT of the Trading
-          Session and the two columns end on roughly the same plane. */}
+          Session and the two columns end on roughly the same plane.
+
+          Below `lg` the columns stack, and source order would bury the order
+          form and the wallet under ~1.7k px of chart and tables — the two
+          things a new visitor needs first. So the right column is ordered
+          first on small screens and back to the right at `lg`. */}
       <section className="flex flex-col px-3 md:px-5 lg:px-8 pt-4 pb-10 gap-4 max-w-[1700px] mx-auto w-full relative z-10">
         <div className="shrink-0">
           <MarketInfo />
@@ -42,14 +47,14 @@ export function TradingDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           {/* LEFT 9 cols: chart + book on top, activity tables below */}
-          <div className="lg:col-span-9 flex flex-col gap-4">
+          <div className="order-3 lg:order-none lg:col-span-9 flex flex-col gap-4">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
               {/* Chart */}
-              <div className="lg:col-span-2 h-[440px] lg:h-[620px] rise-in">
+              <div className="lg:col-span-2 h-[440px] lg:h-[620px]">
                 <PriceChart />
               </div>
               {/* Order Book + Recent Trades */}
-              <div className="lg:col-span-1 flex flex-col gap-4 rise-in" style={{ animationDelay: "60ms" }}>
+              <div className="lg:col-span-1 flex flex-col gap-4">
                 <div className="h-[360px] lg:h-[400px]">
                   <OrderBookDisplay />
                 </div>
@@ -67,22 +72,32 @@ export function TradingDashboard() {
               </span>
               <div className="h-px flex-1 bg-white/[0.06]" />
             </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 rise-in" style={{ animationDelay: "150ms" }}>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <OpenOrders />
               <PositionsTable markPrice={markPrice} />
             </div>
 
             {/* Settled trade history (from the fills indexer). */}
-            <div className="rise-in" style={{ animationDelay: "200ms" }}>
-              <TradeHistory />
-            </div>
+            <TradeHistory />
           </div>
 
-          {/* RIGHT 3 cols: Order Form + Trading Session + System Status. */}
-          <div className="lg:col-span-3 flex flex-col gap-4 rise-in" style={{ animationDelay: "120ms" }}>
-            <OrderForm />
-            <SessionPanel />
-            <StatusPanel />
+          {/* RIGHT 3 cols: Order Form + Trading Session + System Status.
+
+              `contents` below `lg` dissolves this wrapper so its three panels
+              become grid items in their own right and can be ordered against
+              the left column individually: order form and wallet first, system
+              telemetry last. Rendering StatusPanel twice would have been the
+              other way to do it, and would have doubled its RPC polling. */}
+          <div className="contents lg:flex lg:order-none lg:col-span-3 lg:flex-col lg:gap-4">
+            <div className="order-1 lg:order-none">
+              <OrderForm />
+            </div>
+            <div className="order-2 lg:order-none">
+              <SessionPanel />
+            </div>
+            <div className="order-4 lg:order-none">
+              <StatusPanel />
+            </div>
           </div>
         </div>
       </section>

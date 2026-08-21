@@ -23,7 +23,7 @@ function Brand() {
 }
 
 export function MarketInfo() {
-  const { market, loading } = useMarket(0);
+  const { market, status, loading } = useMarket(0);
 
   const shell = (children: React.ReactNode) => (
     <div className="panel-bar px-4 py-2.5 relative z-40">
@@ -46,13 +46,15 @@ export function MarketInfo() {
   );
 
   if (loading) {
-    return shell(<span className="text-sm font-medium text-white/50">Loading market…</span>);
+    return shell(<span className="text-sm font-medium text-zinc-600 dark:text-white/55">Loading market…</span>);
   }
 
   if (!market) {
     return shell(
-      <span className="text-sm font-medium text-white/50">
-        Market not initialized.
+      <span className="text-sm font-medium text-zinc-700 dark:text-white/70">
+        {status === "missing"
+          ? "Market not initialized."
+          : "Can't reach Solana right now — retrying."}
       </span>
     );
   }

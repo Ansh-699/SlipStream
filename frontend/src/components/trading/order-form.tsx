@@ -3,14 +3,9 @@
 import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
 import { Connection, Transaction } from "@solana/web3.js";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { GlassFilter } from "@/components/ui/liquid-radio";
 import { useSession } from "@/hooks/use-session";
 import { useMarket } from "@/hooks/use-market";
 import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
-import { LiquidButton } from "@/components/ui/liquid-glass-button";
 import {
   PROGRAM_ID,
   MARKET_INDEX,
@@ -229,150 +224,125 @@ export function OrderForm() {
   };
 
   const showPriceInput = orderType !== "market";
-  const inputCls =
-    "h-9 text-sm bg-black/5 dark:bg-black/20 border-black/10 dark:border-white/10 text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-white/55 focus-visible:ring-ring/40";
 
   return (
     <LiquidGlassCard shadowIntensity="none" glowIntensity="none" borderRadius="14px" className="glass-surface backdrop-blur-xl text-zinc-900 dark:text-white">
       <div className="px-4 pt-3.5 pb-2.5 border-b border-black/10 dark:border-white/10">
         <span className="panel-title">Place Order</span>
       </div>
-      <div className="space-y-3 pt-3 px-4 pb-4">
-        {/* Long / Short toggle */}
-        <div className="inline-flex h-9 w-full rounded-md bg-black/5 dark:bg-black/20 p-0.5 border border-black/10 dark:border-white/10 shadow-inner">
-          <RadioGroup
-            value={side}
-            onValueChange={(v) => setSide(v as "long" | "short")}
-            className="group w-full relative inline-grid grid-cols-[1fr_1fr] items-center gap-0 text-sm font-medium after:absolute after:inset-y-0 after:w-1/2 after:rounded-[4px] after:bg-black/10 dark:after:bg-white/20 after:backdrop-blur-md after:shadow-sm after:transition-transform after:duration-300 after:[transition-timing-function:cubic-bezier(0.16,1,0.3,1)] data-[state=short]:after:translate-x-full data-[state=long]:after:translate-x-0"
-            data-state={side}
-          >
-            <div className="absolute top-0 left-0 isolate -z-10 h-full w-full overflow-hidden rounded-md" style={{ filter: 'url("#radio-glass")' }} />
-            <label className="relative z-10 inline-flex h-full w-full cursor-pointer select-none items-center justify-center whitespace-nowrap px-4 transition-colors text-zinc-500 dark:text-white/60 group-data-[state=long]:text-emerald-600 dark:group-data-[state=long]:text-emerald-400 group-data-[state=long]:font-semibold">
-              Long
-              <RadioGroupItem id="side-long" value="long" className="sr-only" />
-            </label>
-            <label className="relative z-10 inline-flex h-full w-full cursor-pointer select-none items-center justify-center whitespace-nowrap px-4 transition-colors text-zinc-500 dark:text-white/60 group-data-[state=short]:text-rose-600 dark:group-data-[state=short]:text-rose-400 group-data-[state=short]:font-semibold">
-              Short
-              <RadioGroupItem id="side-short" value="short" className="sr-only" />
-            </label>
-            <GlassFilter />
-          </RadioGroup>
+      <div className="order-form">
+        <div className="order-side" role="group" aria-label="Order side">
+          <button type="button" onClick={() => setSide("long")} aria-pressed={side === "long"} className="order-side-btn order-side-long">
+            <span className="order-side-name">Long</span>
+            <span className="order-side-sub">profits if price rises</span>
+          </button>
+          <button type="button" onClick={() => setSide("short")} aria-pressed={side === "short"} className="order-side-btn order-side-short">
+            <span className="order-side-name">Short</span>
+            <span className="order-side-sub">profits if price falls</span>
+          </button>
         </div>
 
-        {/* Order type */}
-        <Tabs value={orderType} onValueChange={(v) => setOrderType(v as OrderType)}>
-          <TabsList className="w-full grid grid-cols-2 bg-black/5 dark:bg-black/20 p-0.5 rounded-md border border-black/10 dark:border-white/10 shadow-inner h-9">
-            <TabsTrigger value="limit" className="data-[state=active]:bg-black/10 dark:data-[state=active]:bg-white/20 text-zinc-500 dark:text-white/60 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-white data-[state=active]:font-semibold rounded-[4px] transition-all text-xs">Limit</TabsTrigger>
-            <TabsTrigger value="market" className="data-[state=active]:bg-black/10 dark:data-[state=active]:bg-white/20 text-zinc-500 dark:text-white/60 data-[state=active]:text-zinc-900 dark:data-[state=active]:text-white data-[state=active]:font-semibold rounded-[4px] transition-all text-xs">Market</TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        {showPriceInput ? (
-          <div className="space-y-1">
-            <label className="text-xs text-zinc-600 dark:text-white/80 font-medium">Limit Price (USD)</label>
-            <Input type="number" step="0.001" placeholder={markPrice ? markPrice.toFixed(3) : "0.00"} value={price} onChange={(e) => setPrice(e.target.value)} className={inputCls} />
+        <div className="order-field">
+          <div className="order-field-head">
+            <label htmlFor="order-price" className="order-label">{showPriceInput ? "Limit price" : "Execution"}</label>
+            <div className="order-seg" role="group" aria-label="Order type">
+              <button type="button" onClick={() => setOrderType("limit")} aria-pressed={orderType === "limit"} className="order-seg-btn">Limit</button>
+              <button type="button" onClick={() => setOrderType("market")} aria-pressed={orderType === "market"} className="order-seg-btn">Market</button>
+            </div>
           </div>
-        ) : (
-          <div className="text-[11px] text-zinc-500 dark:text-white/60 bg-black/5 dark:bg-white/5 rounded-md px-2.5 py-2">
-            Market order fills at the best available price{markPrice ? ` (~$${markPrice.toFixed(3)})` : ""}.
-          </div>
-        )}
+          {showPriceInput ? (
+            <input id="order-price" type="number" step="0.001" inputMode="decimal" placeholder={markPrice ? markPrice.toFixed(3) : "0.00"} value={price} onChange={(ev) => setPrice(ev.target.value)} className="order-input" />
+          ) : (
+            <p className="order-note">Fills at the best price resting on the book{markPrice ? `, around ${markPrice.toFixed(3)}` : ""}.</p>
+          )}
+        </div>
 
-        {/* Margin ($) */}
-        <div className="space-y-1">
-          <label className="text-xs text-zinc-600 dark:text-white/80 font-medium">Margin (USD)</label>
-          <Input type="number" step="1" placeholder="0.00" value={margin} onChange={(e) => setMargin(e.target.value)} className={inputCls} />
-          <div className="flex gap-1.5">
+        <div className="order-field">
+          <div className="order-field-head">
+            <label htmlFor="order-margin" className="order-label">Margin (USD)</label>
+            <span className="order-aside">{session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet"}</span>
+          </div>
+          <input id="order-margin" type="number" step="1" inputMode="decimal" placeholder="0.00" value={margin} onChange={(ev) => setMargin(ev.target.value)} className="order-input" />
+          <div className="order-chips">
             {[10, 50, 100, 250].map((m) => (
-              <button key={m} onClick={() => setMargin(String(m))} className="flex-1 text-[10px] font-semibold py-1 rounded bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-zinc-600 dark:text-white/60 transition-colors">
-                ${m}
-              </button>
+              <button key={m} type="button" onClick={() => setMargin(String(m))} className="order-chip">${m}</button>
             ))}
-            <button onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")} className="flex-1 text-[10px] font-semibold py-1 rounded bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10 text-zinc-600 dark:text-white/60 transition-colors">
-              Max
-            </button>
+            <button type="button" onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")} className="order-chip">Max</button>
           </div>
         </div>
 
-        {/* Leverage slider */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <label className="text-xs text-zinc-600 dark:text-white/80 font-medium">Leverage</label>
-            <span className="text-sm font-bold tnum text-emerald-500 dark:text-emerald-400">{leverage}x</span>
+        <div className="order-field">
+          <div className="order-field-head">
+            <label htmlFor="order-lev" className="order-label">Leverage</label>
+            <span className="order-lev">{leverage}×</span>
           </div>
-          <input
-            type="range"
-            min={1}
-            max={MAX_LEVERAGE}
-            step={1}
-            value={leverage}
-            onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
-            className="w-full accent-emerald-500 cursor-pointer"
-          />
-          <div className="flex justify-between text-[10px] text-zinc-400 dark:text-white/55 font-medium">
-            <span>1x</span><span>5x</span><span>10x</span><span>20x</span>
-          </div>
+          <input id="order-lev" type="range" min={1} max={MAX_LEVERAGE} step={1} value={leverage} onChange={(ev) => setLeverage(parseInt(ev.target.value, 10))} className="order-range" />
+          <div className="order-scale"><span>1×</span><span>5×</span><span>10×</span><span>{MAX_LEVERAGE}×</span></div>
         </div>
 
         {orderType === "market" && (
-          <div className="space-y-1">
-            <label className="text-xs text-zinc-600 dark:text-white/80 font-medium">Max Slippage (bps)</label>
-            <Input type="number" step="1" placeholder="50" value={slippageBps} onChange={(e) => setSlippageBps(e.target.value)} className={inputCls} />
+          <div className="order-field">
+            <div className="order-field-head">
+              <label htmlFor="order-slippage" className="order-label">Max slippage</label>
+              <span className="order-aside">basis points</span>
+            </div>
+            <input id="order-slippage" type="number" step="1" inputMode="numeric" placeholder="50" value={slippageBps} onChange={(ev) => setSlippageBps(ev.target.value)} className="order-input" />
           </div>
         )}
 
-        {/* Derived position summary */}
-        <div className="rounded-lg bg-black/5 dark:bg-white/[0.04] border border-black/10 dark:border-white/[0.07] px-3 py-2 space-y-1">
-          <SummaryRow label="Position size" value={derived ? `${derived.sizeSol.toFixed(1)} SOL` : "—"} />
-          <SummaryRow label="Notional" value={derived ? `$${derived.notional.toFixed(2)}` : "—"} />
-          <SummaryRow
-            label="Margin required"
-            value={derived ? `$${derived.actualMargin.toFixed(2)}` : "—"}
-            danger={insufficient}
-          />
-          <SummaryRow label="Available credit" value={session.initialized ? `$${availUsd.toFixed(2)}` : "—"} muted />
-        </div>
+        <p className="order-commit">
+          {derived && derived.sizeSol > 0 ? (
+            <>
+              {side === "long" ? "Long" : "Short"} <b>{derived.sizeSol.toFixed(1)} SOL</b> — <span className="order-num">${derived.notional.toFixed(2)}</span> notional,{" "}
+              <span className="order-num">${derived.actualMargin.toFixed(2)}</span> of your{" "}
+              <span className="order-num">${availUsd.toFixed(2)}</span> credit at risk.
+            </>
+          ) : (
+            "Enter a margin amount to size the order."
+          )}
+        </p>
 
-        {belowOneLot && (
-          <div className="text-[11px] text-amber-500 dark:text-amber-400">
-            Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.
-          </div>
-        )}
-        {insufficient && !belowOneLot && (
-          <div className="text-[11px] text-rose-500 dark:text-rose-400">
-            Margin required exceeds available credit. Lower it or fund more credit.
-          </div>
-        )}
+        {belowOneLot && <p className="order-alert order-alert-warn">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>}
+        {insufficient && !belowOneLot && <p className="order-alert order-alert-bad">Margin required exceeds available credit. Lower it or fund more credit.</p>}
+
+        {(() => {
+          const blocker = !publicKey
+            ? "Connect a wallet to trade"
+            : !session.delegated
+              ? "Start a trading session first"
+              : orderType !== "market" && (!price || parseFloat(price) <= 0)
+                ? "Enter a limit price"
+                : !derived || derived.sizeSol <= 0
+                  ? "Enter a margin amount"
+                  : belowOneLot
+                    ? "Below the 0.1 SOL minimum lot"
+                    : insufficient
+                      ? "Margin exceeds available credit"
+                      : null;
+          return (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting || blocker !== null}
+              className={`order-cta ${side === "long" ? "order-cta-long" : "order-cta-short"}`}
+            >
+              {submitting
+                ? "Placing…"
+                : blocker ?? `${side === "long" ? "Long" : "Short"} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
+            </button>
+          );
+        })()}
 
         {session.delegated && (
-          <div className="text-[10px] text-zinc-500 dark:text-white/50">
+          <p className="order-foot">
             {session.sessionActive
               ? "Session key active — orders sign locally, no wallet popup."
               : "No active session key — orders will prompt your wallet."}
-          </div>
+          </p>
         )}
-
-        <LiquidButton
-          size="lg"
-          onClick={handleSubmit}
-          disabled={!publicKey || !session.delegated || submitting || insufficient || belowOneLot || !derived || derived.sizeSol <= 0 || (orderType !== "market" && (!price || parseFloat(price) <= 0))}
-          className={`w-full font-semibold mt-1 rounded-xl backdrop-blur-md ${
-            side === "long"
-              ? "bg-emerald-500/25 hover:bg-emerald-500/35 text-emerald-950 dark:text-emerald-50 shadow-[0_4px_24px_rgba(16,185,129,0.35)]"
-              : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-950 dark:text-rose-50 shadow-[0_4px_24px_rgba(244,63,94,0.3)]"
-          }`}
-        >
-          {submitting ? "Placing…" : `${side === "long" ? "Long" : "Short"}${derived && derived.sizeSol > 0 ? ` ${derived.sizeSol.toFixed(1)} SOL` : ""}`}
-        </LiquidButton>
-
-        {lastErr && <div className="text-xs text-rose-500 dark:text-rose-400 break-all">{lastErr}</div>}
+        {lastErr && <p className="order-err">{lastErr}</p>}
         {lastSig && (
-          <a
-            href={explorerTx(lastSig, "er")}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-emerald-400 hover:text-emerald-300 break-all inline-flex items-center gap-1 underline decoration-dotted underline-offset-2"
-          >
+          <a href={explorerTx(lastSig, "er")} target="_blank" rel="noopener noreferrer" className="order-link">
             View tx on Explorer: {lastSig.slice(0, 12)}…{lastSig.slice(-8)}
           </a>
         )}
@@ -381,27 +351,3 @@ export function OrderForm() {
   );
 }
 
-function SummaryRow({
-  label,
-  value,
-  danger,
-  muted,
-}: {
-  label: string;
-  value: string;
-  danger?: boolean;
-  muted?: boolean;
-}) {
-  return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-zinc-500 dark:text-white/45">{label}</span>
-      <span
-        className={`font-mono font-semibold tnum ${
-          danger ? "text-rose-500 dark:text-rose-400" : muted ? "text-zinc-500 dark:text-white/50" : "text-zinc-900 dark:text-white"
-        }`}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}

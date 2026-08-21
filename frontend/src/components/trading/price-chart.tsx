@@ -64,26 +64,35 @@ export function PriceChart() {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="inline-flex rounded-lg bg-white/[0.04] border border-white/[0.08] p-0.5">
+          <div role="group" aria-label="Chart type" className="inline-flex rounded-lg bg-black/[0.03] border border-black/10 p-0.5 dark:bg-white/[0.04] dark:border-white/[0.08]">
             {(["candles", "line", "area"] as ChartType[]).map((t) => (
               <button
                 key={t}
+                type="button"
+                aria-pressed={chartType === t}
                 onClick={() => setChartType(t)}
-                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold capitalize transition-colors ${
-                  chartType === t ? "bg-white/10 text-white" : "text-white/45 hover:text-white/70"
+                className={`inline-flex h-9 items-center rounded-md px-3 text-[11px] font-semibold capitalize transition-colors sm:h-[26px] sm:px-2.5 ${
+                  chartType === t
+                    ? "bg-black/10 text-zinc-900 dark:bg-white/10 dark:text-white"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-white/55 dark:hover:text-white/80"
                 }`}
               >
                 {t}
               </button>
             ))}
           </div>
-          <div className="inline-flex rounded-lg bg-white/[0.04] border border-white/[0.08] p-0.5">
+          <div role="group" aria-label="Candle interval" className="inline-flex rounded-lg bg-black/[0.03] border border-black/10 p-0.5 dark:bg-white/[0.04] dark:border-white/[0.08]">
             {RESOLUTIONS.map((r, i) => (
               <button
                 key={r.label}
+                type="button"
+                aria-pressed={resIdx === i}
+                aria-label={`${r.label} candles`}
                 onClick={() => setResIdx(i)}
-                className={`px-2 py-1 rounded-md text-[11px] font-semibold transition-colors ${
-                  resIdx === i ? "bg-white/10 text-white" : "text-white/45 hover:text-white/70"
+                className={`inline-flex h-9 min-w-[40px] items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition-colors sm:h-[26px] sm:min-w-0 sm:px-2 ${
+                  resIdx === i
+                    ? "bg-black/10 text-zinc-900 dark:bg-white/10 dark:text-white"
+                    : "text-zinc-600 hover:text-zinc-900 dark:text-white/55 dark:hover:text-white/80"
                 }`}
               >
                 {r.label}
@@ -98,14 +107,24 @@ export function PriceChart() {
         {candles.length >= 2 ? (
           <CandleCanvas candles={candles} chartType={chartType} resolution={resolution} />
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-sm text-white/50">
-            <span>{loading ? "Loading Pyth history…" : error ? `Error: ${error}` : "No candles"}</span>
-            <span className="text-[11px] text-white/50">Crypto.SOL/USD · Pyth Benchmarks</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
+            <span className="text-sm font-medium text-zinc-700 dark:text-white/70">
+              {loading
+                ? "Loading price history…"
+                : error
+                  ? "Couldn't load price history"
+                  : "No candles for this interval"}
+            </span>
+            <span className="max-w-[42ch] text-[11px] leading-relaxed text-zinc-600 dark:text-white/55">
+              {error
+                ? "The Pyth Benchmarks feed didn't answer. It retries on its own; pick another interval if it stays empty."
+                : "Crypto.SOL/USD · Pyth Benchmarks"}
+            </span>
           </div>
         )}
       </div>
 
-      <div className="flex items-center justify-between px-4 py-2 border-t border-white/[0.06] text-[10px] text-white/45">
+      <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-white/[0.06] text-[10px] text-zinc-600 dark:text-white/55">
         <span>Scroll to zoom · drag to pan</span>
         <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
       </div>

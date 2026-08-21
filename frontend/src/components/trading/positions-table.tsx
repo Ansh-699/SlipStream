@@ -236,7 +236,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       <div className="px-2 pb-2">
         {positions.length === 0 && !erPosition ? (
           <div className="text-center text-xs text-white/55 font-medium py-8">
-            {publicKey ? "No open positions" : "Connect wallet to view positions"}
+            {publicKey ? "No open positions" : "Sign in to see your positions"}
           </div>
         ) : (
           <table className="w-full">

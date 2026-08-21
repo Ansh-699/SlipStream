@@ -10,5 +10,12 @@ const PhantomConnectButton = dynamic(
 );
 
 export function ConnectButton() {
-  return <PhantomConnectButton addressType={AddressType.solana} />;
+  // Wrapped so globals.css can reach the vendor button: it hardcodes
+  // white-on-translucent-grey via inline styles, which disappears on the light
+  // canvas and can only be overridden with !important.
+  return (
+    <span className="phantom-connect">
+      <PhantomConnectButton addressType={AddressType.solana} />
+    </span>
+  );
 }

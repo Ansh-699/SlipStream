@@ -60,7 +60,7 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.50 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
@@ -569,16 +569,46 @@ input[type="number"] {
 :root:not(.dark) .text-white { color: rgba(15, 23, 23, 0.95) !important; }
 :root:not(.dark) .text-white\/90 { color: rgba(15, 23, 23, 0.92) !important; }
 :root:not(.dark) .text-white\/85 { color: rgba(15, 23, 23, 0.88) !important; }
-:root:not(.dark) .text-white\/80 { color: rgba(15, 23, 23, 0.82) !important; }
-:root:not(.dark) .text-white\/75 { color: rgba(15, 23, 23, 0.78) !important; }
-:root:not(.dark) .text-white\/70 { color: rgba(15, 23, 23, 0.7) !important; }
-:root:not(.dark) .text-white\/60 { color: rgba(15, 23, 23, 0.62) !important; }
-:root:not(.dark) .text-white\/55 { color: rgba(15, 23, 23, 0.58) !important; }
-:root:not(.dark) .text-white\/50 { color: rgba(15, 23, 23, 0.5) !important; }
-:root:not(.dark) .text-white\/45 { color: rgba(15, 23, 23, 0.5) !important; }
-:root:not(.dark) .text-white\/40 { color: rgba(15, 23, 23, 0.45) !important; }
-:root:not(.dark) .text-white\/35 { color: rgba(15, 23, 23, 0.42) !important; }
-:root:not(.dark) .text-white\/30 { color: rgba(15, 23, 23, 0.38) !important; }
+:root:not(.dark) .text-white\/80 { color: rgba(15, 23, 23, 0.86) !important; }
+:root:not(.dark) .text-white\/75 { color: rgba(15, 23, 23, 0.84) !important; }
+:root:not(.dark) .text-white\/70 { color: rgba(15, 23, 23, 0.82) !important; }
+:root:not(.dark) .text-white\/60 { color: rgba(15, 23, 23, 0.78) !important; }
+:root:not(.dark) .text-white\/55 { color: rgba(15, 23, 23, 0.74) !important; }
+:root:not(.dark) .text-white\/50 { color: rgba(15, 23, 23, 0.72) !important; }
+:root:not(.dark) .text-white\/45 { color: rgba(15, 23, 23, 0.7) !important; }
+:root:not(.dark) .text-white\/40 { color: rgba(15, 23, 23, 0.68) !important; }
+:root:not(.dark) .text-white\/35 { color: rgba(15, 23, 23, 0.66) !important; }
+:root:not(.dark) .text-white\/30 { color: rgba(15, 23, 23, 0.64) !important; }
+
+/* The same problem, for the accent scale. The neutral remap above only covers
+   `text-white/N`; the emerald/rose/amber/sky tints the terminal was built with
+   are tuned for a near-black canvas and land at 1.9–2.9:1 on the light one —
+   and per brand.md these are load-bearing signal, not decoration, so they are
+   exactly the colors that must stay readable. Darkened to the 600/700 steps,
+   which hold their hue and clear AA on white. Light-mode only: Tailwind's
+   `dark:` variants compile to their own class names and are unaffected. */
+:root:not(.dark) .text-emerald-200,
+:root:not(.dark) .text-emerald-300,
+:root:not(.dark) .text-emerald-300\/80,
+:root:not(.dark) .text-emerald-300\/90,
+:root:not(.dark) .text-emerald-400 { color: #047857 !important; }
+
+:root:not(.dark) .text-rose-200,
+:root:not(.dark) .text-rose-300,
+:root:not(.dark) .text-rose-300\/90,
+:root:not(.dark) .text-rose-400 { color: #be123c !important; }
+
+:root:not(.dark) .text-amber-200,
+:root:not(.dark) .text-amber-300,
+:root:not(.dark) .text-amber-300\/80,
+:root:not(.dark) .text-amber-300\/90,
+:root:not(.dark) .text-amber-400,
+:root:not(.dark) .text-amber-400\/90 { color: #b45309 !important; }
+
+:root:not(.dark) .text-sky-200,
+:root:not(.dark) .text-sky-300,
+:root:not(.dark) .text-sky-300\/80,
+:root:not(.dark) .text-sky-400\/80 { color: #0369a1 !important; }
 
 /* White fills (chips, hover rows, segmented controls) → subtle dark tints. */
 :root:not(.dark) .bg-white\/20 { background-color: rgba(15, 23, 23, 0.14) !important; }
@@ -667,3 +697,648 @@ input[type="number"] {
 }
 /* Once mermaid processes a node it sets data-processed="true". */
 .doc-prose pre.mermaid[data-processed="true"] { color: inherit; }
+
+/* ── Order entry (/trade) ────────────────────────────────────────────────
+   The side choice leads, the order reads back as a sentence, and the submit
+   button carries its own blocker text instead of going silently dead. Themed
+   through local vars so the light remap is a variable swap, not a second copy. */
+.order-form {
+  --of-ink: rgba(255, 255, 255, 0.95);
+  --of-ink-2: rgba(255, 255, 255, 0.7);
+  --of-ink-3: rgba(255, 255, 255, 0.55);
+  --of-ink-4: rgba(255, 255, 255, 0.5);
+  --of-line: rgba(255, 255, 255, 0.08);
+  --of-fill: rgba(255, 255, 255, 0.04);
+  --of-fill-hover: rgba(255, 255, 255, 0.06);
+  --of-fill-strong: rgba(255, 255, 255, 0.09);
+  --of-inset: rgba(0, 0, 0, 0.28);
+  --of-seg-on: rgba(255, 255, 255, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px 16px;
+}
+:root:not(.dark) .order-form {
+  --of-ink: rgba(15, 23, 23, 0.95);
+  --of-ink-2: rgba(15, 23, 23, 0.72);
+  --of-ink-3: rgba(15, 23, 23, 0.66);
+  --of-ink-4: rgba(15, 23, 23, 0.62);
+  --of-line: rgba(15, 23, 23, 0.12);
+  --of-fill: rgba(15, 23, 23, 0.04);
+  --of-fill-hover: rgba(15, 23, 23, 0.07);
+  --of-fill-strong: rgba(15, 23, 23, 0.1);
+  --of-inset: rgba(15, 23, 23, 0.06);
+  --of-seg-on: rgba(15, 23, 23, 0.1);
+}
+
+/* Side — the most consequential choice, so it is the loudest control. */
+.order-side { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.order-side-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-height: 46px;
+  padding: 7px 11px;
+  border-radius: 10px;
+  border: 1px solid var(--of-line);
+  background: var(--of-fill);
+  color: var(--of-ink-3);
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+.order-side-btn:hover { background: var(--of-fill-hover); color: var(--of-ink); }
+.order-side-name { font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.01em; line-height: 1.1; }
+.order-side-sub { font-size: 0.6875rem; font-weight: 500; opacity: 0.85; }
+.order-side-long[aria-pressed="true"] {
+  background: #10b981;
+  border-color: #10b981;
+  color: #04140e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.order-side-short[aria-pressed="true"] {
+  background: #f43f5e;
+  border-color: #f43f5e;
+  color: #2b0410;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.order-field { display: flex; flex-direction: column; gap: 6px; }
+.order-field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.order-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--of-ink-3);
+}
+.order-aside { font-size: 0.75rem; font-weight: 500; color: var(--of-ink-3); }
+
+.order-seg {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: 8px;
+  background: var(--of-inset);
+  border: 1px solid var(--of-line);
+}
+.order-seg-btn {
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--of-ink-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.order-seg-btn:hover { color: var(--of-ink); }
+.order-seg-btn[aria-pressed="true"] { background: var(--of-seg-on); color: var(--of-ink); }
+
+.order-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--of-line);
+  background: var(--of-fill);
+  color: var(--of-ink);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+  caret-color: #10b981;
+  transition: background 100ms, border-color 100ms;
+}
+.order-input::placeholder { color: var(--of-ink-4); }
+.order-input:hover { background: var(--of-fill-hover); }
+
+.order-note {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: var(--of-ink-2);
+  background: var(--of-fill);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.order-chips { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.order-chip {
+  height: 28px;
+  border: 1px solid var(--of-line);
+  border-radius: 7px;
+  background: var(--of-fill);
+  color: var(--of-ink-2);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.order-chip:hover { background: var(--of-fill-strong); color: var(--of-ink); }
+
+.order-lev { font-size: 0.9375rem; font-weight: 700; color: #34d399; font-variant-numeric: tabular-nums; }
+:root:not(.dark) .order-lev { color: #047857; }
+.order-range { width: 100%; height: 20px; accent-color: #10b981; cursor: pointer; }
+.order-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--of-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The order read back in words — replaces the four-row summary box. */
+.order-commit {
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--of-ink-2);
+  border-top: 1px solid var(--of-line);
+  padding-top: 10px;
+}
+.order-commit b { color: var(--of-ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.order-num { color: var(--of-ink); font-variant-numeric: tabular-nums; }
+
+.order-alert { margin: 0; font-size: 0.75rem; line-height: 1.45; }
+.order-alert-warn { color: #f59e0b; }
+.dark .order-alert-warn { color: #fbbf24; }
+.order-alert-bad { color: #e11d48; }
+.dark .order-alert-bad { color: #fb7185; }
+
+.order-cta {
+  width: 100%;
+  height: 44px;
+  border: none;
+  border-radius: 11px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background 100ms, transform 100ms;
+}
+.order-cta:active:not(:disabled) { transform: translateY(1px); }
+.order-cta-long {
+  background: #10b981;
+  color: #04140e;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.35), 0 8px 30px rgba(16, 185, 129, 0.28);
+}
+.order-cta-long:hover:not(:disabled) { background: #34d399; }
+.order-cta-short {
+  background: #f43f5e;
+  color: #2b0410;
+  box-shadow: 0 0 0 1px rgba(244, 63, 94, 0.35), 0 8px 30px rgba(244, 63, 94, 0.26);
+}
+.order-cta-short:hover:not(:disabled) { background: #fb7185; }
+/* Disabled carries the blocker text, so it must stay readable, not ghosted. */
+.order-cta:disabled {
+  background: var(--of-fill-hover);
+  color: var(--of-ink-2);
+  box-shadow: inset 0 0 0 1px var(--of-line);
+  cursor: not-allowed;
+}
+
+.order-foot { margin: 0; font-size: 0.75rem; line-height: 1.45; color: var(--of-ink-3); }
+.order-err { margin: 0; font-size: 0.75rem; line-height: 1.45; color: #e11d48; word-break: break-all; }
+.dark .order-err { color: #fb7185; }
+.order-link {
+  font-size: 0.75rem;
+  color: #059669;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+.dark .order-link { color: #34d399; }
+
+/* ══ The paper (landing) ═══════════════════════════════════════════════════
+   The landing page is set as a typeset technical paper on the dark canvas:
+   cream ink, numbered sections, horizontal-rule tables, a numbered figure,
+   footnotes and references. Scoped to `.paper` so none of it reaches the
+   terminal or the docs, which keep the panel world.
+
+   Two rules hold the whole thing together:
+     1. No boxes. Depth on this surface comes from rules and space only —
+        a glass panel here would turn the paper back into a web page.
+     2. Emerald appears exactly twice: the primary action, and the live
+        indicator on Figure 1. Everything else is ink. */
+.paper {
+  --pp-ink: #ece7dc;
+  --pp-body: rgba(236, 231, 220, 0.78);
+  --pp-muted: rgba(236, 231, 220, 0.56);
+  --pp-rule: rgba(236, 231, 220, 0.2);
+  --pp-rule-strong: rgba(236, 231, 220, 0.42);
+  --pp-measure: 68ch;
+  --pp-bid-bar: rgba(16, 185, 129, 0.09);
+  --pp-ask-bar: rgba(244, 63, 94, 0.085);
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  color: var(--pp-body);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+}
+:root:not(.dark) .paper {
+  --pp-ink: #14100c;
+  --pp-body: rgba(20, 16, 12, 0.86);
+  --pp-muted: rgba(20, 16, 12, 0.62);
+  --pp-rule: rgba(20, 16, 12, 0.22);
+  --pp-rule-strong: rgba(20, 16, 12, 0.5);
+  --pp-bid-bar: rgba(4, 120, 87, 0.11);
+  --pp-ask-bar: rgba(190, 18, 60, 0.09);
+}
+
+.paper-sheet { margin-inline: auto; max-width: 46rem; padding-inline: 1.5rem; }
+
+/* Running head — the journal line, not a nav bar. */
+.paper-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1.25rem;
+  padding-block: 1.5rem 0.6rem;
+  border-bottom: 1px solid var(--pp-rule);
+  font-size: 0.8125rem;
+}
+.paper-head-title { color: var(--pp-ink); font-weight: 600; letter-spacing: 0.01em; }
+.paper-head nav { margin-left: auto; display: flex; align-items: baseline; gap: 1.1rem; }
+
+/* Title block. The claim is the subtitle, in italic, the way a paper carries
+   its own restatement under the title. */
+.paper-title {
+  margin: 2.75rem 0 0;
+  color: var(--pp-ink);
+  font-size: clamp(2.3rem, 6vw, 3.3rem);
+  font-weight: 600;
+  line-height: 1.04;
+  letter-spacing: -0.022em;
+  text-wrap: balance;
+}
+.paper-subtitle {
+  margin: 0.7rem 0 0;
+  max-width: 34ch;
+  font-size: clamp(1.1rem, 2.4vw, 1.4rem);
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--pp-muted);
+  text-wrap: balance;
+}
+.paper-edition {
+  margin: 1.4rem 0 0;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--pp-rule);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--pp-muted);
+  font-variant-numeric: oldstyle-nums;
+}
+
+/* Section heads: small caps over a rule, with the number hanging in the
+   left margin where the column has room for it. */
+.paper-h2 {
+  position: relative;
+  margin: 3.25rem 0 1.1rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--pp-rule);
+  color: var(--pp-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.11em;
+}
+.paper-h2 .paper-n { color: var(--pp-muted); margin-right: 0.75em; font-variant-caps: normal; }
+@media (min-width: 900px) {
+  .paper-h2 .paper-n { position: absolute; right: 100%; margin-right: 1.1rem; }
+}
+.paper-h3 {
+  margin: 1.9rem 0 0.5rem;
+  color: var(--pp-ink);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.08em;
+}
+
+/* Prose. Justified with hyphenation, which is what makes a column read as
+   set rather than as flowed HTML. */
+.paper-p {
+  margin: 0.9rem 0 0;
+  max-width: var(--pp-measure);
+  hyphens: auto;
+  font-variant-numeric: oldstyle-nums;
+}
+.paper-p:first-child { margin-top: 0; }
+.paper-lead { font-size: 1.125rem; }
+.paper-abstract {
+  margin: 1.6rem 0 0;
+  padding-left: 1.6rem;
+  border-left: 1px solid var(--pp-rule);
+  max-width: 64ch;
+}
+.paper-abstract .paper-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--pp-ink);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.11em;
+}
+.paper em { font-style: italic; }
+.paper strong, .paper b { color: var(--pp-ink); font-weight: 600; }
+
+/* Links read as citations: ink, ruled underneath, never a coloured word. */
+.paper a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: from-font;
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--pp-rule-strong);
+  transition: color 100ms, text-decoration-color 100ms;
+}
+.paper a:hover { color: var(--pp-ink); text-decoration-color: currentColor; }
+.paper a:focus-visible { outline: 2px solid rgba(16, 185, 129, 0.75); outline-offset: 3px; border-radius: 2px; }
+
+/* The one action. A ruled box, because a paper frames a note rather than
+   filling a button — and emerald because brand.md gives the primary CTA
+   the accent and nothing else on this page claims it. */
+.paper-action {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.55em;
+  margin-top: 1.6rem;
+  padding: 0.62rem 1.15rem;
+  border: 1px solid rgba(16, 185, 129, 0.55);
+  color: #6ee7b7;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+:root:not(.dark) .paper-action { color: #056146; border-color: rgba(5, 97, 70, 0.5); }
+.paper-action:hover { background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.85); color: #a7f3d0; text-decoration: none; }
+:root:not(.dark) .paper-action:hover { color: #04372a; background: rgba(5, 97, 70, 0.08); }
+.paper-action .paper-arrow { font-size: 0.85em; }
+
+/* Tables: horizontal rules only. Vertical rules are what makes a table look
+   like a spreadsheet instead of a specification. */
+.paper-table-wrap { margin-top: 1.4rem; overflow-x: auto; }
+.paper-table {
+  width: 100%;
+  min-width: 30rem;
+  border-collapse: collapse;
+  font-size: 0.9375rem;
+}
+.paper-table caption {
+  caption-side: bottom;
+  padding-top: 0.7rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--pp-muted);
+}
+.paper-table th {
+  padding: 0.45rem 0.9rem 0.45rem 0;
+  border-top: 2px solid var(--pp-rule-strong);
+  border-bottom: 1px solid var(--pp-rule);
+  color: var(--pp-ink);
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.1em;
+}
+.paper-table td { padding: 0.6rem 0.9rem 0.6rem 0; vertical-align: baseline; }
+.paper-table tbody tr:last-child td { border-bottom: 2px solid var(--pp-rule-strong); }
+.paper-table .paper-td-name { color: var(--pp-ink); font-weight: 600; white-space: nowrap; }
+.paper-table .paper-row-split td { border-top: 1px solid var(--pp-rule); }
+
+/* Definition list for the mechanics — term hangs, definition sets beside it. */
+.paper-dl { margin: 1.3rem 0 0; border-top: 1px solid var(--pp-rule); }
+.paper-dl > div { padding: 0.95rem 0; border-bottom: 1px solid var(--pp-rule); }
+@media (min-width: 700px) {
+  .paper-dl > div { display: grid; grid-template-columns: 9.5rem 1fr; gap: 1.5rem; }
+}
+.paper-dl dt { color: var(--pp-ink); font-weight: 600; font-variant-caps: all-small-caps; letter-spacing: 0.07em; }
+.paper-dl dd { margin: 0.2rem 0 0; max-width: 62ch; }
+@media (min-width: 700px) { .paper-dl dd { margin-top: 0; } }
+
+/* Enumerate — hanging numerals, the way a paper sets a numbered list. */
+.paper-ol { margin: 1rem 0 0; padding: 0; list-style: none; counter-reset: pp; max-width: var(--pp-measure); }
+.paper-ol > li { position: relative; padding-left: 2.1rem; margin-top: 0.7rem; counter-increment: pp; }
+.paper-ol > li::before {
+  content: "(" counter(pp) ")";
+  position: absolute;
+  left: 0;
+  color: var(--pp-muted);
+  font-variant-numeric: oldstyle-nums;
+}
+
+/* Margin notes ride in the right margin where the viewport can hold them,
+   and fall back to an indented aside where it cannot. */
+.paper-note {
+  margin: 0.9rem 0 0;
+  padding-left: 1.1rem;
+  border-left: 1px solid var(--pp-rule);
+  max-width: 52ch;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--pp-muted);
+}
+@media (min-width: 1280px) {
+  .paper-note {
+    position: absolute;
+    left: calc(100% + 2.75rem);
+    width: 13rem;
+    margin: 0.35rem 0 0;
+    padding-left: 0;
+    border-left: none;
+    text-align: left;
+    hyphens: auto;
+  }
+}
+
+/* Footnote apparatus: a short rule, then the notes, exactly as printed. */
+.paper-sup { font-size: 0.62em; vertical-align: super; line-height: 0; color: var(--pp-muted); }
+.paper-footnotes { margin-top: 3.5rem; padding-top: 0.9rem; position: relative; }
+.paper-footnotes::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 8rem;
+  border-top: 1px solid var(--pp-rule-strong);
+}
+.paper-footnotes li {
+  position: relative;
+  padding-left: 1.5rem;
+  margin-top: 0.55rem;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--pp-muted);
+  hyphens: auto;
+}
+.paper-footnotes li::before {
+  content: counter(fn);
+  counter-increment: fn;
+  position: absolute;
+  left: 0;
+  font-size: 0.72em;
+  vertical-align: super;
+}
+.paper-footnotes ol { counter-reset: fn; list-style: none; margin: 0; padding: 0; }
+
+/* References — every entry is something a reader can go and check. */
+.paper-refs { margin: 1.2rem 0 0; padding: 0; list-style: none; counter-reset: ref; }
+.paper-refs li {
+  position: relative;
+  padding-left: 2.4rem;
+  margin-top: 0.6rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  counter-increment: ref;
+}
+.paper-refs li::before { content: "[" counter(ref) "]"; position: absolute; left: 0; color: var(--pp-muted); }
+.paper-mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.86em;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+/* Colophon */
+.paper-colophon {
+  margin-top: 3.5rem;
+  padding: 1.2rem 0 3rem;
+  border-top: 1px solid var(--pp-rule);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.8125rem;
+  color: var(--pp-muted);
+}
+
+/* Figure 1 — the live book, set as a float with a numbered caption. It is the
+   only thing on the page that moves, because it is the only thing that is live. */
+.paper-figure { margin: 1.6rem 0 0; }
+.paper-figure-plate { border-top: 2px solid var(--pp-rule-strong); border-bottom: 1px solid var(--pp-rule); }
+.paper-figcaption {
+  margin-top: 0.7rem;
+  max-width: 60ch;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  color: var(--pp-muted);
+}
+.paper-figcaption b { color: var(--pp-ink); font-weight: 600; font-variant-caps: all-small-caps; letter-spacing: 0.06em; }
+.paper-ladder { width: 100%; border-collapse: collapse; font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+.paper-ladder th {
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--pp-rule);
+  color: var(--pp-muted);
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.1em;
+  text-align: right;
+}
+.paper-ladder th:first-child { text-align: left; }
+.paper-ladder td { position: relative; padding: 0.22rem 0.7rem; text-align: right; }
+.paper-ladder td:first-child { text-align: left; }
+.paper-ladder .paper-ask .paper-px { color: #fb7185; }
+.paper-ladder .paper-bid .paper-px { color: #34d399; }
+:root:not(.dark) .paper-ladder .paper-ask .paper-px { color: #be123c; }
+:root:not(.dark) .paper-ladder .paper-bid .paper-px { color: #047857; }
+.paper-ladder .paper-mid td {
+  border-block: 1px solid var(--pp-rule);
+  padding-block: 0.4rem;
+  color: var(--pp-ink);
+  font-weight: 600;
+}
+.paper-ladder .paper-mid .paper-mid-label {
+  font-family: var(--font-serif), ui-serif, Georgia, serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.1em;
+  color: var(--pp-muted);
+}
+.paper-status {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--pp-rule);
+  font-size: 0.78rem;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.09em;
+  color: var(--pp-muted);
+}
+.paper-status .live-dot { align-self: center; }
+
+
+/* Phantom's ConnectButton styles itself inline — white text on a 10%-grey fill,
+   which is invisible against the light canvas. Inline styles mean !important is
+   the only lever; scoped to light mode so the dark default is untouched. */
+:root:not(.dark) .phantom-connect button {
+  color: rgba(15, 23, 23, 0.95) !important;
+  background: rgba(15, 23, 23, 0.06) !important;
+}
+:root:not(.dark) .phantom-connect button * {
+  color: inherit !important;
+}
+
+/* The toggle is a shared component; inside the paper it drops its box and
+   sets as another item in the running head. */
+.paper .paper-toggle {
+  height: auto;
+  width: auto;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+}
+.paper .paper-toggle:hover { background: transparent; color: var(--pp-ink); }
+.paper .paper-toggle:focus-visible { outline: 2px solid rgba(16, 185, 129, 0.75); outline-offset: 3px; }
+
+/* `.paper a` sets the citation underline for body links, which outranks any
+   single-class rule below it. The chrome links opt out explicitly. */
+.paper .paper-action,
+.paper .paper-head-title,
+.paper .paper-head nav a { text-decoration: none; }
+.paper .paper-head-title:hover,
+.paper .paper-head nav a:hover { text-decoration: underline; text-decoration-color: currentColor; }
+.paper .paper-action:hover { text-decoration: none; }
+
+/* Justification needs a measure to work in. Below the breakpoint the column is
+   too narrow for it, so the text sets ragged-right instead of opening rivers. */
+@media (min-width: 700px) {
+  .paper-p,
+  .paper-footnotes li { text-align: justify; }
+}
+
+/* (E) Table 1 at phone width. A three-column specification cannot survive 390px,
+   and a table clipped mid-word at the viewport edge reads as broken even when it
+   scrolls, so each row becomes its own labelled block instead. */
+@media (max-width: 640px) {
+  .paper-table { min-width: 0; }
+  .paper-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .paper-table tr { display: block; padding: 0.85rem 0; border-bottom: 1px solid var(--pp-rule); }
+  .paper-table tr:first-child { border-top: 2px solid var(--pp-rule-strong); }
+  .paper-table tbody tr:last-child { border-bottom: 2px solid var(--pp-rule-strong); }
+  .paper-table td { display: block; padding: 0; }
+  .paper-table tbody tr:last-child td { border-bottom: 0; }
+  .paper-table .paper-td-name { white-space: normal; font-size: 1rem; }
+  .paper-table td[data-label]:not(.paper-td-name) { margin-top: 0.3rem; }
+  .paper-table td[data-label]:not(.paper-td-name)::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--pp-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    font-variant-caps: all-small-caps;
+    letter-spacing: 0.1em;
+  }
+  .paper-table .paper-row-split { border-top: 1px solid var(--pp-rule); }
+}
