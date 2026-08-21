@@ -112,33 +112,50 @@ def funding_payment(size_atoms, index_now, snapshot, mark_price):
     return idiv(signed * delta, FUNDING_SCALE)                      # funding.rs:74-77
 
 
-# A crank restart refreshes last_mark_price/stamp (crank_twap.rs:71-76); the
-# poisoned index is already committed, so the claim settles at the FRESH mark.
+# --------- the path that EXECUTES today: liquidate_position, not claim_funding
+# liquidate_position prices off apply_dual_oracle's live read (liquidate_position
+# .rs:91-101) and never touches mark_price_for_close, so the dead crank asserted
+# above does not block it. Per-position settlement is in live_positions.py; this
+# is the per-SOL size of the funding term it folds in at :138-143.
 ONE_SOL = 1_000_000_000
-long_pay = funding_payment(ONE_SOL, new_index, cum_index, PYTH_6DP)
-short_pay = funding_payment(-ONE_SOL, new_index, cum_index, PYTH_6DP)
+liq_short = funding_payment(-ONE_SOL, new_index, cum_index, PYTH_6DP)
 notional_1sol = idiv(ONE_SOL * PYTH_6DP, BASE_SCALE)
 
-print("\n=== what each side then claims (claim_funding.rs:66-104) ===")
-print(f"  1 SOL notional at the fresh mark: ${notional_1sol/1e6:,.2f}")
-print(f"  long  1 SOL -> payment {long_pay:>18,}  "
-      f"=> CREDITED ${-long_pay/1e6:,.2f}  (claim_funding.rs:99-104)")
-print(f"  short 1 SOL -> payment {short_pay:>18,}  "
-      f"=> DEBITED  ${short_pay/1e6:,.2f}  (claim_funding.rs:88-98)")
-print(f"  credit is {-long_pay/notional_1sol:,.1f}x the position's own notional")
-assert long_pay < 0 and short_pay > 0
-assert -long_pay > 8 * notional_1sol
+print("\n=== what liquidate_position then settles (liquidate_position.rs:138-237) ===")
+print(f"  1 SOL notional at the live oracle: ${notional_1sol/1e6:,.2f}")
+print(f"  short 1 SOL -> funding_payment {liq_short:>18,}  (${liq_short/1e6:,.2f})")
+print(f"  that is {liq_short/notional_1sol:,.1f}x the position's own notional, "
+      "subtracted at")
+print("  :203-206, so total_settlement goes negative for any short whose")
+print("  collateral is under it -> insurance_fund_balance to 0 (:230-231), the")
+print(f"  remainder booked as bad debt (:232-236). Fund holds ${insurance/1e6:,.2f}.")
+assert liq_short > 0
+assert liq_short > 8 * notional_1sol
 
-whole_book_long = funding_payment(oi_long, new_index, cum_index, PYTH_6DP)
-print(f"\n  entire long OI ({oi_long/1e9:,.1f} SOL) is credited "
+# ------------- the OTHER side: minted, but LATCHED until the crank comes back
+# claim_funding reads market.mark_price_for_close(now) (claim_funding.rs:61-63),
+# which is None right now -- the instruction errors OracleStale and pays nobody.
+# When crank_twap resumes it prices at Market.last_mark_price, NOT at the oracle
+# reading above; at today's frozen last_mark_price that is:
+long_pay = funding_payment(ONE_SOL, new_index, cum_index, last_mark_price)
+whole_book_long = funding_payment(oi_long, new_index, cum_index, last_mark_price)
+print("\n=== what claim_funding would owe the longs (latched, claim_funding.rs:61-104) ===")
+print(f"  priced at last_mark_price ${last_mark_price/1e6:,.6f}, not the oracle read")
+print(f"  long  1 SOL -> payment {long_pay:>18,}  "
+      f"=> would be CREDITED ${-long_pay/1e6:,.2f}  (claim_funding.rs:99-104)")
+print(f"  entire long OI ({oi_long/1e9:,.1f} SOL) would be credited "
       f"${-whole_book_long/1e6:,.2f}")
-print(f"  insurance fund holds  ${insurance/1e6:,.2f}")
-print(f"  ratio: {-whole_book_long/insurance:,.0f}x the insurance fund")
+print(f"  insurance fund holds  ${insurance/1e6:,.2f}  "
+      f"({-whole_book_long/insurance:,.0f}x)")
+print("  payable today? NO -- mark_price_for_close() is None per the block above,")
+print("  so claim_funding errors OracleStale (see S3-03).")
+assert long_pay < 0
 
 # ------------------------------- claim_funding.rs:88-98 silently forgives debt
 print("\n=== claim_funding debit saturation (claim_funding.rs:88-98) ===")
 free_collateral, pos_collateral = 50_000_000, 25_000_000     # $50 free, $25 in position
-owed = short_pay
+# priced at last_mark_price, which is what claim_funding reads (line 61-63)
+owed = funding_payment(-ONE_SOL, new_index, cum_index, last_mark_price)
 shortfall = owed - free_collateral
 after_pos = max(0, pos_collateral - shortfall)               # saturating_sub, line 97
 forgiven = shortfall - (pos_collateral - after_pos)

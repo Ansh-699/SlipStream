@@ -1,0 +1,24 @@
+# Scratch audit reproduction crate for run `audit-e2e`, slice S3, class S3-C9.
+# NOT part of the product workspace (own empty [workspace] table detaches it).
+# Never wired into `cargo test --workspace`; run explicitly:
+#   cargo build-sbf --manifest-path programs/slipstream/Cargo.toml
+#   CARGO_TARGET_DIR=/tmp/s3-intent-repro cargo test --manifest-path \
+#     docs/audit/audit-e2e/repro/s3/intent_rollback/Cargo.toml -- --nocapture
+[workspace]
+
+[package]
+name = "s3-intent-rollback-repro"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slipstream = { path = "../../../../../../programs/slipstream", features = ["no-entrypoint"] }
+bytemuck = { version = "1.14", features = ["derive", "min_const_generics"] }
+
+[dev-dependencies]
+mollusk-svm = "0.12"
+solana-account = "3"
+solana-address = "1"
+solana-instruction = "3"
+solana-program-error = "3"
