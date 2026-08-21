@@ -1,12 +1,17 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useOrderBook } from "@/hooks/use-orderbook";
+import { explorerAddress, TICK_SIZE } from "@/lib/manifest";
 
 const DEPTH = 20; // levels shown per side (full available depth)
+const PRICE_SCALE = 1_000_000;
+/** Smallest price increment the program will accept, straight from the manifest. */
+const tickSize = (Number(TICK_SIZE) / PRICE_SCALE).toFixed(3);
 
 export function OrderBookDisplay() {
-  const { bids, asks } = useOrderBook(0);
+  const { bids, asks, trades, status } = useOrderBook(0);
+  const [tab, setTab] = useState<"book" | "trades">("book");
 
   // Build cumulative ladders. Asks render top→down moving DOWN toward the mid,
   // so the cumulative total is largest at the top (farthest level). Bids render
@@ -41,81 +46,163 @@ export function OrderBookDisplay() {
   }, [bids, asks]);
 
   const empty = bids.length === 0 && asks.length === 0;
+  const sellPct = 100 - buyPct;
 
   return (
-    <div className="panel h-full flex flex-col">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
-        <span className="panel-title">Order Book</span>
-        <span className="text-[10px] text-white/50 font-medium">SOL-PERP</span>
+    <div className="h-full flex flex-col bg-[#0b0d0e] overflow-hidden">
+      {/* Tab header */}
+      <div className="tk-head justify-between">
+        <div role="tablist" aria-label="Order book" className="flex items-stretch gap-4">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "book"}
+            aria-controls="book-panel"
+            className="tk-tab"
+            onClick={() => setTab("book")}
+          >
+            Book
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "trades"}
+            aria-controls="trades-panel"
+            className="tk-tab"
+            onClick={() => setTab("trades")}
+          >
+            Trades
+          </button>
+        </div>
+        <span className="text-[11px] text-[#838c92]">SOL-PERP</span>
       </div>
 
-      {/* Column header */}
-      <div className="grid grid-cols-3 px-4 pt-2 pb-1.5 text-[10px] text-white/50 font-semibold uppercase tracking-wider shrink-0">
-        <span>Price</span>
-        <span className="text-right">Size</span>
-        <span className="text-right">Total</span>
+      {/* Real protocol parameters, not decoration: the tick comes from the
+          deploy manifest and the lot from the market's own lot size. */}
+      <div className="h-8 shrink-0 flex items-center gap-1.5 px-3 border-b border-[#1d2224]">
+        <span className="tk-chip">Tick {tickSize}</span>
+        <span className="tk-chip">SOL-USD</span>
       </div>
 
-      <div className="flex-1 flex flex-col min-h-0 px-1.5 pb-1.5">
-        {empty ? (
-          <div className="flex-1 flex items-center justify-center text-xs text-white/55 font-medium">
-            No orders yet
+      {tab === "book" ? (
+        <>
+          {/* Column header */}
+          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[#838c92]">
+            <span>Price (USD)</span>
+            <span className="text-right">Size (SOL)</span>
+            <span className="text-right">Total (SOL)</span>
           </div>
-        ) : (
-          <>
-            {/* Asks — col-reverse so best ask sits at the bottom (by the mid)
-                and the section scrolls reliably into deeper levels. */}
-            <div className="flex-1 flex flex-col-reverse gap-px min-h-0 overflow-y-auto slim-scroll">
-              {askRows.map((l, i) => (
-                <Row key={`a-${i}`} {...l} maxCum={maxCum} side="ask" />
-              ))}
-            </div>
 
-            {/* Mid / spread. The mid is neither a bid nor an ask, so it stays
-                neutral — emerald and rose mean side in this panel. */}
-            <div className="flex items-baseline gap-2 px-2.5 py-1.5 shrink-0">
-              <span className="text-base font-bold tnum text-white">
-                {mid !== null ? mid.toFixed(3) : "—"}
-              </span>
-              <span className="text-[10px] text-white/55 font-medium">mid</span>
-              <span className="ml-auto text-[10px] text-white/55 font-medium tnum">
-                {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
-              </span>
-            </div>
-
-            {/* Bids — scrollable, anchored to the top (best bid near the mid) */}
-            <div className="flex-1 flex flex-col justify-start gap-px min-h-0 overflow-y-auto slim-scroll">
-              {bidRows.map((l, i) => (
-                <Row key={`b-${i}`} {...l} maxCum={maxCum} side="bid" />
-              ))}
-            </div>
-
-            {/* Buy / Sell ratio bar */}
-            <div className="shrink-0 px-1.5 pt-1.5">
-              <div
-                role="img"
-                aria-label={`Resting depth: ${buyPct.toFixed(0)}% bids, ${(100 - buyPct).toFixed(0)}% asks`}
-                className="flex items-center h-4 rounded-sm overflow-hidden text-[10px] font-bold"
-              >
-                <div
-                  className="h-full bg-emerald-500/25 text-emerald-300 flex items-center pl-1.5"
-                  style={{ width: `${buyPct}%` }}
-                >
-                  {buyPct >= 12 ? `${buyPct.toFixed(0)}%` : ""}
-                </div>
-                <div
-                  className="h-full bg-rose-500/25 text-rose-300 flex items-center justify-end pr-1.5 flex-1"
-                >
-                  {100 - buyPct >= 12 ? `${(100 - buyPct).toFixed(0)}%` : ""}
-                </div>
+          <div className="flex-1 flex flex-col min-h-0">
+            {empty ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-1 px-4 text-center">
+                <span className="text-[12px] text-[#e6e9ea]">
+                  {status === "loading"
+                    ? "Loading the book…"
+                    : status === "unavailable"
+                      ? "Can't reach the order book"
+                      : "No resting orders"}
+                </span>
+                <span className="max-w-[34ch] text-[11px] leading-relaxed text-[#a2abb1]">
+                  {status === "unavailable"
+                    ? "Neither the rollup nor the base layer answered."
+                    : status === "empty"
+                      ? "The book decoded cleanly but nobody is quoting."
+                      : ""}
+                </span>
               </div>
-            </div>
-          </>
-        )}
+            ) : (
+              <>
+                {/* Asks — col-reverse so best ask sits at the bottom (by the mid)
+                    and the section scrolls reliably into deeper levels. */}
+                <div className="flex-1 flex flex-col-reverse min-h-0 overflow-y-auto slim-scroll">
+                  {askRows.map((l, i) => (
+                    <Row key={`a-${i}`} {...l} maxCum={maxCum} side="ask" />
+                  ))}
+                </div>
+
+                {/* Mid / spread. The mid is neither a bid nor an ask, so it stays
+                    neutral — green and red mean side in this panel. */}
+                <div className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[#1d2224]">
+                  <span className="text-[15px] font-bold tnum text-[#e6e9ea] leading-[34px]">
+                    {mid !== null ? mid.toFixed(3) : "—"}
+                  </span>
+                  <span className="text-[11px] text-[#838c92]">mid</span>
+                  <span className="ml-auto text-[11px] text-[#a2abb1] tnum">
+                    {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
+                  </span>
+                </div>
+
+                {/* Bids — scrollable, anchored to the top (best bid near the mid) */}
+                <div className="flex-1 flex flex-col justify-start min-h-0 overflow-y-auto slim-scroll">
+                  {bidRows.map((l, i) => (
+                    <Row key={`b-${i}`} {...l} maxCum={maxCum} side="bid" />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Column header */}
+          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[#838c92]">
+            <span>Price (USD)</span>
+            <span className="text-right">Size (SOL)</span>
+            <span className="text-right">Maker</span>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto slim-scroll">
+            {trades.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-[12px] text-[#a2abb1]">
+                No trades yet
+              </div>
+            ) : (
+              trades.map((t) => (
+                <a
+                  key={t.sequence}
+                  href={explorerAddress(t.maker, "er")}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={`Verify maker ${t.maker} on Explorer`}
+                  className="grid grid-cols-3 items-center h-5 px-3 text-[11.5px] hover:bg-[#171b1c] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+                >
+                  <span className={`tnum ${t.side === "buy" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                    {t.price.toFixed(3)}
+                  </span>
+                  <span className="text-right tnum text-[#e6e9ea]">{t.size.toFixed(2)}</span>
+                  <span className="text-right tnum text-[#22c55e] underline decoration-dotted underline-offset-2">
+                    {t.maker.slice(0, 4)}…
+                  </span>
+                </a>
+              ))
+            )}
+          </div>
+        </>
+      )}
+
+      {/* Buy / Sell pressure. Hidden when there is no book: with zero depth
+          buyPct falls back to 50, and rendering a half-and-half bar next to
+          "No resting orders" would invent a split that does not exist. */}
+      {!empty && (
+      <div
+        role="img"
+        aria-label={`Resting depth: ${buyPct.toFixed(0)}% bids, ${sellPct.toFixed(0)}% asks`}
+        className="h-8 shrink-0 flex items-center gap-2 px-3 border-t border-[#1d2224]"
+      >
+        <span className="text-[11px] tnum text-[#22c55e] shrink-0">Buy {buyPct.toFixed(0)}%</span>
+        <div aria-hidden className="flex-1 flex h-1 rounded-[4px] overflow-hidden bg-[#121516]">
+          <div className="h-full bg-[#22c55e]" style={{ width: `${buyPct}%` }} />
+          <div className="h-full flex-1 bg-[#ef4444]" />
+        </div>
+        <span className="text-[11px] tnum text-[#ef4444] shrink-0">{sellPct.toFixed(0)}% Sell</span>
       </div>
+      )}
     </div>
   );
 }
+
+
 
 function Row({
   price,
@@ -132,21 +219,21 @@ function Row({
 }) {
   const pct = Math.min(100, (total / maxCum) * 100);
   return (
-    <div className="relative grid grid-cols-3 text-[11px] leading-5 px-2.5 rounded-sm">
+    <div className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]">
       {/* cumulative-depth bar grows from the right edge */}
       <div
-        className={`absolute inset-y-0 right-0 ${side === "bid" ? "bg-emerald-500/[0.14]" : "bg-rose-500/[0.14]"}`}
-        style={{ width: `${pct}%` }}
+        aria-hidden
+        className="absolute inset-y-0 right-0"
+        style={{
+          width: `${pct}%`,
+          backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
+        }}
       />
-      <span className={`relative font-mono tnum ${side === "bid" ? "text-emerald-400" : "text-rose-400"}`}>
+      <span className={`relative tnum ${side === "bid" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
         {price.toFixed(3)}
       </span>
-      <span className="relative text-right font-mono tnum text-white/85">
-        {fmtAmt(size)}
-      </span>
-      <span className="relative text-right font-mono tnum text-white/55">
-        {fmtAmt(total)}
-      </span>
+      <span className="relative text-right tnum text-[#e6e9ea]">{fmtAmt(size)}</span>
+      <span className="relative text-right tnum text-[#a2abb1]">{fmtAmt(total)}</span>
     </div>
   );
 }

@@ -1,0 +1,62 @@
+"use client";
+
+import Link from "next/link";
+import { Code2, Zap, BookText } from "lucide-react";
+import { ConnectButton } from "@/components/wallet/connect-button";
+
+/**
+ * Terminal top bar: identity on the left, utilities and the wallet on the right.
+ * Deliberately not the marketing header — this one is 52px, flat, and gets out
+ * of the way of the price ladder underneath it.
+ */
+export function TerminalNav() {
+  return (
+    <header className="flex h-[52px] shrink-0 items-center border-b border-[#1d2224] px-4">
+      <Link href="/" className="flex items-center gap-2.5" aria-label="Slipstream home">
+        <span className="relative h-6 w-6 overflow-hidden rounded">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="" className="h-full w-full object-cover" />
+        </span>
+        <span className="text-[15px] font-semibold tracking-tight text-[#e6e9ea]">Slipstream</span>
+      </Link>
+
+      <span className="ml-3 hidden rounded bg-[#121516] px-2 py-0.5 text-[10px] font-medium text-[#a2abb1] sm:inline">
+        devnet
+      </span>
+
+      <div className="ml-auto flex items-center gap-1">
+        <Link
+          href="/docs"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          aria-label="Docs"
+          title="Docs"
+        >
+          <BookText className="h-4 w-4" strokeWidth={1.75} />
+        </Link>
+        <a
+          href="https://github.com/Ansh-699/SlipStream"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          aria-label="GitHub repository"
+          title="GitHub"
+        >
+          <Code2 className="h-4 w-4" strokeWidth={1.75} />
+        </a>
+        <a
+          href="https://www.magicblock.gg/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          aria-label="MagicBlock"
+          title="MagicBlock"
+        >
+          <Zap className="h-4 w-4" strokeWidth={1.75} />
+        </a>
+        <div className="ml-2">
+          <ConnectButton />
+        </div>
+      </div>
+    </header>
+  );
+}

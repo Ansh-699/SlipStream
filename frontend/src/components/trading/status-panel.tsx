@@ -16,18 +16,18 @@ import { PRICE_SCALE } from "@/lib/slipstream";
 type Level = "ok" | "warn" | "down";
 
 const DOT: Record<Level, string> = {
-  ok: "bg-emerald-400",
-  warn: "bg-amber-400",
-  down: "bg-rose-400",
+  ok: "bg-[#22c55e]",
+  warn: "bg-[#f59e0b]",
+  down: "bg-[#ef4444]",
 };
 
 function Row({ label, level, detail }: { label: string; level: Level; detail: string }) {
   return (
-    <div className="flex items-center justify-between py-[5px]">
-      <span className="text-xs text-white/60 font-medium">{label}</span>
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-mono tnum text-white/75">
+    <div className="flex h-[26px] items-center justify-between border-b border-[#15191a] last:border-b-0">
+      <span className="text-[12px] text-[#a2abb1]">{label}</span>
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-mono tnum text-[#e6e9ea]">
         {detail}
-        <span className={`inline-block w-[7px] h-[7px] rounded-full ${DOT[level]}`} />
+        <span className={`inline-block w-[6px] h-[6px] rounded-full ${DOT[level]}`} />
       </span>
     </div>
   );
@@ -92,12 +92,14 @@ export function StatusPanel() {
   const [erLevel, erDetail] = rpcRow(api?.er);
 
   return (
-    <div className="panel px-4 pt-3.5 pb-3">
-      <div className="flex flex-col pb-1.5 border-b border-white/[0.06]">
-        <span className="panel-title">System Status</span>
-        <span className="text-[10px] text-white/50 font-medium">All signals verifiable on-chain</span>
+    <div>
+      <div className="flex h-[36px] items-center justify-between border-b border-[#1d2224] px-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+          System Status
+        </span>
+        <span className="text-[11px] text-[#838c92]">All signals verifiable on-chain</span>
       </div>
-      <div className="pt-1.5">
+      <div className="p-3">
         <Row label="Solana RPC" level={baseLevel} detail={baseDetail} />
         <Row label="Ephemeral Rollup" level={erLevel} detail={erDetail} />
         <Row

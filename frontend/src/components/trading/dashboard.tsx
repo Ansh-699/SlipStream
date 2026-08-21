@@ -1,108 +1,69 @@
 "use client";
 
-import { MarketInfo } from "./market-info";
-import { OrderForm } from "./order-form";
-import { OrderBookDisplay } from "./order-book-display";
-import { PositionsTable } from "./positions-table";
-import { OpenOrders } from "./open-orders";
-import { SessionPanel } from "./session-panel";
+import { TerminalNav } from "./terminal-nav";
+import { MarketBar } from "./market-bar";
 import { PriceChart } from "./price-chart";
-import { RecentTrades } from "./recent-trades";
-import { TradeHistory } from "./trade-history";
+import { OrderBookDisplay } from "./order-book-display";
+import { OrderForm } from "./order-form";
+import { SessionPanel } from "./session-panel";
 import { StatusPanel } from "./status-panel";
+import { ActivityDrawer } from "./activity-drawer";
+import { StatusStrip } from "./status-strip";
 import { FillToasts } from "./fill-toasts";
 import { useMarket } from "@/hooks/use-market";
 import { manifestError } from "@/lib/manifest";
 
+/**
+ * The trading terminal.
+ *
+ * A viewport-locked three-column workspace at `xl` and up — chart plus activity
+ * drawer, the book, then the order ticket — the arrangement every exchange
+ * terminal converges on, because a trader reads price, depth, and entry without
+ * moving their eyes far. Below `xl` the columns stack and the page scrolls
+ * normally, with the ticket and wallet ordered first: on a phone the primary
+ * task has to be reachable without scrolling past a chart.
+ */
 export function TradingDashboard() {
   const { market } = useMarket(0);
   const markPrice = market?.lastMarkPrice ?? null;
 
   return (
-    <div className="min-h-screen flex flex-col app-bg text-foreground overflow-x-hidden relative">
+    <div className="terminal flex min-h-screen flex-col xl:h-screen xl:overflow-hidden">
       {manifestError && (
         <div
           role="alert"
-          className="bg-amber-500/15 border-b border-amber-500/40 text-amber-200 text-xs font-medium px-3 md:px-4 lg:px-6 py-2 relative z-10"
+          className="shrink-0 border-b border-[#f59e0b]/40 bg-[#f59e0b]/10 px-4 py-2 text-[12px] font-medium text-[#f59e0b]"
         >
           {manifestError}
         </div>
       )}
 
-      {/* ── Trading screen ───────────────────────────────────────────────
-          Normal scrolling document (NO viewport height-lock). A 12-col grid:
-          the LEFT 9 cols hold the chart + order book on top and the Open Orders
-          + Positions tables below; the RIGHT 3 cols hold the Order Form + the
-          Trading Session. So Positions sits directly to the LEFT of the Trading
-          Session and the two columns end on roughly the same plane.
+      <TerminalNav />
+      <MarketBar />
 
-          Below `lg` the columns stack, and source order would bury the order
-          form and the wallet under ~1.7k px of chart and tables — the two
-          things a new visitor needs first. So the right column is ordered
-          first on small screens and back to the right at `lg`. */}
-      <section className="flex flex-col px-3 md:px-5 lg:px-8 pt-4 pb-10 gap-4 max-w-[1700px] mx-auto w-full relative z-10">
-        <div className="shrink-0">
-          <MarketInfo />
+      <main className="flex min-h-0 flex-1 flex-col xl:flex-row">
+        {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
+        <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
+          <div className="h-[420px] shrink-0 xl:h-auto xl:min-h-0 xl:flex-1">
+            <PriceChart />
+          </div>
+          <ActivityDrawer markPrice={markPrice} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-          {/* LEFT 9 cols: chart + book on top, activity tables below */}
-          <div className="order-3 lg:order-none lg:col-span-9 flex flex-col gap-4">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-              {/* Chart */}
-              <div className="lg:col-span-2 h-[440px] lg:h-[620px]">
-                <PriceChart />
-              </div>
-              {/* Order Book + Recent Trades */}
-              <div className="lg:col-span-1 flex flex-col gap-4">
-                <div className="h-[360px] lg:h-[400px]">
-                  <OrderBookDisplay />
-                </div>
-                <div className="h-[260px] lg:h-[208px]">
-                  <RecentTrades />
-                </div>
-              </div>
-            </div>
-
-            {/* Open Orders + Positions — now to the LEFT of the session panel. */}
-            <div className="flex items-center gap-2 mt-1">
-              <div className="h-px flex-1 bg-white/[0.06]" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/50">
-                Your Activity
-              </span>
-              <div className="h-px flex-1 bg-white/[0.06]" />
-            </div>
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <OpenOrders />
-              <PositionsTable markPrice={markPrice} />
-            </div>
-
-            {/* Settled trade history (from the fills indexer). */}
-            <TradeHistory />
-          </div>
-
-          {/* RIGHT 3 cols: Order Form + Trading Session + System Status.
-
-              `contents` below `lg` dissolves this wrapper so its three panels
-              become grid items in their own right and can be ordered against
-              the left column individually: order form and wallet first, system
-              telemetry last. Rendering StatusPanel twice would have been the
-              other way to do it, and would have doubled its RPC polling. */}
-          <div className="contents lg:flex lg:order-none lg:col-span-3 lg:flex-col lg:gap-4">
-            <div className="order-1 lg:order-none">
-              <OrderForm />
-            </div>
-            <div className="order-2 lg:order-none">
-              <SessionPanel />
-            </div>
-            <div className="order-4 lg:order-none">
-              <StatusPanel />
-            </div>
-          </div>
+        {/* Depth. */}
+        <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[336px]">
+          <OrderBookDisplay />
         </div>
-      </section>
 
-      {/* Fill notifications for the connected wallet. */}
+        {/* Entry, wallet, and system truth. */}
+        <div className="tk-col slim-scroll order-1 flex w-full shrink-0 flex-col xl:order-none xl:w-[336px] xl:overflow-y-auto">
+          <OrderForm />
+          <SessionPanel />
+          <StatusPanel />
+        </div>
+      </main>
+
+      <StatusStrip />
       <FillToasts />
     </div>
   );

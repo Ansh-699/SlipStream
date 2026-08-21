@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { useModal } from "@phantom/react-sdk";
 import { useSession } from "@/hooks/use-session";
 import { useWallet } from "@/hooks/use-wallet-compat";
@@ -14,6 +12,17 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
  *  PDAs that setup creates. Below this, setup fails partway with a signing
  *  error, so warn before the user starts rather than after. */
 const MIN_SOL_LAMPORTS = 20_000_000; // 0.02 SOL
+
+const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
+const SECONDARY_BTN =
+  `h-[28px] rounded-[4px] border border-[#1d2224] bg-[#121516] px-2.5 text-[12px] text-[#a2abb1] transition-colors hover:text-[#e6e9ea] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS}`;
+const HINT = "text-[10px] leading-tight text-[#838c92]";
+
+function primaryBtn(disabled: boolean) {
+  return `h-[34px] w-full rounded-[6px] text-[13px] font-semibold ${FOCUS} ${
+    disabled ? "cursor-not-allowed bg-[#171b1c] text-[#a2abb1]" : "bg-[#16794f] text-white hover:bg-[#1c9463]"
+  }`;
+}
 
 const usd = (atoms: bigint) =>
   `$${(Number(atoms) / PRICE_SCALE).toLocaleString(undefined, {
@@ -57,37 +66,37 @@ export function SessionPanel() {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   })();
 
+  const startDisabled = busy || (state.usdcBalance === 0n && inProtocol === 0n);
+
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
-        <span className="panel-title">Wallet</span>
+    <div>
+      <div className="flex h-[36px] items-center justify-between border-b border-[#1d2224] px-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+          Wallet
+        </span>
         <span
-          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+          className={`rounded-[4px] px-1.5 py-0.5 text-[10px] ${
             status === "trading"
-              ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/25"
+              ? "bg-[rgba(34,197,94,0.12)] text-[#22c55e]"
               : status === "setup"
-                ? "text-amber-300 bg-amber-500/10 border-amber-500/25"
-                : "text-white/50 bg-white/5 border-white/10"
+                ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
+                : "bg-[#121516] text-[#a2abb1]"
           }`}
         >
           {status}
         </span>
       </div>
 
-      <div className="space-y-3 px-4 pt-3 pb-4">
+      <div className="space-y-3 p-3">
         {!connected ? (
           <div className="space-y-2.5">
-            <p className="text-[11px] leading-relaxed text-muted-foreground">
+            <p className="text-[11.5px] leading-relaxed text-[#a2abb1]">
               Sign in to create your in-app wallet. It holds your funds, signs
               your trades, and needs no browser extension.
             </p>
-            <Button
-              size="lg"
-              onClick={open}
-              className="w-full font-semibold bg-emerald-700 text-emerald-50 hover:bg-emerald-700/90"
-            >
+            <button type="button" onClick={open} className={primaryBtn(false)}>
               Create wallet / sign in
-            </Button>
+            </button>
           </div>
         ) : (
           <>
@@ -103,18 +112,17 @@ export function SessionPanel() {
               />
             </div>
 
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full h-9 text-xs"
+            <button
+              type="button"
               onClick={requestFaucet}
               disabled={busy}
+              className={`w-full ${SECONDARY_BTN} ${busy ? "cursor-not-allowed" : ""}`}
             >
               {busy && step?.includes("USDC") ? "…" : "Get test USDC"}
-            </Button>
+            </button>
 
             {lowSol && (
-              <p className="text-[10px] leading-tight text-amber-700 dark:text-amber-400">
+              <p className="text-[10px] leading-tight text-[#f59e0b]">
                 This wallet needs a little devnet SOL for fees and account rent
                 before setup can run. Send some to the address above.
               </p>
@@ -124,11 +132,11 @@ export function SessionPanel() {
             {(inProtocol > 0n || state.initialized) && (
               <div className="space-y-2 pt-0.5">
                 <div className="flex items-center gap-2">
-                  <div className="h-px flex-1 bg-white/[0.06]" />
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <div className="h-px flex-1 bg-[#1d2224]" />
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#838c92]">
                     In the market
                   </span>
-                  <div className="h-px flex-1 bg-white/[0.06]" />
+                  <div className="h-px flex-1 bg-[#1d2224]" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Stat label="Committed" value={usd(state.committed)} hint="Locked in orders" amber />
@@ -140,36 +148,34 @@ export function SessionPanel() {
             {state.legacyCredit && <LegacyNotice {...{ state, busy, closeLegacyCredit }} />}
 
             {step && (
-              <div className="flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-800 dark:text-emerald-200">
+              <div className="flex items-center gap-2 text-[11.5px] text-[#a2abb1]">
                 <span
                   aria-hidden
-                  className="h-3 w-3 rounded-full border-2 border-emerald-500/40 border-t-emerald-500 animate-spin"
+                  className="h-3 w-3 shrink-0 rounded-full border-2 border-[#1d2224] border-t-[#22c55e] animate-spin"
                 />
                 {step}
               </div>
             )}
             {error && (
-              <div role="alert" className="rounded-md border border-rose-500/40 bg-rose-500/10 px-2.5 py-2 text-[11px] text-rose-800 dark:text-rose-200 break-words">
+              <div role="alert" className="break-words text-[11.5px] leading-tight text-[#ef4444]">
                 {error}
               </div>
             )}
             {notice && !error && !step && (
-              <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-2 text-[11px] text-emerald-800 dark:text-emerald-200 break-words">
-                {notice}
-              </div>
+              <div className="break-words text-[11.5px] leading-tight text-[#a2abb1]">{notice}</div>
             )}
 
             {!state.delegated ? (
               <div className="space-y-1.5">
-                <Button
-                  size="lg"
+                <button
+                  type="button"
                   onClick={() => autoStart()}
-                  disabled={busy || (state.usdcBalance === 0n && inProtocol === 0n)}
-                  className="w-full font-semibold bg-emerald-700 text-emerald-50 hover:bg-emerald-700/90"
+                  disabled={startDisabled}
+                  className={primaryBtn(startDisabled)}
                 >
                   {busy ? "…" : "Start trading"}
-                </Button>
-                <p className="text-[10px] leading-tight text-muted-foreground">
+                </button>
+                <p className={HINT}>
                   {state.usdcBalance > 0n
                     ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session, so every order signs instantly with no popups.`
                     : "Get test USDC first — then this moves it into the market and opens your trading session."}
@@ -179,16 +185,17 @@ export function SessionPanel() {
               <div className="space-y-2">
                 <SessionKeyCard {...{ state, busy, rotate, expiresIn }} />
                 <div className="space-y-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full h-9 text-xs"
+                  <button
+                    type="button"
                     onClick={withdraw}
                     disabled={busy || state.activeOrders > 0}
+                    className={`w-full ${SECONDARY_BTN} ${
+                      busy || state.activeOrders > 0 ? "cursor-not-allowed" : ""
+                    }`}
                   >
                     {busy ? "…" : "Withdraw all to wallet"}
-                  </Button>
-                  <p className="text-[10px] leading-tight text-muted-foreground">
+                  </button>
+                  <p className={HINT}>
                     {state.activeOrders > 0
                       ? "Cancel your open orders first."
                       : "Leaves the rollup, releases your credit and returns the USDC here. Takes a few seconds to settle."}
@@ -225,24 +232,21 @@ function WalletIdentity({ address }: { address: string | null }) {
   const short = `${address.slice(0, 4)}…${address.slice(-4)}`;
 
   return (
-    <div className="flex items-center justify-between rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
-      <div className="flex flex-col min-w-0">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Your wallet
-        </span>
-        <span className="font-mono text-xs text-foreground truncate" title={address}>
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex min-w-0 flex-col">
+        <span className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">Your wallet</span>
+        <span className="truncate font-mono text-[12px] text-[#e6e9ea]" title={address}>
           {short}
         </span>
       </div>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 text-xs shrink-0"
+      <button
+        type="button"
         onClick={copy}
         aria-label={copied ? "Address copied" : "Copy wallet address"}
+        className={`shrink-0 ${SECONDARY_BTN}`}
       >
         {copied ? "Copied" : "Copy"}
-      </Button>
+      </button>
     </div>
   );
 }
@@ -259,16 +263,18 @@ function SessionKeyCard({
   expiresIn: string | null;
 }) {
   return (
-    <div className="rounded-md border p-2 space-y-1.5">
-      <div className="flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">
-          Trading session
-        </span>
-        <Badge variant={state.sessionActive ? "default" : "secondary"} className="text-[10px] px-1.5 py-0">
+    <div className="space-y-1.5 rounded-[4px] border border-[#1d2224] p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">Trading session</span>
+        <span
+          className={`rounded-[4px] bg-[#121516] px-1.5 py-0.5 text-[10px] ${
+            state.sessionActive ? "text-[#22c55e]" : "text-[#a2abb1]"
+          }`}
+        >
           {state.sessionActive ? `active · ${expiresIn}` : "none"}
-        </Badge>
+        </span>
       </div>
-      <p className="text-[10px] leading-tight text-muted-foreground">
+      <p className={HINT}>
         {state.sessionActive ? (
           <>
             Orders are signed locally by a temporary key — no popup per trade. It
@@ -279,9 +285,14 @@ function SessionKeyCard({
           <>No active session key — orders will prompt your wallet each time.</>
         )}
       </p>
-      <Button size="sm" variant="outline" className="w-full h-8 text-xs" onClick={rotate} disabled={busy}>
+      <button
+        type="button"
+        onClick={rotate}
+        disabled={busy}
+        className={`w-full ${SECONDARY_BTN} ${busy ? "cursor-not-allowed" : ""}`}
+      >
         {busy ? "…" : state.sessionActive ? "Rotate session key" : "New session key"}
-      </Button>
+      </button>
     </div>
   );
 }
@@ -296,31 +307,28 @@ function LegacyNotice({
   closeLegacyCredit: () => void;
 }) {
   return (
-    <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-2 space-y-1.5">
-      <div className="text-[11px] font-semibold text-amber-700 dark:text-amber-400">
-        Legacy trading-credit detected
-      </div>
+    <div className="space-y-1.5 rounded-[4px] border border-[#1d2224] p-2.5">
+      <div className="text-[11.5px] font-semibold text-[#f59e0b]">Legacy trading-credit detected</div>
       {state.legacyDelegated ? (
-        <p className="text-[10px] leading-tight text-muted-foreground">
+        <p className={HINT}>
           This credit predates the session-keys upgrade and is delegated to the
           rollup, so it can&apos;t be migrated in place. Use a fresh wallet to
           start the new flow — your existing devnet funds stay where they are.
         </p>
       ) : (
         <>
-          <p className="text-[10px] leading-tight text-muted-foreground">
+          <p className={HINT}>
             This credit predates the session-keys upgrade. Close it to reclaim
             the rent, then start again to create a session-enabled one.
           </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full h-8 text-xs"
+          <button
+            type="button"
             onClick={closeLegacyCredit}
             disabled={busy}
+            className={`w-full ${SECONDARY_BTN} ${busy ? "cursor-not-allowed" : ""}`}
           >
             {busy ? "…" : "Close legacy credit"}
-          </Button>
+          </button>
         </>
       )}
     </div>
@@ -340,18 +348,12 @@ function Stat({
   emerald?: boolean;
   amber?: boolean;
 }) {
-  const color = emerald
-    ? "text-emerald-600 dark:text-emerald-400"
-    : amber
-      ? "text-amber-700 dark:text-amber-300"
-      : "text-foreground";
+  const color = emerald ? "text-[#22c55e]" : amber ? "text-[#f59e0b]" : "text-[#e6e9ea]";
   return (
-    <div className="rounded-lg bg-white/[0.03] border border-white/[0.06] px-2.5 py-2">
-      <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
-        {label}
-      </div>
-      <div className={`font-mono font-bold text-sm tnum ${color}`}>{value}</div>
-      <div className="text-[10px] text-muted-foreground/70 font-medium mt-0.5">{hint}</div>
+    <div className="rounded-[4px] border border-[#1d2224] bg-[#121516] px-[10px] py-2">
+      <div className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">{label}</div>
+      <div className={`text-[14px] font-semibold tnum ${color}`}>{value}</div>
+      <div className={`${HINT} mt-0.5`}>{hint}</div>
     </div>
   );
 }

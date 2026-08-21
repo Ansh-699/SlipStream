@@ -1342,3 +1342,87 @@ input[type="number"] {
   }
   .paper-table .paper-row-split { border-top: 1px solid var(--pp-rule); }
 }
+
+/* ── /trade terminal surface ─────────────────────────────────────────────
+   A flat, dense exchange terminal: one near-black ground, hairline dividers,
+   no glass. Deliberately theme-independent — this surface is dark-only, so the
+   values are literal rather than tokenised through the light remap above. The
+   marketing surfaces keep the liquid-glass world described in brand.md. */
+.terminal {
+  --tk-bg: #0b0d0e;
+  --tk-elev: #121516;
+  --tk-hover: #171b1c;
+  --tk-line: #1d2224;
+  --tk-line-soft: #15191a;
+  --tk-text: #e6e9ea;
+  --tk-text-2: #a2abb1;
+  --tk-text-3: #838c92;
+  --tk-green: #22c55e;
+  --tk-red: #ef4444;
+  font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
+  background: var(--tk-bg);
+  color: var(--tk-text);
+  font-feature-settings: "cv05", "ss01";
+}
+.terminal ::selection { background: rgba(34, 197, 94, 0.3); }
+
+/* Panel chrome shared by every column. */
+.tk-head {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--tk-line);
+}
+.tk-tab {
+  position: relative;
+  height: 40px;
+  padding: 0 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tk-text-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: color 100ms;
+}
+.tk-tab:hover:not(:disabled) { color: var(--tk-text); }
+.tk-tab[aria-selected="true"] { color: var(--tk-text); }
+/* The underline sits ON the header's bottom border, not above it. */
+.tk-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--tk-text);
+}
+.tk-tab:disabled { color: var(--tk-text-3); cursor: not-allowed; }
+
+.tk-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  background: var(--tk-elev);
+  border: 1px solid var(--tk-line);
+  color: var(--tk-text-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Keyboard focus must stay visible on a ground this dark. */
+.terminal :focus-visible {
+  outline: 1px solid var(--tk-green);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
+
+/* Column dividers: the grid draws them so panels stay flush and gapless. */
+.tk-col + .tk-col { border-left: 1px solid var(--tk-line); }
+
+@media (max-width: 1279px) {
+  .tk-col + .tk-col { border-left: none; border-top: 1px solid var(--tk-line); }
+}

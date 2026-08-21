@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Poppins, Geist_Mono } from "next/font/google";
+import { Poppins, Geist_Mono, Inter } from "next/font/google";
 import { WalletProvider } from "@/components/wallet/wallet-provider";
 import "./globals.css";
 
@@ -7,6 +7,14 @@ const poppins = Poppins({
   variable: "--font-sans",
   weight: ["400", "500", "600", "700"],
   subsets: ["latin"],
+});
+
+// The /trade terminal is set in a neutral grotesque: Poppins is geometric and
+// its round figures read poorly in a dense price ladder. Scoped to that surface.
+const inter = Inter({
+  variable: "--font-ui",
+  subsets: ["latin"],
+  display: "swap",
 });
 
 const geistMono = Geist_Mono({
@@ -44,7 +52,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${poppins.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${poppins.variable} ${inter.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <head>

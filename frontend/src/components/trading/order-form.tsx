@@ -5,7 +5,6 @@ import { useWallet } from "@/hooks/use-wallet-compat";
 import { Connection, Transaction } from "@solana/web3.js";
 import { useSession } from "@/hooks/use-session";
 import { useMarket } from "@/hooks/use-market";
-import { LiquidGlassCard } from "@/components/ui/liquid-weather-glass";
 import {
   PROGRAM_ID,
   MARKET_INDEX,
@@ -223,131 +222,270 @@ export function OrderForm() {
     }
   };
 
+
   const showPriceInput = orderType !== "market";
+  const availLine = session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet";
+  const inputCls =
+    "h-[34px] w-full rounded-[4px] border border-[#1d2224] bg-[#121516] px-[10px] pr-14 text-[13px] text-[#e6e9ea] tnum placeholder:text-[#838c92] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
+  const suffixCls = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[#838c92]";
+  const labelCls = "text-[12px] text-[#a2abb1]";
+  const rowCls = "flex h-[22px] items-center justify-between border-b border-[#15191a] last:border-b-0";
+
+  const blocker = !publicKey
+    ? "Connect a wallet to trade"
+    : !session.delegated
+      ? "Start a trading session first"
+      : orderType !== "market" && (!price || parseFloat(price) <= 0)
+        ? "Enter a limit price"
+        : !derived || derived.sizeSol <= 0
+          ? "Enter a margin amount"
+          : belowOneLot
+            ? "Below the 0.1 SOL minimum lot"
+            : insufficient
+              ? "Margin exceeds available credit"
+              : null;
+  const disabled = submitting || blocker !== null;
 
   return (
-    <LiquidGlassCard shadowIntensity="none" glowIntensity="none" borderRadius="14px" className="glass-surface backdrop-blur-xl text-zinc-900 dark:text-white">
-      <div className="px-4 pt-3.5 pb-2.5 border-b border-black/10 dark:border-white/10">
-        <span className="panel-title">Place Order</span>
+    <div className="flex flex-col border border-[#1d2224] bg-[#0b0d0e]">
+      <div className="flex h-[40px] items-stretch gap-4 border-b border-[#1d2224] px-3" role="group" aria-label="Order type">
+        {(["market", "limit"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setOrderType(t)}
+            aria-pressed={orderType === t}
+            className={`relative text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+              orderType === t
+                ? "text-[#e6e9ea] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[#e6e9ea]"
+                : "text-[#a2abb1] hover:text-[#e6e9ea]"
+            }`}
+          >
+            {t === "market" ? "Market" : "Limit"}
+          </button>
+        ))}
       </div>
-      <div className="order-form">
-        <div className="order-side" role="group" aria-label="Order side">
-          <button type="button" onClick={() => setSide("long")} aria-pressed={side === "long"} className="order-side-btn order-side-long">
-            <span className="order-side-name">Long</span>
-            <span className="order-side-sub">profits if price rises</span>
+
+      <div className="flex flex-col gap-3 p-3">
+        <div className="grid grid-cols-2 gap-2" role="group" aria-label="Order side">
+          <button
+            type="button"
+            onClick={() => setSide("long")}
+            aria-pressed={side === "long"}
+            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+              side === "long"
+                ? "border-[#22c55e] bg-[rgba(34,197,94,0.12)] text-[#22c55e]"
+                : "border-[#1d2224] bg-[#121516] text-[#a2abb1] hover:text-[#e6e9ea]"
+            }`}
+          >
+            <span className="flex flex-col items-center leading-tight">
+              <span>Long</span>
+              <span className="text-[10px] font-normal opacity-80">profits if price rises</span>
+            </span>
           </button>
-          <button type="button" onClick={() => setSide("short")} aria-pressed={side === "short"} className="order-side-btn order-side-short">
-            <span className="order-side-name">Short</span>
-            <span className="order-side-sub">profits if price falls</span>
+          <button
+            type="button"
+            onClick={() => setSide("short")}
+            aria-pressed={side === "short"}
+            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+              side === "short"
+                ? "border-[#ef4444] bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
+                : "border-[#1d2224] bg-[#121516] text-[#a2abb1] hover:text-[#e6e9ea]"
+            }`}
+          >
+            <span className="flex flex-col items-center leading-tight">
+              <span>Short</span>
+              <span className="text-[10px] font-normal opacity-80">profits if price falls</span>
+            </span>
           </button>
         </div>
 
-        <div className="order-field">
-          <div className="order-field-head">
-            <label htmlFor="order-price" className="order-label">{showPriceInput ? "Limit price" : "Execution"}</label>
-            <div className="order-seg" role="group" aria-label="Order type">
-              <button type="button" onClick={() => setOrderType("limit")} aria-pressed={orderType === "limit"} className="order-seg-btn">Limit</button>
-              <button type="button" onClick={() => setOrderType("market")} aria-pressed={orderType === "market"} className="order-seg-btn">Market</button>
+        {showPriceInput ? (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between">
+              <label htmlFor="order-price" className={labelCls}>Limit Price</label>
+            </div>
+            <div className="relative">
+              <input
+                id="order-price"
+                type="number"
+                step="0.001"
+                inputMode="decimal"
+                placeholder={markPrice ? markPrice.toFixed(3) : "0.00"}
+                value={price}
+                onChange={(ev) => setPrice(ev.target.value)}
+                className={inputCls}
+              />
+              <span className={suffixCls}>USD</span>
             </div>
           </div>
-          {showPriceInput ? (
-            <input id="order-price" type="number" step="0.001" inputMode="decimal" placeholder={markPrice ? markPrice.toFixed(3) : "0.00"} value={price} onChange={(ev) => setPrice(ev.target.value)} className="order-input" />
-          ) : (
-            <p className="order-note">Fills at the best price resting on the book{markPrice ? `, around ${markPrice.toFixed(3)}` : ""}.</p>
-          )}
-        </div>
-
-        <div className="order-field">
-          <div className="order-field-head">
-            <label htmlFor="order-margin" className="order-label">Margin (USD)</label>
-            <span className="order-aside">{session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet"}</span>
-          </div>
-          <input id="order-margin" type="number" step="1" inputMode="decimal" placeholder="0.00" value={margin} onChange={(ev) => setMargin(ev.target.value)} className="order-input" />
-          <div className="order-chips">
-            {[10, 50, 100, 250].map((m) => (
-              <button key={m} type="button" onClick={() => setMargin(String(m))} className="order-chip">${m}</button>
-            ))}
-            <button type="button" onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")} className="order-chip">Max</button>
-          </div>
-        </div>
-
-        <div className="order-field">
-          <div className="order-field-head">
-            <label htmlFor="order-lev" className="order-label">Leverage</label>
-            <span className="order-lev">{leverage}×</span>
-          </div>
-          <input id="order-lev" type="range" min={1} max={MAX_LEVERAGE} step={1} value={leverage} onChange={(ev) => setLeverage(parseInt(ev.target.value, 10))} className="order-range" />
-          <div className="order-scale"><span>1×</span><span>5×</span><span>10×</span><span>{MAX_LEVERAGE}×</span></div>
-        </div>
-
-        {orderType === "market" && (
-          <div className="order-field">
-            <div className="order-field-head">
-              <label htmlFor="order-slippage" className="order-label">Max slippage</label>
-              <span className="order-aside">basis points</span>
-            </div>
-            <input id="order-slippage" type="number" step="1" inputMode="numeric" placeholder="50" value={slippageBps} onChange={(ev) => setSlippageBps(ev.target.value)} className="order-input" />
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            <span className={labelCls}>Execution</span>
+            <p className="text-[11.5px] text-[#838c92]">
+            Fills at the best price resting on the book
+            {markPrice ? <span className="tnum">, around {markPrice.toFixed(3)}</span> : ""}.
+            </p>
           </div>
         )}
 
-        <p className="order-commit">
-          {derived && derived.sizeSol > 0 ? (
-            <>
-              {side === "long" ? "Long" : "Short"} <b>{derived.sizeSol.toFixed(1)} SOL</b> — <span className="order-num">${derived.notional.toFixed(2)}</span> notional,{" "}
-              <span className="order-num">${derived.actualMargin.toFixed(2)}</span> of your{" "}
-              <span className="order-num">${availUsd.toFixed(2)}</span> credit at risk.
-            </>
-          ) : (
-            "Enter a margin amount to size the order."
-          )}
-        </p>
-
-        {belowOneLot && <p className="order-alert order-alert-warn">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>}
-        {insufficient && !belowOneLot && <p className="order-alert order-alert-bad">Margin required exceeds available credit. Lower it or fund more credit.</p>}
-
-        {(() => {
-          const blocker = !publicKey
-            ? "Connect a wallet to trade"
-            : !session.delegated
-              ? "Start a trading session first"
-              : orderType !== "market" && (!price || parseFloat(price) <= 0)
-                ? "Enter a limit price"
-                : !derived || derived.sizeSol <= 0
-                  ? "Enter a margin amount"
-                  : belowOneLot
-                    ? "Below the 0.1 SOL minimum lot"
-                    : insufficient
-                      ? "Margin exceeds available credit"
-                      : null;
-          return (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="order-margin" className={labelCls}>Margin</label>
+            <span className="text-[11.5px] text-[#838c92] tnum">{availLine}</span>
+          </div>
+          <div className="relative">
+            <input
+              id="order-margin"
+              type="number"
+              step="1"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={margin}
+              onChange={(ev) => setMargin(ev.target.value)}
+              className={inputCls}
+            />
+            <span className={suffixCls}>USDC</span>
+          </div>
+          <div className="grid grid-cols-5 gap-1">
+            {[10, 50, 100, 250].map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMargin(String(m))}
+                className="h-[26px] rounded-[4px] border border-[#1d2224] bg-[#121516] text-[11.5px] text-[#a2abb1] tnum hover:text-[#e6e9ea] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+              >
+                ${m}
+              </button>
+            ))}
             <button
               type="button"
-              onClick={handleSubmit}
-              disabled={submitting || blocker !== null}
-              className={`order-cta ${side === "long" ? "order-cta-long" : "order-cta-short"}`}
+              onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")}
+              className="h-[26px] rounded-[4px] border border-[#1d2224] bg-[#121516] text-[11.5px] text-[#a2abb1] hover:text-[#e6e9ea] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
             >
-              {submitting
-                ? "Placing…"
-                : blocker ?? `${side === "long" ? "Long" : "Short"} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
+              Max
             </button>
-          );
-        })()}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-baseline justify-between">
+            <label htmlFor="order-lev" className={labelCls}>Leverage</label>
+            <span className="text-[12px] font-semibold text-[#22c55e] tnum">{leverage}×</span>
+          </div>
+          <input
+            id="order-lev"
+            type="range"
+            min={1}
+            max={MAX_LEVERAGE}
+            step={1}
+            value={leverage}
+            onChange={(ev) => setLeverage(parseInt(ev.target.value, 10))}
+            className="w-full cursor-pointer accent-[#22c55e] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+          />
+          <div className="flex justify-between text-[11px] text-[#838c92] tnum">
+            <span>1×</span><span>5×</span><span>10×</span><span>{MAX_LEVERAGE}×</span>
+          </div>
+        </div>
+
+        {orderType === "market" && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between">
+              <label htmlFor="order-slippage" className={labelCls}>Max Slippage</label>
+              <span className="text-[11.5px] text-[#838c92]">basis points</span>
+            </div>
+            <div className="relative">
+              <input
+                id="order-slippage"
+                type="number"
+                step="1"
+                inputMode="numeric"
+                placeholder="50"
+                value={slippageBps}
+                onChange={(ev) => setSlippageBps(ev.target.value)}
+                className={inputCls}
+              />
+              <span className={suffixCls}>bps</span>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col">
+          <div className={rowCls}>
+            <span className={labelCls}>Direction</span>
+            <span className="text-[12px] text-[#e6e9ea]">{side === "long" ? "Long" : "Short"}</span>
+          </div>
+          <div className={rowCls}>
+            <span className={labelCls}>Size</span>
+            <span className="text-[12px] text-[#e6e9ea] tnum">
+              {derived && derived.sizeSol > 0 ? `${derived.sizeSol.toFixed(1)} SOL` : "—"}
+            </span>
+          </div>
+          <div className={rowCls}>
+            <span className={labelCls}>Notional</span>
+            <span className="text-[12px] text-[#e6e9ea] tnum">
+              {derived && derived.sizeSol > 0 ? `$${derived.notional.toFixed(2)}` : "—"}
+            </span>
+          </div>
+          <div className={rowCls}>
+            <span className={labelCls}>Margin at risk</span>
+            <span className="text-[12px] text-[#e6e9ea] tnum">
+              {derived && derived.sizeSol > 0 ? `$${derived.actualMargin.toFixed(2)}` : "—"}
+            </span>
+          </div>
+          <div className={rowCls}>
+            <span className={labelCls}>Available credit</span>
+            <span className="text-[12px] text-[#e6e9ea] tnum">${availUsd.toFixed(2)}</span>
+          </div>
+        </div>
+
+        {!(derived && derived.sizeSol > 0) && (
+          <p className="text-[11.5px] text-[#838c92]">Enter a margin amount to size the order.</p>
+        )}
+
+        {belowOneLot && (
+          <p className="text-[11.5px] text-[#f59e0b]">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>
+        )}
+        {insufficient && !belowOneLot && (
+          <p className="text-[11.5px] text-[#ef4444]">Margin required exceeds available credit. Lower it or fund more credit.</p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={disabled}
+          className={`h-[38px] min-h-[38px] w-full rounded-[6px] text-[14px] font-semibold focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+            disabled
+              ? "cursor-not-allowed bg-[#171b1c] text-[#a2abb1]"
+              : side === "long"
+                ? "bg-[#16794f] text-white hover:bg-[#1c9463]"
+                : "bg-[#a93436] text-white hover:bg-[#c04447]"
+          }`}
+        >
+          {submitting
+            ? "Placing…"
+            : blocker ?? `${side === "long" ? "Long" : "Short"} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
+        </button>
 
         {session.delegated && (
-          <p className="order-foot">
+          <p className="text-[11.5px] text-[#838c92]">
             {session.sessionActive
               ? "Session key active — orders sign locally, no wallet popup."
               : "No active session key — orders will prompt your wallet."}
           </p>
         )}
-        {lastErr && <p className="order-err">{lastErr}</p>}
+        {lastErr && <p className="text-[11.5px] break-all text-[#ef4444]">{lastErr}</p>}
         {lastSig && (
-          <a href={explorerTx(lastSig, "er")} target="_blank" rel="noopener noreferrer" className="order-link">
-            View tx on Explorer: {lastSig.slice(0, 12)}…{lastSig.slice(-8)}
+          <a
+            href={explorerTx(lastSig, "er")}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11.5px] text-[#22c55e] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+          >
+            View tx on Explorer: <span className="tnum">{lastSig.slice(0, 12)}…{lastSig.slice(-8)}</span>
           </a>
         )}
       </div>
-    </LiquidGlassCard>
+    </div>
   );
 }
-

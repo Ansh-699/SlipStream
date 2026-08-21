@@ -6,6 +6,9 @@ import { usePythCandles, RESOLUTIONS, type Resolution, type Candle } from "@/hoo
 
 type ChartType = "candles" | "line" | "area";
 
+const CHIP =
+  "inline-flex h-9 min-w-[40px] items-center justify-center rounded-[4px] px-2.5 text-[11px] font-semibold transition-colors sm:h-[26px] sm:min-w-0 sm:px-2";
+
 export function PriceChart() {
   const [resIdx, setResIdx] = useState(1); // default 5m
   const resolution = RESOLUTIONS[resIdx];
@@ -43,79 +46,127 @@ export function PriceChart() {
   }, [candles]);
   const up = (change ?? 0) >= 0;
 
+  // Legend OHLC comes from the latest merged candle — no extra fetching.
+  const latest = candles.length ? candles[candles.length - 1] : null;
+
   return (
-    <div className="panel w-full h-full flex flex-col min-h-[360px] overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-white/[0.06] flex-wrap">
-        <div className="flex items-baseline gap-3">
-          <span className="text-sm font-semibold text-white">SOL-PERP</span>
-          <span className="text-2xl font-bold tnum text-white tracking-tight">
+    <div className="w-full h-full flex flex-col min-h-[360px] overflow-hidden rounded-[6px] border border-[#1d2224] bg-[#0b0d0e]">
+      {/* Header — panel tabs */}
+      <div className="tk-head justify-between gap-3">
+        <div role="tablist" aria-label="Chart view" className="flex items-stretch gap-4">
+          <button
+            type="button"
+            role="tab"
+            aria-selected
+            aria-controls="chart-panel"
+            className="tk-tab"
+          >
+            Chart
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={false}
+            disabled
+            title="No depth-of-market view yet — the ladder is in the Book panel."
+            className="tk-tab"
+          >
+            Depth
+          </button>
+        </div>
+
+        <div className="flex items-baseline gap-2">
+          <span className="text-[13px] font-medium tnum text-[#e6e9ea]">
             {lastPrice != null ? `$${lastPrice.toFixed(3)}` : "—"}
           </span>
           {change != null && (
-            <span
-              className={`text-xs font-semibold tnum px-1.5 py-0.5 rounded ${
-                up ? "text-emerald-300 bg-emerald-500/10" : "text-rose-300 bg-rose-500/10"
-              }`}
-            >
-              {up ? "▲" : "▼"} {Math.abs(change).toFixed(2)}%
+            <span className={`text-[11px] font-semibold tnum ${up ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+              {up ? "+" : "−"}
+              {Math.abs(change).toFixed(2)}%
             </span>
           )}
         </div>
+      </div>
 
-        <div className="flex items-center gap-2">
-          <div role="group" aria-label="Chart type" className="inline-flex rounded-lg bg-black/[0.03] border border-black/10 p-0.5 dark:bg-white/[0.04] dark:border-white/[0.08]">
-            {(["candles", "line", "area"] as ChartType[]).map((t) => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={chartType === t}
-                onClick={() => setChartType(t)}
-                className={`inline-flex h-9 items-center rounded-md px-3 text-[11px] font-semibold capitalize transition-colors sm:h-[26px] sm:px-2.5 ${
-                  chartType === t
-                    ? "bg-black/10 text-zinc-900 dark:bg-white/10 dark:text-white"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-white/55 dark:hover:text-white/80"
-                }`}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-          <div role="group" aria-label="Candle interval" className="inline-flex rounded-lg bg-black/[0.03] border border-black/10 p-0.5 dark:bg-white/[0.04] dark:border-white/[0.08]">
-            {RESOLUTIONS.map((r, i) => (
-              <button
-                key={r.label}
-                type="button"
-                aria-pressed={resIdx === i}
-                aria-label={`${r.label} candles`}
-                onClick={() => setResIdx(i)}
-                className={`inline-flex h-9 min-w-[40px] items-center justify-center rounded-md px-2.5 text-[11px] font-semibold transition-colors sm:h-[26px] sm:min-w-0 sm:px-2 ${
-                  resIdx === i
-                    ? "bg-black/10 text-zinc-900 dark:bg-white/10 dark:text-white"
-                    : "text-zinc-600 hover:text-zinc-900 dark:text-white/55 dark:hover:text-white/80"
-                }`}
-              >
-                {r.label}
-              </button>
-            ))}
-          </div>
+      {/* Toolbar — interval chips | chart type chips */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#1d2224] px-3 py-1.5 sm:h-9 sm:flex-nowrap sm:py-0">
+        <div role="group" aria-label="Candle interval" className="flex items-center gap-1">
+          {RESOLUTIONS.map((r, i) => (
+            <button
+              key={r.label}
+              type="button"
+              aria-pressed={resIdx === i}
+              aria-label={`${r.label} candles`}
+              onClick={() => setResIdx(i)}
+              className={`${CHIP} ${
+                resIdx === i
+                  ? "bg-[#171b1c] text-[#e6e9ea]"
+                  : "text-[#a2abb1] hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+
+        <span aria-hidden className="h-4 w-px shrink-0 bg-[#1d2224]" />
+
+        <div role="group" aria-label="Chart type" className="flex items-center gap-1">
+          {(["candles", "line", "area"] as ChartType[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              aria-pressed={chartType === t}
+              onClick={() => setChartType(t)}
+              className={`${CHIP} capitalize ${
+                chartType === t
+                  ? "bg-[#171b1c] text-[#e6e9ea]"
+                  : "text-[#a2abb1] hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
         </div>
       </div>
 
+      {/* Legend */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-[6px] text-[11px]">
+        <span className="text-[#a2abb1]">
+          <span className="font-semibold text-[#e6e9ea]">SOL-PERP</span>
+          {" · "}
+          {resolution.label} · SOL/USD via Pyth
+        </span>
+        <span className="flex items-center gap-2 text-[#838c92]">
+          <span>
+            O <span className="tnum text-[#e6e9ea]">{latest ? latest.o.toFixed(3) : "—"}</span>
+          </span>
+          <span>
+            H <span className="tnum text-[#e6e9ea]">{latest ? latest.h.toFixed(3) : "—"}</span>
+          </span>
+          <span>
+            L <span className="tnum text-[#e6e9ea]">{latest ? latest.l.toFixed(3) : "—"}</span>
+          </span>
+          <span>
+            C <span className="tnum text-[#e6e9ea]">{latest ? latest.c.toFixed(3) : "—"}</span>
+          </span>
+        </span>
+      </div>
+
       {/* Canvas chart */}
-      <div className="relative flex-1">
+      <div id="chart-panel" role="tabpanel" aria-label="Price chart" className="relative flex-1 bg-[#0b0d0e]">
         {candles.length >= 2 ? (
           <CandleCanvas candles={candles} chartType={chartType} resolution={resolution} />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
-            <span className="text-sm font-medium text-zinc-700 dark:text-white/70">
+            <span className="text-[12px] font-medium text-[#e6e9ea]">
               {loading
                 ? "Loading price history…"
                 : error
                   ? "Couldn't load price history"
                   : "No candles for this interval"}
             </span>
-            <span className="max-w-[42ch] text-[11px] leading-relaxed text-zinc-600 dark:text-white/55">
+            <span className="max-w-[42ch] text-[12px] leading-relaxed text-[#a2abb1]">
               {error
                 ? "The Pyth Benchmarks feed didn't answer. It retries on its own; pick another interval if it stays empty."
                 : "Crypto.SOL/USD · Pyth Benchmarks"}
@@ -124,7 +175,7 @@ export function PriceChart() {
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-white/[0.06] text-[10px] text-zinc-600 dark:text-white/55">
+      <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[#1d2224] px-3 text-[11px] text-[#838c92]">
         <span>Scroll to zoom · drag to pan</span>
         <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
       </div>
@@ -149,13 +200,10 @@ function CandleCanvas({
   const [hover, setHover] = useState<{ x: number; y: number; i: number } | null>(null);
   const drag = useRef<{ x: number; startOffset: number } | null>(null);
   // Track the active theme so the canvas grid/axis ink flips with light/dark.
-  const [isDark, setIsDark] = useState(true);
-  useEffect(() => {
-    const read = () => setIsDark(document.documentElement.classList.contains("dark"));
-    read();
-    window.addEventListener("themechange", read);
-    return () => window.removeEventListener("themechange", read);
-  }, []);
+  // The terminal ground is #0b0d0e regardless of the app theme, so the canvas
+  // must not follow the `dark` class — doing so painted dark ink on a dark
+  // background in light mode and the chart vanished.
+  const isDark = true;
 
   // Clamp the view to the data.
   const total = candles.length;
@@ -248,7 +296,7 @@ function CandleCanvas({
         const c = visible[i];
         const x = xOf(i);
         const green = c.c >= c.o;
-        const color = green ? "rgb(16,185,129)" : "rgb(244,63,94)";
+        const color = green ? "rgb(34,197,94)" : "rgb(239,68,68)";
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
         // wick
@@ -267,7 +315,7 @@ function CandleCanvas({
       const last = visible[n - 1].c;
       const first = visible[0].c;
       const green = last >= first;
-      const color = green ? "rgb(16,185,129)" : "rgb(244,63,94)";
+      const color = green ? "rgb(34,197,94)" : "rgb(239,68,68)";
       ctx.beginPath();
       visible.forEach((c, i) => {
         const x = xOf(i);
@@ -279,7 +327,7 @@ function CandleCanvas({
         ctx.lineTo(xOf(0), padT + plotH);
         ctx.closePath();
         const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
-        grad.addColorStop(0, green ? "rgba(16,185,129,0.25)" : "rgba(244,63,94,0.25)");
+        grad.addColorStop(0, green ? "rgba(34,197,94,0.25)" : "rgba(239,68,68,0.25)");
         grad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = grad;
         ctx.fill();
@@ -311,7 +359,7 @@ function CandleCanvas({
     ctx.lineTo(plotW, ly);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = lastC >= visible[n - 1].o ? "rgb(16,185,129)" : "rgb(244,63,94)";
+    ctx.fillStyle = lastC >= visible[n - 1].o ? "rgb(34,197,94)" : "rgb(239,68,68)";
     ctx.fillRect(plotW, ly - 8, padR, 16);
     ctx.fillStyle = priceTagText;
     ctx.textAlign = "center";
@@ -389,12 +437,12 @@ function CandleCanvas({
     >
       <canvas ref={canvasRef} className="block" />
       {hoverCandle && (
-        <div className="absolute top-2 left-2 flex gap-3 text-[10px] font-mono tnum bg-black/60 backdrop-blur px-2 py-1 rounded border border-white/10 pointer-events-none">
-          <span>O <span className="text-white/80">{hoverCandle.o.toFixed(3)}</span></span>
-          <span>H <span className="text-emerald-400">{hoverCandle.h.toFixed(3)}</span></span>
-          <span>L <span className="text-rose-400">{hoverCandle.l.toFixed(3)}</span></span>
-          <span>C <span className="text-white/80">{hoverCandle.c.toFixed(3)}</span></span>
-          <span className="text-white/55">
+        <div className="pointer-events-none absolute left-2 top-2 flex gap-3 rounded-[4px] border border-[#1d2224] bg-[#121516] px-2 py-1 text-[11px] tnum text-[#838c92]">
+          <span>O <span className="text-[#e6e9ea]">{hoverCandle.o.toFixed(3)}</span></span>
+          <span>H <span className="text-[#22c55e]">{hoverCandle.h.toFixed(3)}</span></span>
+          <span>L <span className="text-[#ef4444]">{hoverCandle.l.toFixed(3)}</span></span>
+          <span>C <span className="text-[#e6e9ea]">{hoverCandle.c.toFixed(3)}</span></span>
+          <span>
             {new Date(hoverCandle.t * 1000).toLocaleString([], {
               month: "short",
               day: "numeric",

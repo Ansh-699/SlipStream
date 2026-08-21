@@ -23,6 +23,11 @@ const PRICE_SCALE = 1_000_000;
 // Slippage bound on close-at-market: reject settling >1% through the current mark.
 const CLOSE_SLIPPAGE_BPS = 100n;
 
+const BTN_UTIL =
+  "h-6 px-2 rounded-[4px] text-[12px] border border-[#1d2224] text-[#a2abb1] transition-colors hover:text-[#e6e9ea] disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed";
+const INPUT =
+  "h-8 w-24 px-[10px] rounded-[4px] bg-[#121516] border border-[#1d2224] text-[13px] tnum text-[#e6e9ea] placeholder:text-[#838c92] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
+
 interface PositionsTableProps {
   markPrice: bigint | null;
 }
@@ -226,53 +231,55 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
   };
 
   return (
-    <div className="panel">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06]">
-        <span className="panel-title">Positions</span>
-        <span className="text-[10px] text-white/50 font-medium">
+    <div>
+      <div className="h-9 flex items-center justify-between px-3 border-b border-[#1d2224]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+          Positions
+        </span>
+        <span className="text-[11px] text-[#838c92] tnum">
           {positions.length + (erPosition ? 1 : 0)} open
         </span>
       </div>
-      <div className="px-2 pb-2">
+      <div className="p-3">
         {positions.length === 0 && !erPosition ? (
-          <div className="text-center text-xs text-white/55 font-medium py-8">
+          <div className="text-center text-xs text-[#a2abb1] py-6">
             {publicKey ? "No open positions" : "Sign in to see your positions"}
           </div>
         ) : (
-          <table className="w-full">
+          <table className="w-full border-collapse">
             <thead>
-              <tr className="text-[10px] text-white/50 font-semibold uppercase tracking-wider border-b border-white/[0.06]">
-                <th className="text-left font-semibold px-2 py-2">Side</th>
-                <th className="text-right font-semibold px-2 py-2">Size</th>
-                <th className="text-right font-semibold px-2 py-2">Entry</th>
-                <th className="text-right font-semibold px-2 py-2">Mark</th>
-                <th className="text-right font-semibold px-2 py-2">Liq.</th>
-                <th className="text-right font-semibold px-2 py-2">Health</th>
-                <th className="text-right font-semibold px-2 py-2">uPnL</th>
-                <th className="px-2 py-2"></th>
+              <tr className="text-[11px] text-[#838c92] border-b border-[#15191a]">
+                <th className="h-[26px] px-2 text-left font-normal">Side</th>
+                <th className="h-[26px] px-2 text-right font-normal">Size</th>
+                <th className="h-[26px] px-2 text-right font-normal">Entry</th>
+                <th className="h-[26px] px-2 text-right font-normal">Mark</th>
+                <th className="h-[26px] px-2 text-right font-normal">Liq.</th>
+                <th className="h-[26px] px-2 text-right font-normal">Health</th>
+                <th className="h-[26px] px-2 text-right font-normal">uPnL</th>
+                <th className="h-[26px]"></th>
               </tr>
             </thead>
             <tbody>
               {/* ER (pending-settlement) position — filled on the rollup, not yet
                   settled to an L1 Position. Reconstructed from the ER fill queue. */}
               {erPosition && (
-                <tr className="border-t border-white/[0.05] bg-amber-500/[0.04]">
-                  <td className="px-2 py-2.5">
-                    <div className="flex flex-col gap-1">
+                <tr className="h-7 text-[11.5px] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516]">
+                  <td className="px-2 text-left">
+                    <span className="inline-flex items-center gap-2">
                       <SideBadge isLong={erPosition.isLong} />
-                      <span className="text-[10px] text-amber-400/90 font-semibold uppercase tracking-wide flex items-center gap-1">
-                        <span className="h-1 w-1 rounded-full bg-amber-400 animate-pulse" />
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#f59e0b]">
+                        <span className="h-1 w-1 rounded-full bg-[#f59e0b] animate-pulse" />
                         Pending
                       </span>
-                    </div>
+                    </span>
                   </td>
-                  <td className={`text-right font-mono tnum text-xs px-2 ${erPosition.isLong ? "text-emerald-400" : "text-rose-400"}`}>
+                  <td className={`text-right tnum ${erPosition.isLong ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
                     {Math.abs(erPosition.size).toFixed(3)}
                   </td>
-                  <td className="text-right font-mono tnum text-xs px-2 text-white/80">
+                  <td className="px-2 text-right tnum text-[#e6e9ea]">
                     ${erPosition.entryPrice.toFixed(2)}
                   </td>
-                  <td className="text-right font-mono tnum text-xs px-2 text-white/80">
+                  <td className="px-2 text-right tnum text-[#e6e9ea]">
                     ${(Number(markPrice || 0n) / PRICE_SCALE).toFixed(2)}
                   </td>
                   {(() => {
@@ -286,23 +293,23 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                     );
                     return (
                       <>
-                        <td className="text-right font-mono tnum text-xs px-2 text-amber-300/90">
+                        <td className="px-2 text-right tnum text-[#f59e0b]">
                           {liq !== null ? `$${liq.toFixed(2)}` : "—"}
                         </td>
-                        <td className="text-right text-xs px-2">
+                        <td className="px-2 text-right">
                           <HealthCell health={health} />
                         </td>
                       </>
                     );
                   })()}
-                  <td className={`text-right font-mono tnum font-bold text-xs px-2 ${erPosition.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                  <td className={`text-right tnum ${erPosition.unrealizedPnl >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
                     {fmtSignedUsd(erPosition.unrealizedPnl)}
                   </td>
-                  <td className="text-right px-2 py-2">
+                  <td className="px-2 text-right">
                     <button
                       onClick={handleFlatten}
                       disabled={flattening}
-                      className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/25 text-rose-200 transition-colors disabled:opacity-50"
+                      className={`${BTN_UTIL} bg-[#121516]`}
                       title="Close by placing an opposite IOC order on the ER"
                     >
                       {flattening ? "…" : "Close"}
@@ -314,12 +321,12 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                 const size = Number(pos.size < 0n ? -pos.size : pos.size) / 1e9;
                 const sizeAtoms = pos.size < 0n ? -pos.size : pos.size;
                 return (
-                  <tr key={i} className="border-t border-white/[0.05] hover:bg-white/[0.02] transition-colors">
-                    <td className="px-2 py-2.5">
-                      <div className="flex flex-col gap-1">
+                  <tr key={i} className="h-7 text-[11.5px] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516]">
+                    <td className="px-2 text-left">
+                      <span className="inline-flex items-center gap-2">
                         <SideBadge isLong={pos.isLong} />
                         {(triggers.stopLoss || triggers.takeProfit) && (
-                          <span className="flex gap-1">
+                          <span className="inline-flex items-center gap-1">
                             {triggers.stopLoss && (
                               <TriggerBadge
                                 label="SL"
@@ -336,15 +343,15 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                             )}
                           </span>
                         )}
-                      </div>
+                      </span>
                     </td>
-                    <td className={`text-right font-mono tnum text-xs px-2 ${pos.size > 0n ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className={`text-right tnum ${pos.size > 0n ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
                       {size.toFixed(3)}
                     </td>
-                    <td className="text-right font-mono tnum text-xs px-2 text-white/80">
+                    <td className="px-2 text-right tnum text-[#e6e9ea]">
                       ${(Number(pos.entryPrice) / PRICE_SCALE).toFixed(2)}
                     </td>
-                    <td className="text-right font-mono tnum text-xs px-2 text-white/80">
+                    <td className="px-2 text-right tnum text-[#e6e9ea]">
                       ${(Number(markPrice || 0n) / PRICE_SCALE).toFixed(2)}
                     </td>
                     {(() => {
@@ -358,41 +365,37 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       );
                       return (
                         <>
-                          <td className="text-right font-mono tnum text-xs px-2 text-amber-300/90">
+                          <td className="px-2 text-right tnum text-[#f59e0b]">
                             {liq !== null ? `$${liq.toFixed(2)}` : "—"}
                           </td>
-                          <td className="text-right text-xs px-2">
+                          <td className="px-2 text-right">
                             <HealthCell health={health} />
                           </td>
                         </>
                       );
                     })()}
-                    <td className={`text-right font-mono tnum font-bold text-xs px-2 ${pos.unrealizedPnl >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                    <td className={`text-right tnum ${pos.unrealizedPnl >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
                       {fmtSignedUsd(pos.unrealizedPnl)}
                     </td>
-                    <td className="text-right px-2 py-2">
+                    <td className="px-2 text-right">
                       <div className="inline-flex items-center gap-1">
                         <button
                           onClick={() => setTriggerOpen((v) => !v)}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-md border transition-colors ${
-                            triggerOpen
-                              ? "bg-sky-500/20 border-sky-500/30 text-sky-200"
-                              : "bg-white/5 hover:bg-white/10 border-white/10 text-white/70"
-                          }`}
+                          className={`${BTN_UTIL} ${triggerOpen ? "bg-[#171b1c] text-[#e6e9ea]" : "bg-[#121516]"}`}
                           title="Set stop-loss / take-profit"
                         >
                           SL/TP
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 0.5)}
-                          className="text-[11px] font-semibold px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-white/70 transition-colors"
+                          className={`${BTN_UTIL} bg-[#121516]`}
                           title="Close half the position (lot-rounded, 1% slippage bound)"
                         >
                           ½
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 1)}
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 transition-colors"
+                          className={`${BTN_UTIL} bg-[#121516]`}
                           title="Close at mark (1% slippage bound)"
                         >
                           Close
@@ -405,33 +408,33 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
               {/* SL/TP expander: one trigger pair per market (matches the
                   per-owner-per-market Position + TriggerOrder PDAs). */}
               {triggerOpen && positions.length > 0 && (
-                <tr className="border-t border-white/[0.05] bg-sky-500/[0.03]">
-                  <td colSpan={8} className="px-3 py-2.5">
+                <tr className="border-b border-[#15191a] last:border-b-0">
+                  <td colSpan={8} className="py-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="flex items-center gap-1.5 text-[11px] text-white/60 font-medium">
+                      <label className="flex items-center gap-1.5 text-[11px] text-[#a2abb1]">
                         Stop-loss $
                         <input
                           value={slInput}
                           onChange={(e) => setSlInput(e.target.value)}
                           placeholder={triggers.stopLoss ? (Number(triggers.stopLoss.triggerPrice) / PRICE_SCALE).toFixed(2) : "price"}
                           inputMode="decimal"
-                          className="w-20 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-xs font-mono tnum text-white/85 outline-none focus:border-sky-500/40"
+                          className={INPUT}
                         />
                       </label>
-                      <label className="flex items-center gap-1.5 text-[11px] text-white/60 font-medium">
+                      <label className="flex items-center gap-1.5 text-[11px] text-[#a2abb1]">
                         Take-profit $
                         <input
                           value={tpInput}
                           onChange={(e) => setTpInput(e.target.value)}
                           placeholder={triggers.takeProfit ? (Number(triggers.takeProfit.triggerPrice) / PRICE_SCALE).toFixed(2) : "price"}
                           inputMode="decimal"
-                          className="w-20 bg-white/5 border border-white/10 rounded-md px-2 py-1 text-xs font-mono tnum text-white/85 outline-none focus:border-sky-500/40"
+                          className={INPUT}
                         />
                       </label>
                       <button
                         onClick={() => handleSetTriggers(positions[0].isLong)}
                         disabled={triggerBusy}
-                        className="text-[11px] font-semibold px-2.5 py-1 rounded-md bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/25 text-sky-200 transition-colors disabled:opacity-50"
+                        className="h-7 px-3 rounded-[6px] text-[13px] font-semibold bg-[#16794f] text-[#ffffff] hover:bg-[#1c9463] disabled:bg-[#171b1c] disabled:text-[#a2abb1] disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
                       >
                         {triggerBusy ? "…" : "Set"}
                       </button>
@@ -439,7 +442,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         <button
                           onClick={() => handleCancelTrigger(TRIGGER_KIND_STOP_LOSS)}
                           disabled={triggerBusy}
-                          className="text-[11px] font-medium px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 transition-colors disabled:opacity-50"
+                          className={`${BTN_UTIL} bg-[#121516]`}
                         >
                           Clear SL
                         </button>
@@ -448,17 +451,17 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         <button
                           onClick={() => handleCancelTrigger(TRIGGER_KIND_TAKE_PROFIT)}
                           disabled={triggerBusy}
-                          className="text-[11px] font-medium px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-white/60 transition-colors disabled:opacity-50"
+                          className={`${BTN_UTIL} bg-[#121516]`}
                         >
                           Clear TP
                         </button>
                       )}
-                      <span className="text-[10px] text-white/50">
+                      <span className="text-[11px] text-[#838c92]">
                         Executed by keepers when the mark price crosses — works even if you close this tab.
                       </span>
                     </div>
                     {triggerErr && (
-                      <div className="text-[11px] text-rose-400 pt-1.5 break-all">{triggerErr}</div>
+                      <div className="pt-2 text-[11px] text-[#ef4444] break-all">{triggerErr}</div>
                     )}
                   </td>
                 </tr>
@@ -467,10 +470,10 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
           </table>
         )}
         {flattenErr && (
-          <div className="text-[11px] text-rose-400 px-2 py-1.5 break-all">{flattenErr}</div>
+          <div className="pt-2 text-[11px] text-[#ef4444] break-all">{flattenErr}</div>
         )}
         {closeErr && (
-          <div className="text-[11px] text-rose-400 px-2 py-1.5 break-all">{closeErr}</div>
+          <div className="pt-2 text-[11px] text-[#ef4444] break-all">{closeErr}</div>
         )}
       </div>
     </div>
@@ -487,10 +490,8 @@ function fmtSignedUsd(v: number): string {
 function SideBadge({ isLong }: { isLong: boolean }) {
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold tracking-wide ${
-        isLong
-          ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/25"
-          : "bg-rose-500/15 text-rose-300 border border-rose-500/25"
+      className={`text-[11px] font-semibold tracking-wide ${
+        isLong ? "text-[#22c55e]" : "text-[#ef4444]"
       }`}
     >
       {isLong ? "LONG" : "SHORT"}
@@ -539,31 +540,28 @@ function liqAndHealth(
 }
 
 function HealthCell({ health }: { health: number | null }) {
-  if (health === null) return <span className="text-white/55">—</span>;
+  if (health === null) return <span className="text-[#838c92]">—</span>;
   const color =
-    health >= 2 ? "text-emerald-400" : health >= 1.3 ? "text-amber-400" : "text-rose-400";
+    health >= 2 ? "text-[#22c55e]" : health >= 1.3 ? "text-[#f59e0b]" : "text-[#ef4444]";
   const bar =
-    health >= 2 ? "bg-emerald-400" : health >= 1.3 ? "bg-amber-400" : "bg-rose-400";
+    health >= 2 ? "bg-[#22c55e]" : health >= 1.3 ? "bg-[#f59e0b]" : "bg-[#ef4444]";
   // Margin meter: health 0 (liquidation) .. 3+ (full bar).
   const pct = Math.max(0, Math.min(100, (health / 3) * 100));
   return (
     <span className="inline-flex flex-col items-end gap-0.5">
-      <span className={`font-mono tnum ${color}`}>{health.toFixed(2)}</span>
-      <span className="block w-10 h-[3px] rounded-full bg-white/10 overflow-hidden">
-        <span className={`block h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+      <span className={`tnum ${color}`}>{health.toFixed(2)}</span>
+      <span className="block w-10 h-[2px] bg-[#1d2224] overflow-hidden">
+        <span className={`block h-full ${bar}`} style={{ width: `${pct}%` }} />
       </span>
     </span>
   );
 }
 
 function TriggerBadge({ label, price, tone }: { label: string; price: number; tone: "rose" | "emerald" }) {
-  const cls =
-    tone === "rose"
-      ? "bg-rose-500/10 text-rose-300/90 border-rose-500/20"
-      : "bg-emerald-500/10 text-emerald-300/90 border-emerald-500/20";
+  const cls = tone === "rose" ? "text-[#ef4444]" : "text-[#22c55e]";
   return (
-    <span className={`inline-flex items-center gap-0.5 px-1 py-px rounded-sm border text-[10px] font-bold tracking-wide ${cls}`}>
-      {label} <span className="font-mono tnum">${price.toFixed(2)}</span>
+    <span className={`inline-flex items-center gap-0.5 px-1 rounded-[3px] bg-[#121516] border border-[#1d2224] text-[10px] font-semibold tracking-wide ${cls}`}>
+      {label} <span className="tnum">${price.toFixed(2)}</span>
     </span>
   );
 }

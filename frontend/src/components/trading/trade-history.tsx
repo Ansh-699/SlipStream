@@ -28,6 +28,8 @@ function fmtTime(ts: number): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+const GRID = "grid grid-cols-[0.9fr_0.9fr_0.9fr_0.7fr_0.7fr_0.9fr] gap-2 items-center";
+
 export function TradeHistory() {
   const { publicKey } = useWallet();
   const [fills, setFills] = useState<FillRow[]>([]);
@@ -60,23 +62,25 @@ export function TradeHistory() {
   const volume = fills.reduce((s, f) => s + (f.quantity / 1e9) * (f.price / PRICE_SCALE), 0);
 
   return (
-    <div className="panel flex flex-col min-h-0">
-      <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-white/[0.06] shrink-0">
-        <div className="flex flex-col">
-          <span className="panel-title">Trade History</span>
-          <span className="text-[10px] text-white/50 font-medium">
+    <div className="flex flex-col min-h-0">
+      <div className="flex h-9 items-center justify-between gap-3 px-3 border-b border-[#1d2224] shrink-0">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+          Trade History
+        </span>
+        <div className="flex items-center gap-3 text-[11px] text-[#838c92] truncate">
+          {fills.length > 0 && (
+            <span className="tnum">
+              {fills.length} fills · ${volume.toFixed(0)} vol
+            </span>
+          )}
+          <span className="truncate">
             {wallet ? "Your settled fills" : "All settled fills"} · from the L1 settlement pipeline
           </span>
         </div>
-        {fills.length > 0 && (
-          <span className="text-[10px] text-white/45 font-mono tnum">
-            {fills.length} fills · ${volume.toFixed(0)} vol
-          </span>
-        )}
       </div>
 
-      <div className="px-3 pt-2 pb-2 flex-1 min-h-0 flex flex-col">
-        <div className="grid grid-cols-[0.9fr_0.9fr_0.9fr_0.7fr_0.7fr_0.9fr] gap-2 text-[10px] text-white/45 font-semibold pb-1.5 uppercase tracking-wider border-b border-white/[0.05] shrink-0 px-1">
+      <div className="p-3 flex-1 min-h-0 flex flex-col">
+        <div className={`${GRID} h-[26px] text-[11px] text-[#838c92] border-b border-[#15191a] shrink-0`}>
           <span>Time</span>
           <span className="text-right">Price</span>
           <span className="text-right">Size (SOL)</span>
@@ -85,9 +89,9 @@ export function TradeHistory() {
           <span className="text-right">Counterparty</span>
         </div>
 
-        <div className="max-h-[220px] overflow-y-auto slim-scroll mt-0.5">
+        <div className="max-h-[220px] overflow-y-auto slim-scroll">
           {fills.length === 0 ? (
-            <div className="text-center text-xs text-white/55 font-medium py-6">
+            <div className="text-center text-xs text-[#a2abb1] py-6">
               {indexed ? "No settled fills yet" : "Indexer warming up…"}
             </div>
           ) : (
@@ -104,36 +108,22 @@ export function TradeHistory() {
                   href={explorerAddress(counterparty, "er")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="grid grid-cols-[0.9fr_0.9fr_0.9fr_0.7fr_0.7fr_0.9fr] gap-2 text-xs py-[3px] px-1 rounded-sm hover:bg-white/[0.04] transition-colors"
+                  className={`${GRID} group h-7 text-[11.5px] text-[#e6e9ea] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]`}
                 >
-                  <span className="font-mono tnum text-white/45">{fmtTime(f.settled_at)}</span>
-                  <span className="text-right font-mono tnum text-white/80">
+                  <span className="font-mono tnum text-[#a2abb1]">{fmtTime(f.settled_at)}</span>
+                  <span className="text-right font-mono tnum">
                     {(f.price / PRICE_SCALE).toFixed(3)}
                   </span>
-                  <span className="text-right font-mono tnum text-white/70">
-                    {(f.quantity / 1e9).toFixed(2)}
-                  </span>
+                  <span className="text-right font-mono tnum">{(f.quantity / 1e9).toFixed(2)}</span>
                   <span
-                    className={`text-right font-semibold ${viewerBought ? "text-emerald-400" : "text-rose-400"}`}
+                    className={`text-right font-semibold ${viewerBought ? "text-[#22c55e]" : "text-[#ef4444]"}`}
                   >
                     {viewerBought ? "Buy" : "Sell"}
                   </span>
-                  <span className="text-right">
-                    {wallet ? (
-                      <span
-                        className={`inline-block text-[10px] font-semibold uppercase tracking-wider px-1.5 py-px rounded-sm ${
-                          isMaker
-                            ? "bg-sky-400/10 text-sky-300/80"
-                            : "bg-amber-400/10 text-amber-300/80"
-                        }`}
-                      >
-                        {isMaker ? "Maker" : "Taker"}
-                      </span>
-                    ) : (
-                      <span className="text-white/50">—</span>
-                    )}
+                  <span className="text-right text-[11px] text-[#a2abb1]">
+                    {wallet ? (isMaker ? "Maker" : "Taker") : <span className="text-[#838c92]">—</span>}
                   </span>
-                  <span className="text-right font-mono tnum text-sky-400/80 underline decoration-dotted underline-offset-2">
+                  <span className="text-right font-mono tnum text-[#58a6ff] underline decoration-dotted underline-offset-2">
                     {counterparty.slice(0, 4)}…
                   </span>
                 </a>
