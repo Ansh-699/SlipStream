@@ -31,3 +31,4 @@ keepers/data/
 # Architect run artifacts (local only; frozen checks under docs/checks/ stay tracked)
 docs/runs/
 docs/jobs/
+.architect/
