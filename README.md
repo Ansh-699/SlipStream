@@ -116,14 +116,17 @@ liquidation math, session keys, the problems-and-solutions tour, and a glossary.
 ## Try it
 
 The fastest way is the live demo at **[slipstream.ansht.tech](https://slipstream.ansht.tech)**.
-You'll need a Solana wallet (Phantom/Solflare/Backpack) set to **devnet**. See
-[**New-user walkthrough**](#new-user-walkthrough) below for the exact click path
-(get devnet SOL → deposit test USDC → fund credit → delegate to the ER → trade).
+You do not need a wallet extension: signing in with Google or Apple creates an in-app
+wallet, and the in-app faucet funds it. See [**New-user walkthrough**](#new-user-walkthrough)
+below for the exact click path (sign in → get test USDC → start trading → trade).
 
 ## Run / check locally
 
 ### Prerequisites
-- Node 20+, a Solana wallet on **devnet**.
+- Node 20+. No wallet extension needed — signing in with Google or Apple creates the
+  in-app wallet. A devnet-set Phantom/Backpack extension also works if you prefer one.
+- A dedicated devnet RPC in `BASE_RPC_UPSTREAM` — the public endpoint rate-limits hard
+  enough that the faucet and balance reads fail without it.
 - (Only to rebuild the on-chain program: Rust + Solana CLI + `cargo build-sbf`.)
 
 ### Frontend
@@ -193,42 +196,38 @@ slipstream/
 
 ## New-user walkthrough
 
-Exactly what a brand-new user does to go from an empty wallet to a live trade. Everything
-is **devnet** — no real money. (This is also the deposit/credit/ER flow end-to-end.)
+Exactly what a brand-new user does to go from nothing to a live trade. Everything is
+**devnet** — no real money, and the tokens are worthless test tokens.
 
-1. **Wallet on devnet.** Install Phantom/Solflare/Backpack and switch the network to
-   **Devnet** (Phantom: Settings → Developer Settings → Change Network → Devnet).
-2. **Get devnet SOL** (pays transaction fees). Use a faucet:
-   [faucet.solana.com](https://faucet.solana.com) or `solana airdrop 2 <your-address> --url devnet`.
-   A small amount (~0.5 SOL) is plenty.
-3. **Open the app** at [slipstream.ansht.tech](https://slipstream.ansht.tech) and click
-   **Connect Wallet** (top right) → approve.
-4. **Get test USDC.** The demo USDC is a devnet mint controlled by the operator. New
-   wallets are funded with test USDC for the demo — if your balance is 0, ping the
-   operator to mint you some (the mint authority drips USDC to demo wallets). This USDC is
-   worthless test tokens, used only to post margin.
-5. **Deposit + Init** (Trading Session panel, right column → scroll down). Enter an amount
-   (e.g. `1000`) and click **Deposit + Init**. This moves USDC from your wallet into the
-   protocol vault on **L1** and creates your trading-credit account. *(One wallet signature.)*
-6. **Fund credit.** Enter how much of your deposited collateral to allocate to SOL-PERP
-   (e.g. `500`) and click **Fund credit**. This earmarks margin for this market.
-7. **Delegate to ER.** Click **Delegate to ER (start trading)**. This delegates your
-   *trading-credit* (a scoped margin allowance — not your whole balance) to the Ephemeral
-   Rollup so orders match at sub-second speed. *(One wallet signature.)*
-8. **(Recommended) Create a session key.** Once delegated, click **Rotate session key**.
-   This authorizes an in-browser key to sign orders for you — **no wallet popup per
-   order**. It's scoped to your capped credit and expires automatically.
-9. **Trade.** Use the order form (left of the session panel): pick **Margin ($)**,
-   **Leverage** (1–20×), and a **Limit price** or **Market**. The form derives your
-   position size. Place the order — it matches in the ER instantly and shows as a pending
-   position.
-10. **Watch it settle.** A keeper mirrors your fill from the ER to L1 within a few seconds;
-    your **Positions** table (below the fold, "Your Activity") then shows the real settled
-    position with live PnL, health, and liquidation price. Close it any time to realize PnL
-    back to your collateral, then withdraw.
+1. **Open the app** at [slipstream.ansht.tech](https://slipstream.ansht.tech) and click
+   **Start trading** (or **Open the terminal**).
+2. **Sign in.** Google, Apple, or a Solana wallet you already have. Signing in with Google
+   or Apple creates a Phantom-secured in-app wallet — no extension, no seed phrase to
+   write down. That wallet is the on-chain owner of everything below.
+3. **Get test USDC.** Click **Get test USDC** in the Wallet panel. The faucet mints devnet
+   USDC and, if the wallet is short, tops it up with the small amount of SOL that network
+   fees need. Fresh wallets have neither, so this step is not optional.
+4. **Start trading.** One click chains the whole setup: it initialises your account,
+   deposits collateral into the L1 vault, funds a **capped** trading credit for SOL-PERP,
+   delegates that credit to the Ephemeral Rollup, and authorises a session key. You sign
+   each money-moving step — the app never holds a key that can move funds on its own.
+5. **Trade.** Use the order form: pick **Margin ($)**, **Leverage** (1–20×), and a **Limit
+   price** or **Market**. The form derives your position size. Orders are signed locally by
+   the session key, so there is **no wallet popup per order**. They match in the ER
+   instantly and show as a pending position.
+6. **Watch it settle.** A keeper mirrors your fill from the ER to L1 within a few seconds.
+   Your **Positions** table then shows the real settled position with live PnL, health, and
+   liquidation price.
+7. **Withdraw.** Close any open positions and cancel resting orders first — the program
+   requires an idle account. **Withdraw** then unwinds the setup in reverse: undelegate
+   from the rollup, wait for the base layer to take ownership back (this is asynchronous,
+   so the UI polls), withdraw the trading credit, and withdraw collateral to your wallet.
 
 > Money flow, in one line:
-> `wallet USDC → deposit → collateral (L1) → fund → credit → delegate → ER → trade → settle → Position (L1)`.
+> `wallet USDC → deposit → collateral (L1) → fund → capped credit → delegate → ER → trade → settle → Position (L1)`.
+>
+> The session key can only place and cancel orders. Every step that moves money requires
+> the owner's signature — see [`docs/06-session-keys.md`](./docs/06-session-keys.md).
 
 ---
 

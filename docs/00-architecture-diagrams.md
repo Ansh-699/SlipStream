@@ -107,7 +107,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   subgraph L4["Layer 4 — Frontend"]
-    F["Next.js 16<br/>React · Tailwind · wallet-adapter"]
+    F["Next.js 16<br/>React · Tailwind · Phantom Connect"]
   end
   subgraph L3["Layer 3 — Keepers"]
     K["TypeScript bots<br/>settlement · funding · liq · twap"]
@@ -139,10 +139,10 @@ sequenceDiagram
   participant K as Fill-Log Keeper
   participant L1 as Solana L1
 
-  U->>W: Deposit USDC + Init (1 sig)
+  U->>W: Start trading (one action, chained below)
   W->>L1: deposit_collateral + init_user/credit/position
-  U->>W: Delegate to ER (1 sig)
-  W->>L1: delegate_trading_credit (+ authorize session)
+  W->>L1: fund_trading_credit (capped allowance)
+  W->>L1: delegate_trading_credit + authorize_session
   L1-->>ER: TradingCredit now delegated
 
   U->>W: Place order (margin × leverage)

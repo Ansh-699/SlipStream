@@ -143,6 +143,11 @@ chart streams real **Pyth** data over SSE (not polling) — see the chart hooks.
 This trace ties every layer together. Follow one market order from click to
 settled position.
 
+Steps 1–3 are separate on-chain instructions, but the UI no longer asks for them
+separately: "Start trading" chains deposit → fund → delegate → authorize_session
+into one flow. They are listed apart here because the program still enforces them
+apart, and because withdrawal unwinds them in reverse.
+
 ```
  1. DEPOSIT (L1)
     User deposits USDC → UserAccount.free_collateral (L1 vault holds tokens).
