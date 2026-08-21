@@ -27,3 +27,7 @@ keepers/data/
 
 # Playwright MCP screenshots/snapshots
 .playwright-mcp/
+
+# Architect run artifacts (local only; frozen checks under docs/checks/ stay tracked)
+docs/runs/
+docs/jobs/
