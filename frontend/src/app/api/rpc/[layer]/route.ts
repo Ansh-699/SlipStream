@@ -26,6 +26,28 @@ const UPSTREAMS: Record<string, string> = {
   er: process.env.ER_RPC_UPSTREAM || "https://devnet.magicblock.app",
 };
 
+/** Echo the caller's JSON-RPC id so the client can match the response.
+ *  `id: null` never matches a pending request, and for a BATCH the client
+ *  expects an array and gets an object — so the carefully worded error below
+ *  never actually reached the user as that error. */
+function errorEnvelope(body: string, code: number, message: string): string {
+  try {
+    const parsed = JSON.parse(body);
+    if (Array.isArray(parsed)) {
+      return JSON.stringify(
+        parsed.map((c: { id?: unknown }) => ({
+          jsonrpc: "2.0",
+          id: c?.id ?? null,
+          error: { code, message },
+        }))
+      );
+    }
+    return JSON.stringify({ jsonrpc: "2.0", id: parsed?.id ?? null, error: { code, message } });
+  } catch {
+    return JSON.stringify({ jsonrpc: "2.0", id: null, error: { code, message } });
+  }
+}
+
 async function forward(upstream: string, body: string): Promise<Response> {
   // A couple of quick retries smooth over the ER's occasional transient errors
   // (the same flakiness that surfaced as "Failed to fetch" in the browser).
@@ -39,7 +61,35 @@ async function forward(upstream: string, body: string): Promise<Response> {
         // Server-side fetch: no CORS, generous timeout via AbortSignal.
         signal: AbortSignal.timeout(20_000),
       });
+      // An HTTP 429/5xx is a SUCCESSFUL fetch, so the catch below never saw it
+      // and the loop returned immediately without retrying. Worse, the response
+      // was stamped Content-Type: application/json regardless — and a public
+      // devnet 429 is usually text or HTML, so the client did
+      // JSON.parse("Too Many Requests") and reported a generic failure rather
+      // than "rate limited". Retry it like the transport failures it resembles,
+      // and if it persists, return a WELL-FORMED JSON-RPC error.
+      if ((res.status === 429 || res.status >= 500) && attempt < 2) {
+        const retryAfter = Number(res.headers.get("retry-after"));
+        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter * 1000, 4_000)
+          : 300 * (attempt + 1);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
       const text = await res.text();
+      if (res.status === 429 || res.status >= 500) {
+        console.error(`[rpc-proxy] upstream ${res.status}`);
+        return new Response(
+          errorEnvelope(
+            body,
+            -32005,
+            res.status === 429
+              ? "Upstream RPC is rate limiting this request."
+              : "Upstream RPC is unavailable."
+          ),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      }
       return new Response(text, {
         status: res.status,
         headers: { "Content-Type": "application/json" },
@@ -53,13 +103,12 @@ async function forward(upstream: string, body: string): Promise<Response> {
   // URL, and the base upstream carries a private API key that must never reach
   // the browser.
   console.error("[rpc-proxy] upstream failed:", lastErr);
+  // Status 200 with a JSON-RPC error body, not 502: web3.js surfaces a non-2xx
+  // as an opaque transport failure, which is what produced "Failed to fetch" in
+  // the browser instead of this message.
   return new Response(
-    JSON.stringify({
-      jsonrpc: "2.0",
-      id: null,
-      error: { code: -32603, message: "RPC proxy failed: upstream unreachable" },
-    }),
-    { status: 502, headers: { "Content-Type": "application/json" } }
+    errorEnvelope(body, -32603, "RPC proxy failed: upstream unreachable"),
+    { status: 200, headers: { "Content-Type": "application/json" } }
   );
 }
 

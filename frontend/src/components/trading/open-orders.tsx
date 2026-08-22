@@ -7,7 +7,9 @@ import { Connection, Transaction } from "@solana/web3.js";
 import { useOpenOrders } from "@/hooks/use-open-orders";
 import { useSession } from "@/hooks/use-session";
 import { PROGRAM_ID, MARKET_INDEX, ER_RPC } from "@/lib/manifest";
-import { createCancelOrderInstruction } from "@/lib/slipstream";
+import { createCancelOrderInstruction,
+  humanizeError,
+} from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
 /**
@@ -57,7 +59,7 @@ export function OpenOrders() {
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
       refresh();
     } catch (err) {
-      setCancelErr(err instanceof Error ? err.message : String(err));
+      setCancelErr(humanizeError(err));
       console.error("cancel failed:", err);
     } finally {
       setCancelling(null);

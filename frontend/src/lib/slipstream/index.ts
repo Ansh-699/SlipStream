@@ -6,6 +6,7 @@
 //   - instructions: canonical instruction builders (same as keepers/tests use)
 export * from "./constants";
 export * from "./accounts";
+export * from "./errors";
 export * from "./orderbook";
 export * from "./pda";
 export * from "./instructions";

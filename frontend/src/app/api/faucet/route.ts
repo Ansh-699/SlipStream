@@ -62,6 +62,18 @@ const dripTimes: number[] = [];
 const lastDripByIp = new Map<string, number>();
 const IP_COOLDOWN_MS = 60_000;
 
+/**
+ * `dripTimes` is trimmed against the 1h cutoff; these two Maps were not, so
+ * they only ever grew — keyed by caller-supplied pubkey and by IP, in a
+ * long-lived server process. Fresh keypairs are free, which is the exact attack
+ * the comment above anticipates, so the anticipated attacker also got an
+ * unbounded memory leak. Swept on the same cadence as the drip list.
+ */
+function sweepCooldowns(now: number): void {
+  for (const [k, t] of lastDrip) if (now - t > COOLDOWN_MS) lastDrip.delete(k);
+  for (const [k, t] of lastDripByIp) if (now - t > IP_COOLDOWN_MS) lastDripByIp.delete(k);
+}
+
 function clientIp(req: NextRequest): string {
   const fwd = req.headers.get("x-forwarded-for");
   if (fwd) return fwd.split(",")[0]!.trim();
@@ -89,7 +101,14 @@ function loadOperator(): Keypair | null {
     raw && raw.trim().startsWith("[") ? raw : null, // inline JSON array
     raw && !raw.trim().startsWith("[") ? raw : null, // a path
     process.env.KEEPER_KEYPAIR,
-    join(process.env.HOME || "/home/ec2-user", ".config/solana/id.json"),
+    // NOT ~/.config/solana/id.json. That fallback meant the faucet was enabled
+    // by a FILE EXISTING rather than by configuration: on any dev machine this
+    // route silently signed mints and SOL transfers with the developer's
+    // personal default keypair. Opt in explicitly via FAUCET_KEYPAIR or
+    // KEEPER_KEYPAIR, or the route reports itself unconfigured.
+    process.env.FAUCET_ALLOW_DEFAULT_KEYPAIR === "1"
+      ? join(process.env.HOME || "/root", ".config/solana/id.json")
+      : null,
   ].filter(Boolean) as string[];
 
   for (const c of candidates) {
@@ -133,6 +152,7 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const key = wallet.toBase58();
   const now = Date.now();
+  sweepCooldowns(now);
   const prev = lastDrip.get(key) ?? 0;
   if (now - prev < COOLDOWN_MS) {
     const wait = Math.ceil((COOLDOWN_MS - (now - prev)) / 1000);

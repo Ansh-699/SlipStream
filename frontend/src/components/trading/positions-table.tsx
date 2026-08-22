@@ -17,6 +17,7 @@ import {
   createCancelTriggerInstruction,
   TRIGGER_KIND_STOP_LOSS,
   TRIGGER_KIND_TAKE_PROFIT,
+  humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
@@ -54,6 +55,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
   const [flattening, setFlattening] = useState(false);
   const [flattenErr, setFlattenErr] = useState<string | null>(null);
   const [closeErr, setCloseErr] = useState<string | null>(null);
+  const [closing, setClosing] = useState<number | null>(null);
   const [triggerOpen, setTriggerOpen] = useState(false);
   const [slInput, setSlInput] = useState("");
   const [tpInput, setTpInput] = useState("");
@@ -145,7 +147,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
       refresh();
     } catch (err) {
-      setFlattenErr(err instanceof Error ? err.message : String(err));
+      setFlattenErr(humanizeError(err));
       console.error("flatten failed:", err);
     } finally {
       setFlattening(false);
@@ -164,6 +166,12 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
     fraction: 1 | 0.5
   ) => {
     if (!publicKey) return;
+    // Every sibling handler in this file has a busy flag; this one did not, so
+    // the buttons stayed live through sendTransaction AND a 30s confirm. A
+    // second click signed a SECOND close_position — which on a half close
+    // closes twice, and on a full close reverts with a raw error.
+    if (closing !== null) return;
+    setClosing(marketIndex);
     setCloseErr(null);
     try {
       let closeSize = 0n; // 0 = full close
@@ -202,8 +210,10 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       await confirmSignature(connection, sig, { timeoutMs: 30_000 });
       refresh();
     } catch (err) {
-      setCloseErr(err instanceof Error ? err.message : String(err));
+      setCloseErr(humanizeError(err));
       console.error("Close position failed:", err);
+    } finally {
+      setClosing(null);
     }
   };
 
@@ -248,7 +258,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       setTriggerOpen(false);
       refreshTriggers();
     } catch (err) {
-      setTriggerErr(err instanceof Error ? err.message : String(err));
+      setTriggerErr(humanizeError(err));
     } finally {
       setTriggerBusy(false);
     }
@@ -264,7 +274,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       await confirmSignature(connection, sig, { timeoutMs: 30_000 });
       refreshTriggers();
     } catch (err) {
-      setTriggerErr(err instanceof Error ? err.message : String(err));
+      setTriggerErr(humanizeError(err));
     } finally {
       setTriggerBusy(false);
     }
@@ -434,17 +444,19 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 0.5)}
+                          disabled={closing !== null}
                           className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                           title="Close half the position (lot-rounded, 1% slippage bound)"
                         >
-                          ½
+                          {closing === pos.marketIndex ? "…" : "½"}
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 1)}
+                          disabled={closing !== null}
                           className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                           title="Close at mark (1% slippage bound)"
                         >
-                          Close
+                          {closing === pos.marketIndex ? "…" : "Close"}
                         </button>
                       </div>
                     </td>

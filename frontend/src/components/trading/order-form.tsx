@@ -23,6 +23,8 @@ import {
   SIDE_ASK,
   ORDER_TYPE_LIMIT,
   ORDER_TYPE_MARKET,
+  decodeProgramError,
+  humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
@@ -41,32 +43,6 @@ function requiredMarginAtoms(sizeAtoms: bigint, price6dp: bigint): bigint {
   return notional / BigInt(MAX_LEVERAGE);
 }
 
-const ERR_NAMES = [
-  "InvalidDiscriminator", "InvalidAuthority", "InvalidPda", "InvalidOracle", "OracleStale",
-  "MarketPaused", "CircuitBreakerTripped", "InsufficientCollateral", "InsufficientMargin", "WithdrawalGateFailed",
-  "PendingFillsExist", "ReservedMarginExists", "SameSlotWithdrawal", "OrderBookFull", "PriceLevelsFull",
-  "InvalidOrderPrice", "InvalidOrderSize", "InvalidOrderSide", "InvalidOrderType", "OrderNotFound",
-  "NotOrderOwner", "PostOnlyWouldCross", "FokCannotFill", "SlippageExceeded", "PositionNotFound",
-  "PositionNotLiquidatable", "HealthFactorAboveThreshold", "InsuranceFundInsufficient", "InvalidFillSequence", "FillQueueEmpty",
-  "FillQueueFull", "MathOverflow", "MathUnderflow", "DivisionByZero", "InvalidMarketIndex",
-  "MaxOrdersPerUser", "InvalidExpiryTimestamp", "AccountAlreadyInitialized", "AccountNotInitialized", "InvalidTokenMint",
-  "InvalidVault", "InvalidProgramId", "InsufficientCredit", "CreditStillActive", "TickSizeViolation",
-  "LotSizeViolation", "OracleDisagreement", "RestrictedMode", "InvalidSwitchboardFeed", "GracePeriodActive",
-  "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded", "TriggerConditionNotMet",
-  "SelfTrade", "PositionStillOpen",
-];
-
-function decodeProgramError(input: unknown): string | null {
-  const anyErr = input as { message?: string; logs?: string[] } | null;
-  const logs = Array.isArray(anyErr?.logs) ? anyErr!.logs! : [];
-  const hay = [anyErr?.message ?? String(input), ...logs].join("\n");
-  const hex = hay.match(/custom program error:\s*0x([0-9a-fA-F]+)/);
-  const dec = hay.match(/Custom\((\d+)\)/);
-  const code = hex ? parseInt(hex[1], 16) : dec ? parseInt(dec[1], 10) : null;
-  if (code === null) return null;
-  const idx = code - 0x100;
-  return idx >= 0 && idx < ERR_NAMES.length ? ERR_NAMES[idx] : `custom 0x${code.toString(16)}`;
-}
 
 export function OrderForm() {
   const { publicKey, sendTransaction } = useWallet();

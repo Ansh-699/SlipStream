@@ -39,6 +39,7 @@ import {
   findGlobalStatePda,
   findPositionPda,
   MAGIC_CONTEXT_ID,
+  humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 
@@ -78,29 +79,6 @@ function slog(step: string, msg: string, extra?: unknown): void {
   }
 }
 
-/** Turn an on-chain / wallet error into a short, human, actionable message. */
-function humanizeError(err: unknown): string {
-  const anyErr = err as { message?: string; logs?: string[]; name?: string } | null;
-  const logs = Array.isArray(anyErr?.logs) ? anyErr!.logs! : [];
-  const hay = [anyErr?.message ?? String(err), ...logs].join("\n");
-
-  if (/insufficient (lamports|funds for rent|funds)/i.test(hay)) {
-    return "Not enough devnet SOL to pay fees/rent. Airdrop some SOL to your wallet and retry.";
-  }
-  if (/could not find account|account does not exist|invalid account owner|TokenAccountNotFound/i.test(hay)) {
-    return "You have no test USDC yet. Click “Get test USDC” first, then deposit.";
-  }
-  if (/0x1|insufficient/i.test(hay) && /transfer/i.test(hay)) {
-    return "USDC transfer failed — your balance is lower than the deposit amount.";
-  }
-  if (/User rejected|rejected the request|cancelled/i.test(hay)) {
-    return "You rejected the transaction in your wallet.";
-  }
-  if (/blockhash|expired|timed out/i.test(hay)) {
-    return "Network was slow and the transaction expired. Please retry.";
-  }
-  return anyErr?.message ?? String(err);
-}
 
 export interface SessionState {
   initialized: boolean;
