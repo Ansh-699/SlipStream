@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useLivePrice } from "@/hooks/use-live-price";
+import { useOracleConnected } from "@/hooks/use-live-price";
 
 /** Slim footer strip: connection truth on the left, reference links on the right. */
 export function StatusStrip() {
-  const { connected } = useLivePrice();
+  // Only the boolean — subscribing to the price snapshot would re-render this
+  // footer at the 20 msg/s feed rate for a value that flips on connect only.
+  const connected = useOracleConnected();
 
   return (
     <footer className="flex h-[32px] shrink-0 items-center gap-4 border-t border-[var(--t-border)] px-4 text-[11px] text-[var(--t-text-3)]">

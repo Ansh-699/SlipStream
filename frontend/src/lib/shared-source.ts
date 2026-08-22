@@ -49,11 +49,13 @@ function entryFor<T>(key: string): Entry<T> {
 /**
  * Subscribe to a shared, polled value.
  *
- * @param key      null disables the subscription entirely (e.g. no wallet yet).
+ * @param key      Falsy (null or "") disables the subscription entirely, e.g.
+ *                 before a wallet connects.
  *                 MUST encode every input `fetcher` closes over, or two callers
  *                 with different inputs will silently share one result.
- * @param fetcher  Only the FIRST subscriber's fetcher is used for the lifetime
- *                 of the key — see the key contract above.
+ * @param fetcher  Captured once, from the first subscriber, and held for the
+ *                 lifetime of the key. Later renders do NOT rewrite it, so the
+ *                 key contract above is what actually keeps callers honest.
  * @param intervalMs Gap after each completed fetch, not a fixed period.
  */
 export function useSharedSource<T>(
@@ -72,9 +74,17 @@ export function useSharedSource<T>(
     e.subscribers.add(notify);
 
     if (e.subscribers.size === 1) {
+      // Captured once, here. It used to call fetcherRef.current(), and that ref
+      // is rewritten on every render of whichever instance happened to
+      // subscribe first — so the owning instance could swap the shared fetcher
+      // for a DIFFERENT input's fetcher while other subscribers still held the
+      // old key, storing one market's data under another market's key. Not
+      // reachable while every call site passes a constant index, but the
+      // docstring promised a guarantee the code did not provide.
+      const capturedFetcher = fetcherRef.current;
       const run = async () => {
         try {
-          e.data = await fetcherRef.current();
+          e.data = await capturedFetcher();
           e.error = null;
         } catch (err) {
           // Keep the last good value on screen; a transient RPC failure should

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { ER_RPC_DIRECT } from "@/lib/manifest";
 
 /**
@@ -106,7 +106,18 @@ function openFeed() {
   const ws = new WebSocket(wsUrl);
   feedSocket = ws;
 
+  // Identity guard on all four handlers. WebSocket.close() dispatches onclose
+  // on a LATER task, so a socket opened between close() and that delivery had
+  // its only reference erased by the PREVIOUS socket's handler — and since
+  // closeFeedIfIdle can only ever close `feedSocket`, the orphan became
+  // unreachable while still streaming at 50ms. onclose then saw subscribers
+  // remaining and opened a third. React StrictMode's cleanup-then-setup in one
+  // commit triggers this on every dev page load (next.config.ts sets no
+  // reactStrictMode, which defaults it ON), and in production any remount
+  // inside the close handshake does it: error-boundary reset, bfcache restore,
+  // fast back/forward.
   ws.onopen = () => {
+    if (feedSocket !== ws) return;
     feedFailures = 0;
     feed.connected = true;
     publish();
@@ -123,6 +134,7 @@ function openFeed() {
   };
 
   ws.onmessage = (ev) => {
+    if (feedSocket !== ws) return;
     try {
       const msg = JSON.parse(ev.data);
       if (msg.method !== "accountNotification") return;
@@ -139,11 +151,16 @@ function openFeed() {
   };
 
   ws.onerror = () => {
+    if (feedSocket !== ws) return;
     feed.connected = false;
     publish();
   };
 
   ws.onclose = () => {
+    // An orphan closing must not report the LIVE socket as disconnected, which
+    // rendered "Oracle stream reconnecting" over a working stream, nor schedule
+    // a redundant reconnect.
+    if (feedSocket !== ws) return;
     feed.connected = false;
     feedSocket = null;
     publish();
@@ -162,22 +179,55 @@ function closeFeedIfIdle() {
   }
   const ws = feedSocket;
   feedSocket = null;
-  ws?.close();
+  // The guards above make ordering non-load-bearing, but closing a socket whose
+  // handlers can no longer see it is the clearer statement of intent.
+  if (ws) {
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    ws.close();
+  }
   feed.connected = false;
 }
 
+function subscribeFeed(cb: () => void): () => void {
+  feedSubscribers.add(cb);
+  openFeed();
+  return () => {
+    feedSubscribers.delete(cb);
+    closeFeedIfIdle();
+  };
+}
+
+const getLive = () => feed.live;
+const getConnected = () => feed.connected;
+const serverLive = () => null;
+const serverConnected = () => false;
+
+/**
+ * useSyncExternalStore rather than a forced re-render, for two reasons:
+ *
+ *  1. It bails out when the snapshot is unchanged (Object.is), so a consumer of
+ *     `connected` alone stops re-rendering at the 20 msg/s feed rate. The
+ *     previous version called every subscriber's useReducer increment on every
+ *     notification, which never bails — so a footer boolean, the whole positions
+ *     table and the chart all re-rendered together, fifty times a second.
+ *  2. It reads the store during render, closing the window where a component
+ *     that mounted while a tick was in flight showed the pre-tick value until
+ *     the next one.
+ */
 export function useLivePrice(): { live: LivePrice | null; connected: boolean } {
-  const [, rerender] = useReducer((c: number) => c + 1, 0);
+  const live = useSyncExternalStore(subscribeFeed, getLive, serverLive);
+  const connected = useSyncExternalStore(subscribeFeed, getConnected, serverConnected);
+  return useMemo(() => ({ live, connected }), [live, connected]);
+}
 
-  useEffect(() => {
-    const notify = () => rerender();
-    feedSubscribers.add(notify);
-    openFeed();
-    return () => {
-      feedSubscribers.delete(notify);
-      closeFeedIfIdle();
-    };
-  }, []);
-
-  return { live: feed.live, connected: feed.connected };
+/**
+ * For consumers that need only the connection state — the footer indicator, a
+ * status row. Subscribing through the price snapshot would re-render them on
+ * every tick for a boolean that changes on connect and disconnect only.
+ */
+export function useOracleConnected(): boolean {
+  return useSyncExternalStore(subscribeFeed, getConnected, serverConnected);
 }
