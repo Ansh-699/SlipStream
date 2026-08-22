@@ -224,6 +224,16 @@ export function OrderForm() {
 
 
   const showPriceInput = orderType !== "market";
+  // A market order takes whatever is resting at the best price, right now.
+  // "Long - profits if price rises" describes a thesis, not that action; the
+  // honest verb for crossing the book is buy/sell. A limit order really is
+  // opening a directional position at a price you choose, so it keeps
+  // long/short. Same instruction either way - only the label changes.
+  const isMarket = orderType === "market";
+  const buyLabel = isMarket ? "Buy" : "Long";
+  const sellLabel = isMarket ? "Sell" : "Short";
+  const buyHint = isMarket ? "takes the best ask now" : "profits if price rises";
+  const sellHint = isMarket ? "hits the best bid now" : "profits if price falls";
   const availLine = session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet";
   const inputCls =
     "h-[34px] w-full rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] tnum placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
@@ -288,8 +298,8 @@ export function OrderForm() {
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
-              <span>Long</span>
-              <span className="text-[10px] font-normal opacity-80">profits if price rises</span>
+              <span>{buyLabel}</span>
+              <span className="text-[10px] font-normal opacity-80">{buyHint}</span>
             </span>
           </button>
           <button
@@ -303,8 +313,8 @@ export function OrderForm() {
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
-              <span>Short</span>
-              <span className="text-[10px] font-normal opacity-80">profits if price falls</span>
+              <span>{sellLabel}</span>
+              <span className="text-[10px] font-normal opacity-80">{sellHint}</span>
             </span>
           </button>
         </div>
@@ -421,8 +431,8 @@ export function OrderForm() {
 
         <div className="flex flex-col">
           <div className={rowCls}>
-            <span className={labelCls}>Direction</span>
-            <span className="text-[12px] text-[var(--t-text)]">{side === "long" ? "Long" : "Short"}</span>
+            <span className={labelCls}>{isMarket ? "Action" : "Direction"}</span>
+            <span className="text-[12px] text-[var(--t-text)]">{side === "long" ? buyLabel : sellLabel}</span>
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Size</span>
@@ -483,7 +493,7 @@ export function OrderForm() {
         >
           {submitting
             ? "Placing…"
-            : blocker ?? `${side === "long" ? "Long" : "Short"} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
+            : blocker ?? `${side === "long" ? buyLabel : sellLabel} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
         </button>
 
         {session.delegated && (
