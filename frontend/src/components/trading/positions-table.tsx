@@ -326,7 +326,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                     {reference !== null ? `$${reference.toFixed(2)}` : "—"}
                   </td>
                   {(() => {
-                    const mk = reference ?? 0;
+                    const mk = reference;
                     const { liq, health } = liqAndHealth(
                       erPosition.isLong,
                       Math.abs(erPosition.size),
@@ -401,7 +401,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       {reference !== null ? `$${reference.toFixed(2)}` : "—"}
                     </td>
                     {(() => {
-                      const mk = reference ?? 0;
+                      const mk = reference;
                       const { liq, health } = liqAndHealth(
                         pos.isLong,
                         size,
@@ -563,14 +563,24 @@ function SideBadge({ isLong }: { isLong: boolean }) {
  *
  * Inputs are human units: sizeSol (SOL), entry/mark (USD).
  */
+/**
+ * `mark` is nullable ON PURPOSE. It used to be called with `reference ?? 0`,
+ * and at mark = 0 the uPnL term below inverts: a SHORT reads
+ * uPnl = +entry*size, health enormous, and HealthCell paints a full green bar
+ * on a position the program may consider liquidatable. A LONG reads the
+ * mirror image and looks about to be liquidated. Both are fabrications from a
+ * price the rest of this component correctly refuses to quote — the Mark
+ * column two cells left already renders "—" in the same state.
+ */
 function liqAndHealth(
   isLong: boolean,
   sizeSol: number,
   entry: number,
-  mark: number,
+  mark: number | null,
   _collateral: number
 ): { liq: number | null; health: number | null } {
   if (sizeSol <= 0 || entry <= 0) return { liq: null, health: null };
+  if (mark === null) return { liq: null, health: null };
   const notional = sizeSol * entry;
   const initialMargin = notional / MAX_LEVERAGE; // posted margin (1/leverage of notional)
   const maintMargin = initialMargin / 2;

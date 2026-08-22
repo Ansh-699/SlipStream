@@ -2,7 +2,7 @@
 
 import { startPoll } from "@/lib/poll";
 import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 import { PROGRAM_ID } from "@/lib/manifest";
@@ -67,7 +67,16 @@ export function useUserAccount() {
 export function usePositions(markPrice: bigint | null) {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
-  const [positions, setPositions] = useState<PositionData[]>([]);
+  // Positions WITHOUT the price-derived field. Pricing happens at render, not
+  // at fetch: markPrice used to sit in the fetch's dependency array, so every
+  // oracle tick rebuilt `fetch`, re-ran the effect, and fired an immediate
+  // getProgramAccounts — while ALSO clearing the startPoll timer before it
+  // could fire. With the live feed pushing ~20 prices/second that is ~20
+  // unbounded program scans per second instead of one per five seconds, none
+  // of them aborted. It is the whole of ERR_INSUFFICIENT_RESOURCES, and it was
+  // introduced when this hook was switched from the 5s market mark to the live
+  // reference price. The request never needed the price at all.
+  const [raw, setRaw] = useState<Omit<PositionData, "unrealizedPnl">[]>([]);
 
   const fetch = useCallback(async () => {
     if (!publicKey) return;
@@ -83,22 +92,10 @@ export function usePositions(markPrice: bigint | null) {
         ],
       });
 
-      const result: PositionData[] = [];
+      const result: Omit<PositionData, "unrealizedPnl">[] = [];
       for (const { account } of accounts) {
         const pos = decodePosition(account.data as Buffer);
         if (pos.size === 0n) continue;
-
-        const isLong = pos.size > 0n;
-
-        let unrealizedPnl = 0;
-        if (markPrice) {
-          // Mirror the on-chain compute_unrealized_pnl: size is 9-dp base atoms,
-          // so (size * priceDiff) / BASE_SCALE (1e9) yields 6-dp quote PnL; then
-          // divide by PRICE_SCALE (1e6) for a human dollar value.
-          const priceDiff = markPrice - pos.entryPrice;
-          const rawPnl = (pos.size * priceDiff) / 1_000_000_000n; // BASE_SCALE
-          unrealizedPnl = Number(rawPnl) / PRICE_SCALE;
-        }
 
         result.push({
           marketIndex: pos.marketIndex,
@@ -106,15 +103,34 @@ export function usePositions(markPrice: bigint | null) {
           entryPrice: pos.entryPrice,
           collateral: pos.collateral,
           realizedPnl: pos.realizedPnl,
-          isLong,
-          unrealizedPnl,
+          isLong: pos.size > 0n,
         });
       }
-      setPositions(result);
+      setRaw(result);
     } catch {
       // Will retry
     }
-  }, [connection, publicKey, markPrice]);
+  }, [connection, publicKey]);
+
+  // Price them here instead. Recomputing this on every oracle tick is a cheap
+  // pure map over a handful of positions; refetching on every oracle tick was
+  // a program scan.
+  const positions: PositionData[] = useMemo(
+    () =>
+      raw.map((p) => {
+        let unrealizedPnl = 0;
+        if (markPrice) {
+          // Mirrors the on-chain compute_unrealized_pnl: size is 9-dp base
+          // atoms, so (size * priceDiff) / BASE_SCALE (1e9) yields 6-dp quote
+          // PnL; then / PRICE_SCALE (1e6) for a human dollar value.
+          const priceDiff = markPrice - p.entryPrice;
+          const rawPnl = (p.size * priceDiff) / 1_000_000_000n; // BASE_SCALE
+          unrealizedPnl = Number(rawPnl) / PRICE_SCALE;
+        }
+        return { ...p, unrealizedPnl };
+      }),
+    [raw, markPrice]
+  );
 
   useEffect(() => {
     fetch();

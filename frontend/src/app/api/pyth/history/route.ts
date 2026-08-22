@@ -51,7 +51,12 @@ export async function GET(req: NextRequest): Promise<Response> {
       await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
     }
   }
-  return json({ s: "error", errmsg: `benchmarks proxy failed: ${String(lastErr)}` }, 502);
+  // Server-side only. A fetch failure can embed the upstream URL, and
+  // PYTH_BENCHMARKS_UPSTREAM is operator-configurable and may carry an API key
+  // — the same reason rpc/[layer] and faucet both refuse to echo lastErr. This
+  // route was the one that never got the patch.
+  console.error("[pyth-proxy] upstream failed:", lastErr);
+  return json({ s: "error", errmsg: "Price history upstream is unavailable." }, 502);
 }
 
 function json(body: unknown, status: number): Response {

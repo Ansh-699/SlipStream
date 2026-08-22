@@ -2,7 +2,7 @@
 
 import { baseConnection, erConnection } from "@/lib/connections";
 import { startPoll } from "@/lib/poll";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, MARKET, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
 import {
@@ -63,7 +63,10 @@ function pnl(signedQty: bigint, entry: bigint, mark: bigint): bigint {
 function reconstruct(
   fills: FillEvent[],
   ownerB58: string,
-  markPrice: bigint,
+  // Nullable deliberately: priced at 0n the pnl() below returns a large
+  // fabricated number that renders green or red by sign, next to a Mark column
+  // that correctly shows "—". No price means no PnL, not a free one.
+  markPrice: bigint | null,
   lastSettledSequence: bigint
 ): ErPosition | null {
   // Sort by sequence ascending so VWAP / reductions apply in match order.
@@ -131,7 +134,7 @@ function reconstruct(
 
   if (count === 0 || size === 0n) return null;
 
-  const up = pnl(size, entry, markPrice);
+  const up = markPrice === null ? null : pnl(size, entry, markPrice);
   return {
     isLong: size > 0n,
     size: Number(size) / 1e9,
@@ -148,11 +151,19 @@ export function useErPosition(
   markPrice: bigint | null,
   marketIndex: number = 0
 ) {
-  const [position, setPosition] = useState<ErPosition | null>(null);
+  // Same split as usePositions: markPrice is used only to PRICE the fetched
+  // fills, never to fetch them, so it must not sit in the fetch's dependency
+  // array. With the live feed pushing ~20 prices/second it was rebuilding
+  // `fetch`, re-running the effect and re-pulling the 612 KiB order book ~20
+  // times a second, while clearing the startPoll timer before it could fire.
+  const [rawFills, setRawFills] = useState<{
+    fillEvents: Parameters<typeof reconstruct>[0];
+    lastSettledSequence: bigint;
+  } | null>(null);
 
   const fetch = useCallback(async () => {
     if (!owner) {
-      setPosition(null);
+      setRawFills(null);
       return;
     }
     try {
@@ -180,7 +191,7 @@ export function useErPosition(
         info = await baseConn.getAccountInfo(pda);
       }
       if (!info) {
-        setPosition(null);
+        setRawFills(null);
         return;
       }
 
@@ -199,12 +210,26 @@ export function useErPosition(
       }
 
       const book = decodeOrderBook(info.data as Buffer);
-      const pos = reconstruct(book.fillEvents, owner.toBase58(), markPrice ?? 0n, lastSettledSequence);
-      setPosition(pos);
+      setRawFills({ fillEvents: book.fillEvents, lastSettledSequence });
     } catch {
       // Transient — keep last good state.
     }
-  }, [owner, markPrice, marketIndex]);
+  }, [owner, marketIndex]);
+
+  // Re-price on every oracle tick; re-fetch only on the poll. Reconstructing
+  // from fills already in memory is pure CPU over a bounded ring.
+  const position: ErPosition | null = useMemo(
+    () =>
+      owner && rawFills
+        ? reconstruct(
+            rawFills.fillEvents,
+            owner.toBase58(),
+            markPrice,
+            rawFills.lastSettledSequence
+          )
+        : null,
+    [owner, rawFills, markPrice]
+  );
 
   useEffect(() => {
     fetch();

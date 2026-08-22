@@ -9,26 +9,23 @@ import { RPC_URL, ER_RPC } from "@/lib/manifest";
  * every 2s, use-er-position three, use-open-orders two, use-session five more
  * per refresh. None was ever closed.
  *
- * That leaks, for two compounding reasons:
+ * CORRECTION, recorded because the first version of this comment asserted it:
+ * these instances did NOT leak WebSockets. In the pinned @solana/web3.js
+ * 1.98.4 the Connection constructor builds its RpcWebSocketClient with
+ * `autoconnect: false` (lib/index.cjs.js:6104-6106) and only calls connect()
+ * from _updateSubscriptions, reached solely via onAccountChange / onLogs /
+ * onSignature / onProgramAccountChange — and this app makes zero subscriptions
+ * (lib/confirm.ts exists precisely to avoid confirmTransaction's
+ * signatureSubscribe). An unsubscribed Connection holds no socket and no timer.
  *
- *  1. Every web3.js Connection constructs an RpcWebSocketClient and reconnects
- *     it forever on failure. The browser reaches both layers through the
- *     same-origin HTTP proxy (/api/rpc/*), from which web3.js derives a ws://
- *     URL the proxy does not serve — see the note in lib/confirm.ts, which
- *     exists for exactly this reason. So every Connection ever created is still
- *     retrying a socket that can never open.
- *  2. Connection retries HTTP 429/5xx internally, so each dead instance also
- *     keeps its own independent retry state. Under upstream rate limiting the
- *     request count multiplies per instance.
+ * What per-instance construction did cost: independent HTTP retry state, so a
+ * 429 was retried by each instance separately rather than once, multiplying
+ * load during exactly the rate limiting it should have backed off from.
  *
- * After a few minutes of polling that is hundreds of live zombie clients, and
- * the browser stops opening sockets:
- *
- *     POST /api/rpc/base  net::ERR_INSUFFICIENT_RESOURCES
- *
- * Bounding the poll rate (lib/poll.ts) does not help, because the leak is per
- * instance, not per tick. Two module-scope singletons do: the count is fixed at
- * two for the lifetime of the tab regardless of how long it runs.
+ * The real cause of ERR_INSUFFICIENT_RESOURCES was elsewhere — an unstable
+ * effect dependency re-firing fetches ~20x/second (see use-positions.ts and
+ * use-er-position.ts). Singletons are still the right shape, and this file is
+ * kept for the retry-state reason above, but it is not what stopped the errors.
  *
  * `disableRetryOnRateLimit` is on deliberately. The callers here are pollers
  * that will ask again in a second or two anyway, so a silent internal retry

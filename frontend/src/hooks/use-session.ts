@@ -47,6 +47,10 @@ const DELEGATION_PROGRAM = DELEGATION_PROGRAM_ID.toBase58();
 /** Session lifetime (seconds). The browser session key is authorized for this
  *  long; after it expires the user must rotate (one signature) to keep trading
  *  popup-less. 24h keeps a leaked key's blast radius bounded. */
+/** Rent for UserAccount(56B) + TradingCredit(96B) + Position(96B) = 4_398_720
+ *  lamports, plus fees and delegate()'s own account creations. Rounded up. */
+const MIN_SOL_LAMPORTS = 10_000_000; // 0.01 SOL
+
 const SESSION_TTL_SECS = 24 * 60 * 60;
 
 /** A tiny SOL float optionally sent to the session key on delegate so it can
@@ -465,8 +469,18 @@ export function useSession(marketIndex: number = 0) {
         // an unreachable RPC, which was non-fatal before and stays non-fatal.
         if (lamports !== null) {
           slog("init", `wallet SOL = ${(lamports / 1e9).toFixed(4)}`);
-          if (lamports < 3_000_000) {
-            setError("Your wallet has almost no devnet SOL — airdrop some SOL (for fees/rent) and retry.");
+          // Rent for the three accounts this transaction creates is
+          // 1_280_640 (UserAccount 56B) + 1_559_040 (TradingCredit 96B)
+          // + 1_559_040 (Position 96B) = 4_398_720 lamports, before fees and
+          // before delegate()'s own buffer/record/metadata accounts. The old
+          // 3_000_000 gate passed wallets that then failed at signing with
+          // "insufficient funds for rent", which humanizeError reports as a
+          // deposit problem.
+          if (lamports < MIN_SOL_LAMPORTS) {
+            setError(
+              `Your wallet needs about ${(MIN_SOL_LAMPORTS / 1e9).toFixed(3)} devnet SOL for account rent and fees — ` +
+                `it has ${(lamports / 1e9).toFixed(4)}. Use "Get test USDC" (it tops up SOL too) or airdrop some, then retry.`
+            );
             return false;
           }
         }
@@ -723,7 +737,19 @@ export function useSession(marketIndex: number = 0) {
             : getAssociatedTokenAddress(USDC_MINT, publicKey)
                 .then((ata) => getAccount(connection, ata))
                 .then((a) => a.amount)
-                .catch(() => 0n),
+                // ONLY "the ATA does not exist" means zero. Every other failure
+                // is the RPC being unreachable, and swallowing it here turned
+                // "deposit everything" into "deposit nothing" while the run
+                // carried on and delegated an EMPTY credit — three approvals
+                // burned, USDC still in the wallet, and the Start button then
+                // replaced by the withdraw card so there was no way back.
+                .catch((e: unknown) => {
+                  const name = (e as { name?: string })?.name ?? "";
+                  if (name === "TokenAccountNotFoundError" || name === "TokenInvalidAccountOwnerError") {
+                    return 0n;
+                  }
+                  throw e;
+                }),
         ]);
         if (creditInfo?.owner.toBase58() === DELEGATION_PROGRAM) {
           // Silent `return true` here read to the user as "the button does
@@ -775,12 +801,32 @@ export function useSession(marketIndex: number = 0) {
           if (!(await fund(Number(free) / PRICE_SCALE))) return false;
         }
 
+        // Delegating an empty credit is the trap: it succeeds, `state.delegated`
+        // flips true, and session-panel then swaps the Start button for the
+        // withdraw/rotate card — leaving a wallet that cannot trade and has no
+        // visible way to fund. Refuse before the third signature, not after.
+        const creditNow = await connection.getAccountInfo(creditPda);
+        const creditAmount =
+          creditNow && creditNow.data.length >= TRADING_CREDIT_SIZE
+            ? decodeTradingCredit(creditNow.data as Buffer).credit
+            : 0n;
+        if (creditAmount === 0n) {
+          setError(
+            "Nothing was moved into the market, so there is no session to open. " +
+              "Get test USDC (or check your connection) and press Start trading again."
+          );
+          slog("autostart", "BLOCKED: refusing to delegate an empty credit");
+          return false;
+        }
+
         setStep("Step 3 of 3 — opening your rollup session\u2026");
         if (!(await delegate())) return false;
 
         slog("autostart", "setup complete");
         setNotice("You're ready to trade — orders sign instantly, no wallet popups.");
-        await refresh();
+        // Not awaited: autoStart re-reads what it needs from chain itself, so
+        // this is 4+ RPCs of pure latency on the path the user is watching.
+        void refresh();
         return true;
       } catch (err) {
         const msg = humanizeError(err);
@@ -955,6 +1001,9 @@ export function useSession(marketIndex: number = 0) {
   const rotate = useCallback(async () => {
     if (!publicKey) return;
     setBusy(true);
+    setError(null);
+    setNotice(null);
+    setStep("Awaiting wallet signature\u2026");
     try {
       const sessionKp = Keypair.generate();
       const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL_SECS;
@@ -1000,7 +1049,17 @@ export function useSession(marketIndex: number = 0) {
       // Persist only AFTER the on-chain authorize succeeds.
       storeSession(publicKey, marketIndex, sessionKp, expiry);
       await refresh();
+    } catch (err) {
+      // Was try/finally with NO catch, wired straight to onClick: a rejected
+      // signature, an ER outage and a SUCCESSFUL rotation were pixel-identical
+      // — spinner, then the label back. This is the recovery path for a session
+      // key lost to a confirm timeout, so its silence compounded.
+      const msg = humanizeError(err);
+      setError(msg);
+      slog("rotate", `FAILED: ${msg}`, err);
+      return false;
     } finally {
+      setStep(null);
       setBusy(false);
     }
   }, [publicKey, sendTransaction, connection, marketIndex, refresh]);
@@ -1022,6 +1081,14 @@ export function useSession(marketIndex: number = 0) {
       const sig = await sendTransaction(new Transaction().add(ix), connection);
       await confirmSignature(connection, sig, { timeoutMs: 45_000 });
       await refresh();
+    } catch (err) {
+      // Same silence as rotate(). This is the ONLY route out of a bricked
+      // legacy credit, so a button that spins and says nothing is the worst
+      // possible failure mode for it.
+      const msg = humanizeError(err);
+      setError(msg);
+      slog("close-legacy", `FAILED: ${msg}`, err);
+      return false;
     } finally {
       setBusy(false);
     }
