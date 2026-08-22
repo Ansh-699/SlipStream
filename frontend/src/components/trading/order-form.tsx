@@ -236,7 +236,7 @@ export function OrderForm() {
   const sellHint = isMarket ? "hits the best bid now" : "profits if price falls";
   const availLine = session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet";
   const inputCls =
-    "h-[34px] w-full rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] tnum placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
+    "h-[34px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] tnum placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
   const suffixCls = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[var(--t-text-3)]";
   const labelCls = "text-[12px] text-[var(--t-text-2)]";
   const rowCls = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
@@ -294,12 +294,12 @@ export function OrderForm() {
             className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
               side === "long"
                 ? "border-[var(--t-up)] bg-[rgba(34,197,94,0.12)] text-[var(--t-up)]"
-                : "border-[var(--t-border)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
+                : "border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
               <span>{buyLabel}</span>
-              <span className="text-[10px] font-normal opacity-80">{buyHint}</span>
+              <span className="text-[10px] font-normal">{buyHint}</span>
             </span>
           </button>
           <button
@@ -309,12 +309,12 @@ export function OrderForm() {
             className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
               side === "short"
                 ? "border-[var(--t-down)] bg-[rgba(239,68,68,0.12)] text-[var(--t-down)]"
-                : "border-[var(--t-border)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
+                : "border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
               <span>{sellLabel}</span>
-              <span className="text-[10px] font-normal opacity-80">{sellHint}</span>
+              <span className="text-[10px] font-normal">{sellHint}</span>
             </span>
           </button>
         </div>

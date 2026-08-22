@@ -90,7 +90,7 @@ export function OpenOrders() {
               {orders.map((o) => (
                 <tr
                   key={o.orderId.toString()}
-                  className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]"
+                  className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]"
                 >
                   <td className={o.isLong ? "text-left text-[var(--t-up)]" : "text-left text-[var(--t-down)]"}>
                     {o.isLong ? "LONG" : "SHORT"}
@@ -102,7 +102,7 @@ export function OpenOrders() {
                       onClick={() => handleCancel(o.orderId)}
                       disabled={cancelling === o.orderId.toString()}
                       aria-label="Cancel order"
-                      className="h-6 px-2 rounded-[4px] text-[12px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="h-6 px-2 rounded-[4px] text-[12px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:text-[var(--t-text-3)] disabled:border-[var(--t-border)] disabled:cursor-not-allowed"
                     >
                       {cancelling === o.orderId.toString() ? "…" : "Cancel"}
                     </button>

@@ -344,7 +344,9 @@
 input,
 textarea,
 [contenteditable] {
-  caret-color: #10b981;
+  /* --t-up rather than a literal emerald-500, which measured ~2.5:1 on a white
+     input — the cursor was hard to find while typing an order price. */
+  caret-color: var(--t-up);
 }
 
 /* The default focus ring is invisible against the dark canvas. Keyboard users
@@ -359,7 +361,10 @@ textarea,
 html {
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
-:root:not(.dark) html {
+/* NOT `:root:not(.dark) html` — `:root` IS the <html> element, so that asked
+   for an html inside an html and could never match. The light page scrollbar
+   was white-on-white for as long as this rule has existed. */
+:root:not(.dark) {
   scrollbar-color: rgba(15, 23, 23, 0.22) transparent;
 }
 body::-webkit-scrollbar {
@@ -393,17 +398,21 @@ a {
    controls at the bottom are always reachable inside the viewport lock. */
 .slim-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  /* Was a literal rgba(255,255,255,.18) with no light counterpart: an invisible
+     thumb on a white ground, on the very column this rule exists to keep
+     reachable. Specifying scrollbar-color also disables the ::-webkit-*
+     fallback below in Chrome, so there was no second chance. */
+  scrollbar-color: var(--t-scroll-thumb) transparent;
 }
 .slim-scroll::-webkit-scrollbar {
   width: 8px;
 }
 .slim-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--t-scroll-thumb);
   border-radius: 9999px;
 }
 .slim-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--t-scroll-thumb-hover);
 }
 
 /* Hide native number-input spin buttons (the up/down arrows looked broken on the
@@ -806,7 +815,7 @@ input[type="number"] {
   color: var(--of-ink);
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
-  caret-color: #10b981;
+  caret-color: var(--t-up);
   transition: background 100ms, border-color 100ms;
 }
 .order-input::placeholder { color: var(--of-ink-4); }
@@ -1477,6 +1486,12 @@ input[type="number"] {
      filled buttons took `text-white` -- which the light remap above rewrites to
      dark ink -- and rendered black-on-dark-green at 2.26:1. */
   --t-on-fill: #ffffff;
+  /* --t-border is a hairline DIVIDER (decorative, no WCAG bar). A control whose
+     only boundary is its border must clear 3:1 per 1.4.11, which #d5dbdf at
+     1.40:1 does not — so interactive edges take --t-border-strong instead. */
+  --t-border-strong: #84919c;   /* 3.23:1 on white */
+  --t-scroll-thumb: rgba(15, 23, 23, 0.28);
+  --t-scroll-thumb-hover: rgba(15, 23, 23, 0.45);
   --t-warn: #a2490a;      /*  6.0:1 on white, 5.1:1 on --t-surface-3.
                              amber-700 (#b45309) measured 4.27:1 against
                              surface-3 -- an AA failure only the darkest
@@ -1503,6 +1518,9 @@ input[type="number"] {
   --t-down-3: #a93436;
   --t-down-bg: #2b1416;
   --t-on-fill: #ffffff;
+  --t-border-strong: #5f696d;   /* 3.01:1 on --t-bg */
+  --t-scroll-thumb: rgba(255, 255, 255, 0.18);
+  --t-scroll-thumb-hover: rgba(255, 255, 255, 0.3);
   --t-warn: #f59e0b;
   --t-link: #58a6ff;
 }

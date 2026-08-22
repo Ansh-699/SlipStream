@@ -25,7 +25,7 @@ const PRICE_SCALE = 1_000_000;
 const CLOSE_SLIPPAGE_BPS = 100n;
 
 const BTN_UTIL =
-  "h-6 px-2 rounded-[4px] text-[12px] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed";
+  "h-6 px-2 rounded-[4px] text-[12px] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:text-[var(--t-text-3)] disabled:border-[var(--t-border)] disabled:pointer-events-none disabled:cursor-not-allowed";
 const INPUT =
   "h-8 w-24 px-[10px] rounded-[4px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[13px] tnum text-[var(--t-text)] placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 
@@ -302,7 +302,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
               {/* ER (pending-settlement) position — filled on the rollup, not yet
                   settled to an L1 Position. Reconstructed from the ER fill queue. */}
               {erPosition && (
-                <tr className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]">
+                <tr className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
                   <td className="px-2 text-left">
                     <span className="inline-flex items-center gap-2">
                       <SideBadge isLong={erPosition.isLong} />
@@ -363,7 +363,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                 const size = Number(pos.size < 0n ? -pos.size : pos.size) / 1e9;
                 const sizeAtoms = pos.size < 0n ? -pos.size : pos.size;
                 return (
-                  <tr key={i} className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]">
+                  <tr key={i} className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
                     <td className="px-2 text-left">
                       <span className="inline-flex items-center gap-2">
                         <SideBadge isLong={pos.isLong} />

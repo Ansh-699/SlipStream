@@ -697,8 +697,24 @@ export function useSession(marketIndex: number = 0) {
         const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
         const creditInfo = await connection.getAccountInfo(creditPda);
         if (creditInfo?.owner.toBase58() === DELEGATION_PROGRAM) {
+          // Silent `return true` here read to the user as "the button does
+          // nothing": no spinner, no error, no notice, no state change they
+          // could see. Say what happened, and say it differently depending on
+          // whether there is actually credit to trade with — "already set up"
+          // is not a useful answer to someone staring at $0.00 available.
           slog("autostart", "already delegated — nothing to do");
           await refresh();
+          const [uPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+          const uAcc = await connection.getAccountInfo(uPda);
+          const parked =
+            uAcc && uAcc.data[0] === DISC_USER_ACCOUNT
+              ? decodeUserAccount(uAcc.data as Buffer).freeCollateral
+              : 0n;
+          setNotice(
+            parked > 0n
+              ? "Your session is already open, but this wallet still has collateral sitting outside its trading credit. Use \u201CWithdraw all to wallet\u201D and start again to move it in."
+              : "Your session is already open — nothing to set up. If credit still shows $0.00, the funds are in a trading credit this build cannot reach; use a fresh wallet."
+          );
           return true;
         }
 

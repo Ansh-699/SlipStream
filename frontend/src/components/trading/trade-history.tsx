@@ -108,7 +108,7 @@ export function TradeHistory() {
                   href={explorerAddress(counterparty, "er")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`${GRID} group h-7 text-[11.5px] text-[var(--t-text)] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]`}
+                  className={`${GRID} group h-7 text-[11.5px] text-[var(--t-text)] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]`}
                 >
                   <span className="font-mono tnum text-[var(--t-text-2)]">{fmtTime(f.settled_at)}</span>
                   <span className="text-right font-mono tnum">

@@ -15,7 +15,7 @@ const MIN_SOL_LAMPORTS = 20_000_000; // 0.02 SOL
 
 const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 const SECONDARY_BTN =
-  `h-[28px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-2.5 text-[12px] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS}`;
+  `h-[28px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-2.5 text-[12px] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:text-[var(--t-text-3)] disabled:border-[var(--t-border)] disabled:cursor-not-allowed ${FOCUS}`;
 const HINT = "text-[10px] leading-tight text-[var(--t-text-3)]";
 
 function primaryBtn(disabled: boolean) {
