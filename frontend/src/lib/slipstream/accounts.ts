@@ -99,6 +99,13 @@ export interface Market {
   makerRebateBps: number;
   twapWriteIndex: number;
   twapCount: number;
+  /** S6-01. The mark-price freshness stamp: minutes-since-epoch mod 65536,
+   *  written by crank_twap and read by the program's own `is_mark_price_fresh`.
+   *  It lives in `Market._padding1` (byte 14), so both vendored decoders used to
+   *  skip it as padding -- which left every client structurally unable to tell a
+   *  live mark from a 16-day-old one, while rendering it as live.
+   *  0 means "never stamped", which the program treats as fresh. */
+  markPriceMinute: number;
   baseMint: PublicKey;
   quoteMint: PublicKey;
   pythFeed: PublicKey;
@@ -148,6 +155,7 @@ export function decodeMarket(data: Buffer): Market {
     makerRebateBps: readU16LE(data, 8),
     twapWriteIndex: readU16LE(data, 10),
     twapCount: readU16LE(data, 12),
+    markPriceMinute: readU16LE(data, 14),
     baseMint: readPubkey(data, 16),
     quoteMint: readPubkey(data, 48),
     pythFeed: readPubkey(data, 80),
@@ -166,6 +174,39 @@ export function decodeMarket(data: Buffer): Market {
     switchboardFeed: data.length >= 2056 ? readPubkey(data, 2024) : ZERO_PUBKEY,
     restrictedMode: data.length >= 2057 ? readU8(data, 2056) !== 0 : false,
   };
+}
+
+/** Mirror of the program's `MARK_PRICE_MAX_STALENESS_MINS` (state/market.rs:16). */
+export const MARK_PRICE_MAX_STALENESS_MINS = 30;
+
+/**
+ * Mirror of `Market::is_mark_price_fresh` (state/market.rs:154-161), including
+ * its wrapping u16 minute arithmetic and its treatment of an unstamped market.
+ *
+ * This is the program's OWN definition of a usable mark - the one that decides
+ * whether close_position, execute_trigger, claim_funding and (since S2-X03)
+ * place_order will accept it. A client that guesses instead, e.g. by comparing
+ * against an oracle, disagrees with the chain at the boundary and needs the
+ * oracle stream up to say anything at all.
+ */
+export function isMarkPriceFresh(
+  market: Pick<Market, "markPriceMinute">,
+  nowSec: number
+): boolean {
+  const stamp = market.markPriceMinute;
+  if (stamp === 0) return true; // unstamped: the program preserves pre-upgrade behaviour
+  const nowMin = Math.floor(nowSec / 60) % 65536;
+  return ((nowMin - stamp) & 0xffff) <= MARK_PRICE_MAX_STALENESS_MINS;
+}
+
+/** Age of the mark-price stamp in minutes, or null when the market is unstamped. */
+export function markPriceAgeMins(
+  market: Pick<Market, "markPriceMinute">,
+  nowSec: number
+): number | null {
+  if (market.markPriceMinute === 0) return null;
+  const nowMin = Math.floor(nowSec / 60) % 65536;
+  return (nowMin - market.markPriceMinute) & 0xffff;
 }
 
 // ---- UserAccount (56 bytes) ----

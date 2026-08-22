@@ -16,6 +16,10 @@ export interface MarketData {
   openInterestShort: bigint;
   insuranceFundBalance: bigint;
   lastMarkPrice: bigint;
+  /** S6-01: the mark-price freshness stamp, previously dropped as padding by
+   *  both decoders. Without it no client could apply the program's own
+   *  staleness gate. Consumed by `useMarkPrice`. */
+  markPriceMinute: number;
   twapPrice: number | null;
   fundingRate: bigint;
   /** L1 settlement cursor (highest settled fill sequence). */
@@ -65,6 +69,7 @@ export function useMarket(marketIndex: number = 0) {
           openInterestShort: m.openInterestShort,
           insuranceFundBalance: m.insuranceFundBalance,
           lastMarkPrice: m.lastMarkPrice,
+          markPriceMinute: m.markPriceMinute,
           twapPrice: computeTwap(m),
           fundingRate: m.cumulativeFundingIndex,
           lastSettledSequence: m.lastSettledSequence,

@@ -95,6 +95,13 @@ export interface Market {
   makerRebateBps: number;
   twapWriteIndex: number;
   twapCount: number;
+  /** S6-01. The mark-price freshness stamp: minutes-since-epoch mod 65536,
+   *  written by crank_twap and read by the program's own `is_mark_price_fresh`.
+   *  It lives in `Market._padding1` (byte 14), so both vendored decoders used to
+   *  skip it as padding -- which left every client structurally unable to tell a
+   *  live mark from a 16-day-old one, while rendering it as live.
+   *  0 means "never stamped", which the program treats as fresh. */
+  markPriceMinute: number;
   baseMint: PublicKey;
   quoteMint: PublicKey;
   pythFeed: PublicKey;
@@ -144,6 +151,7 @@ export function decodeMarket(data: Buffer): Market {
     makerRebateBps: readU16LE(data, 8),
     twapWriteIndex: readU16LE(data, 10),
     twapCount: readU16LE(data, 12),
+    markPriceMinute: readU16LE(data, 14),
     baseMint: readPubkey(data, 16),
     quoteMint: readPubkey(data, 48),
     pythFeed: readPubkey(data, 80),

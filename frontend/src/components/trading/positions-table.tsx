@@ -7,6 +7,7 @@ import { usePositions } from "@/hooks/use-positions";
 import { useErPosition } from "@/hooks/use-er-position";
 import { useSession } from "@/hooks/use-session";
 import { useTriggers } from "@/hooks/use-triggers";
+import { useMarkPrice } from "@/hooks/use-mark-price";
 import { PROGRAM_ID, MARKET_INDEX, ER_RPC, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
@@ -35,8 +36,18 @@ interface PositionsTableProps {
 export function PositionsTable({ markPrice }: PositionsTableProps) {
   const { publicKey, sendTransaction } = useWallet();
   const { connection } = useConnection();
-  const { positions, refresh } = usePositions(markPrice);
-  const { position: erPosition } = useErPosition(publicKey ?? null, markPrice);
+  // S13-02: every per-position figure below - Mark, Liq., health, uPnL - used
+  // to derive from `markPrice` with none of the staleness treatment the market
+  // bar applies to the identical value 400px above. A frozen mark renders a
+  // green health score on a position the program computes as liquidatable.
+  const { reference, stale: markStale, reason: markReason } = useMarkPrice(MARKET_INDEX);
+  const referenceAtoms =
+    reference !== null ? BigInt(Math.round(reference * PRICE_SCALE)) : null;
+  // uPnL is priced off the reference too - S13-02 names it as one of the
+  // figures derived from the frozen mark. Passing `markPrice` here would leave
+  // the Mark column honest while the PnL beside it stayed wrong.
+  const { positions, refresh } = usePositions(referenceAtoms);
+  const { position: erPosition } = useErPosition(publicKey ?? null, referenceAtoms);
   const { state: session, getSessionKeypair } = useSession(0);
   const { triggers, refresh: refreshTriggers } = useTriggers();
   const [flattening, setFlattening] = useState(false);
@@ -78,9 +89,26 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       const signerPk = useSessionKey ? sessionKp!.publicKey : publicKey;
 
       // IOC (order type 2) at a price that crosses: a marketable limit. Use a
-      // wide bound off the mark so it sweeps available depth.
-      const mark = Number(markPrice || 0n) / PRICE_SCALE;
-      const crossPrice = erPosition.isLong ? mark * 0.95 : mark * 1.05;
+      // wide bound off the reference price so it sweeps available depth.
+      //
+      // S13-04/S9-X02: this used to build the band from `markPrice` - the
+      // on-chain mark - with no freshness test. A +/-5% band around a mark that
+      // is 18.6% below the market does not reach the book on the buy side, so
+      // "Close" on a short simply could not fill, and the only feedback was
+      // whatever the RPC happened to say. `reference` is the oracle when it is
+      // up and a still-fresh mark otherwise; when it is null there is no price
+      // this client can honestly quote, so refuse rather than send an order
+      // built on a number we know is wrong.
+      if (reference === null) {
+        setFlattenErr(
+          markReason
+            ? `No trustworthy price to close against - ${markReason}. Try again once it recovers.`
+            : "No trustworthy price to close against right now."
+        );
+        setFlattening(false);
+        return;
+      }
+      const crossPrice = erPosition.isLong ? reference * 0.95 : reference * 1.05;
       const priceVal = BigInt(Math.round((crossPrice / 0.001)) ) * 1000n; // tick = $0.001
 
       const ix = createPlaceOrderInstruction(
@@ -147,12 +175,23 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
         }
       }
 
-      let limitPrice = 0n;
-      if (markPrice && markPrice > 0n) {
-        limitPrice = isLong
-          ? (markPrice * (10_000n - CLOSE_SLIPPAGE_BPS)) / 10_000n
-          : (markPrice * (10_000n + CLOSE_SLIPPAGE_BPS)) / 10_000n;
+      // S9-X02: the slippage bound is built from the reference price, not the
+      // raw on-chain mark. Bounding a close against a 16-day-old number either
+      // reverts or admits a fill far outside the band the user thought they
+      // set. limitPrice 0 means "no bound" to the program, so falling back to it
+      // when there is no trustworthy price would silently REMOVE the user's
+      // protection - refuse instead.
+      if (referenceAtoms === null) {
+        setCloseErr(
+          markReason
+            ? `No trustworthy price to bound this close - ${markReason}. Try again once it recovers.`
+            : "No trustworthy price to bound this close right now."
+        );
+        return;
       }
+      const limitPrice = isLong
+        ? (referenceAtoms * (10_000n - CLOSE_SLIPPAGE_BPS)) / 10_000n
+        : (referenceAtoms * (10_000n + CLOSE_SLIPPAGE_BPS)) / 10_000n;
 
       const ix = createClosePositionInstruction(publicKey, marketIndex, PROGRAM_ID, {
         closeSize,
@@ -279,11 +318,14 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                   <td className="px-2 text-right tnum text-[#e6e9ea]">
                     ${erPosition.entryPrice.toFixed(2)}
                   </td>
-                  <td className="px-2 text-right tnum text-[#e6e9ea]">
-                    ${(Number(markPrice || 0n) / PRICE_SCALE).toFixed(2)}
+                  <td
+                    className={`px-2 text-right tnum ${markStale ? "text-[#f59e0b]" : "text-[#e6e9ea]"}`}
+                    title={markStale && markReason ? markReason : undefined}
+                  >
+                    {reference !== null ? `$${reference.toFixed(2)}` : "—"}
                   </td>
                   {(() => {
-                    const mk = Number(markPrice || 0n) / PRICE_SCALE;
+                    const mk = reference ?? 0;
                     const { liq, health } = liqAndHealth(
                       erPosition.isLong,
                       Math.abs(erPosition.size),
@@ -351,11 +393,14 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                     <td className="px-2 text-right tnum text-[#e6e9ea]">
                       ${(Number(pos.entryPrice) / PRICE_SCALE).toFixed(2)}
                     </td>
-                    <td className="px-2 text-right tnum text-[#e6e9ea]">
-                      ${(Number(markPrice || 0n) / PRICE_SCALE).toFixed(2)}
+                    <td
+                      className={`px-2 text-right tnum ${markStale ? "text-[#f59e0b]" : "text-[#e6e9ea]"}`}
+                      title={markStale && markReason ? markReason : undefined}
+                    >
+                      {reference !== null ? `$${reference.toFixed(2)}` : "—"}
                     </td>
                     {(() => {
-                      const mk = Number(markPrice || 0n) / PRICE_SCALE;
+                      const mk = reference ?? 0;
                       const { liq, health } = liqAndHealth(
                         pos.isLong,
                         size,
