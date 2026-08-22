@@ -25,9 +25,9 @@ const PRICE_SCALE = 1_000_000;
 const CLOSE_SLIPPAGE_BPS = 100n;
 
 const BTN_UTIL =
-  "h-6 px-2 rounded-[4px] text-[12px] border border-[#1d2224] text-[#a2abb1] transition-colors hover:text-[#e6e9ea] disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed";
+  "h-6 px-2 rounded-[4px] text-[12px] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:opacity-50 disabled:pointer-events-none disabled:cursor-not-allowed";
 const INPUT =
-  "h-8 w-24 px-[10px] rounded-[4px] bg-[#121516] border border-[#1d2224] text-[13px] tnum text-[#e6e9ea] placeholder:text-[#838c92] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
+  "h-8 w-24 px-[10px] rounded-[4px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[13px] tnum text-[var(--t-text)] placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 
 interface PositionsTableProps {
   markPrice: bigint | null;
@@ -271,23 +271,23 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
 
   return (
     <div>
-      <div className="h-9 flex items-center justify-between px-3 border-b border-[#1d2224]">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+      <div className="h-9 flex items-center justify-between px-3 border-b border-[var(--t-border)]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           Positions
         </span>
-        <span className="text-[11px] text-[#838c92] tnum">
+        <span className="text-[11px] text-[var(--t-text-3)] tnum">
           {positions.length + (erPosition ? 1 : 0)} open
         </span>
       </div>
       <div className="p-3">
         {positions.length === 0 && !erPosition ? (
-          <div className="text-center text-xs text-[#a2abb1] py-6">
+          <div className="text-center text-xs text-[var(--t-text-2)] py-6">
             {publicKey ? "No open positions" : "Sign in to see your positions"}
           </div>
         ) : (
           <table className="w-full border-collapse">
             <thead>
-              <tr className="text-[11px] text-[#838c92] border-b border-[#15191a]">
+              <tr className="text-[11px] text-[var(--t-text-3)] border-b border-[var(--t-surface-2)]">
                 <th className="h-[26px] px-2 text-left font-normal">Side</th>
                 <th className="h-[26px] px-2 text-right font-normal">Size</th>
                 <th className="h-[26px] px-2 text-right font-normal">Entry</th>
@@ -302,24 +302,24 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
               {/* ER (pending-settlement) position — filled on the rollup, not yet
                   settled to an L1 Position. Reconstructed from the ER fill queue. */}
               {erPosition && (
-                <tr className="h-7 text-[11.5px] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516]">
+                <tr className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]">
                   <td className="px-2 text-left">
                     <span className="inline-flex items-center gap-2">
                       <SideBadge isLong={erPosition.isLong} />
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[#f59e0b]">
-                        <span className="h-1 w-1 rounded-full bg-[#f59e0b] animate-pulse" />
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--t-warn)]">
+                        <span className="h-1 w-1 rounded-full bg-[var(--t-warn)] animate-pulse" />
                         Pending
                       </span>
                     </span>
                   </td>
-                  <td className={`text-right tnum ${erPosition.isLong ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                  <td className={`text-right tnum ${erPosition.isLong ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                     {Math.abs(erPosition.size).toFixed(3)}
                   </td>
-                  <td className="px-2 text-right tnum text-[#e6e9ea]">
+                  <td className="px-2 text-right tnum text-[var(--t-text)]">
                     ${erPosition.entryPrice.toFixed(2)}
                   </td>
                   <td
-                    className={`px-2 text-right tnum ${markStale ? "text-[#f59e0b]" : "text-[#e6e9ea]"}`}
+                    className={`px-2 text-right tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text)]"}`}
                     title={markStale && markReason ? markReason : undefined}
                   >
                     {reference !== null ? `$${reference.toFixed(2)}` : "—"}
@@ -335,7 +335,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                     );
                     return (
                       <>
-                        <td className="px-2 text-right tnum text-[#f59e0b]">
+                        <td className="px-2 text-right tnum text-[var(--t-warn)]">
                           {liq !== null ? `$${liq.toFixed(2)}` : "—"}
                         </td>
                         <td className="px-2 text-right">
@@ -344,14 +344,14 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       </>
                     );
                   })()}
-                  <td className={`text-right tnum ${erPosition.unrealizedPnl >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                  <td className={`text-right tnum ${erPosition.unrealizedPnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                     {fmtSignedUsd(erPosition.unrealizedPnl)}
                   </td>
                   <td className="px-2 text-right">
                     <button
                       onClick={handleFlatten}
                       disabled={flattening}
-                      className={`${BTN_UTIL} bg-[#121516]`}
+                      className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                       title="Close by placing an opposite IOC order on the ER"
                     >
                       {flattening ? "…" : "Close"}
@@ -363,7 +363,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                 const size = Number(pos.size < 0n ? -pos.size : pos.size) / 1e9;
                 const sizeAtoms = pos.size < 0n ? -pos.size : pos.size;
                 return (
-                  <tr key={i} className="h-7 text-[11.5px] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516]">
+                  <tr key={i} className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]">
                     <td className="px-2 text-left">
                       <span className="inline-flex items-center gap-2">
                         <SideBadge isLong={pos.isLong} />
@@ -387,14 +387,14 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         )}
                       </span>
                     </td>
-                    <td className={`text-right tnum ${pos.size > 0n ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                    <td className={`text-right tnum ${pos.size > 0n ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                       {size.toFixed(3)}
                     </td>
-                    <td className="px-2 text-right tnum text-[#e6e9ea]">
+                    <td className="px-2 text-right tnum text-[var(--t-text)]">
                       ${(Number(pos.entryPrice) / PRICE_SCALE).toFixed(2)}
                     </td>
                     <td
-                      className={`px-2 text-right tnum ${markStale ? "text-[#f59e0b]" : "text-[#e6e9ea]"}`}
+                      className={`px-2 text-right tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text)]"}`}
                       title={markStale && markReason ? markReason : undefined}
                     >
                       {reference !== null ? `$${reference.toFixed(2)}` : "—"}
@@ -410,7 +410,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       );
                       return (
                         <>
-                          <td className="px-2 text-right tnum text-[#f59e0b]">
+                          <td className="px-2 text-right tnum text-[var(--t-warn)]">
                             {liq !== null ? `$${liq.toFixed(2)}` : "—"}
                           </td>
                           <td className="px-2 text-right">
@@ -419,28 +419,28 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         </>
                       );
                     })()}
-                    <td className={`text-right tnum ${pos.unrealizedPnl >= 0 ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                    <td className={`text-right tnum ${pos.unrealizedPnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                       {fmtSignedUsd(pos.unrealizedPnl)}
                     </td>
                     <td className="px-2 text-right">
                       <div className="inline-flex items-center gap-1">
                         <button
                           onClick={() => setTriggerOpen((v) => !v)}
-                          className={`${BTN_UTIL} ${triggerOpen ? "bg-[#171b1c] text-[#e6e9ea]" : "bg-[#121516]"}`}
+                          className={`${BTN_UTIL} ${triggerOpen ? "bg-[var(--t-surface-3)] text-[var(--t-text)]" : "bg-[var(--t-surface)]"}`}
                           title="Set stop-loss / take-profit"
                         >
                           SL/TP
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 0.5)}
-                          className={`${BTN_UTIL} bg-[#121516]`}
+                          className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                           title="Close half the position (lot-rounded, 1% slippage bound)"
                         >
                           ½
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 1)}
-                          className={`${BTN_UTIL} bg-[#121516]`}
+                          className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                           title="Close at mark (1% slippage bound)"
                         >
                           Close
@@ -453,10 +453,10 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
               {/* SL/TP expander: one trigger pair per market (matches the
                   per-owner-per-market Position + TriggerOrder PDAs). */}
               {triggerOpen && positions.length > 0 && (
-                <tr className="border-b border-[#15191a] last:border-b-0">
+                <tr className="border-b border-[var(--t-surface-2)] last:border-b-0">
                   <td colSpan={8} className="py-3">
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="flex items-center gap-1.5 text-[11px] text-[#a2abb1]">
+                      <label className="flex items-center gap-1.5 text-[11px] text-[var(--t-text-2)]">
                         Stop-loss $
                         <input
                           value={slInput}
@@ -466,7 +466,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                           className={INPUT}
                         />
                       </label>
-                      <label className="flex items-center gap-1.5 text-[11px] text-[#a2abb1]">
+                      <label className="flex items-center gap-1.5 text-[11px] text-[var(--t-text-2)]">
                         Take-profit $
                         <input
                           value={tpInput}
@@ -479,7 +479,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       <button
                         onClick={() => handleSetTriggers(positions[0].isLong)}
                         disabled={triggerBusy}
-                        className="h-7 px-3 rounded-[6px] text-[13px] font-semibold bg-[#16794f] text-[#ffffff] hover:bg-[#1c9463] disabled:bg-[#171b1c] disabled:text-[#a2abb1] disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+                        className="h-7 px-3 rounded-[6px] text-[13px] font-semibold bg-[var(--t-up-3)] text-[var(--t-text-hi)] hover:bg-[var(--t-up-2)] disabled:bg-[var(--t-surface-3)] disabled:text-[var(--t-text-2)] disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
                       >
                         {triggerBusy ? "…" : "Set"}
                       </button>
@@ -487,7 +487,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         <button
                           onClick={() => handleCancelTrigger(TRIGGER_KIND_STOP_LOSS)}
                           disabled={triggerBusy}
-                          className={`${BTN_UTIL} bg-[#121516]`}
+                          className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                         >
                           Clear SL
                         </button>
@@ -496,17 +496,17 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         <button
                           onClick={() => handleCancelTrigger(TRIGGER_KIND_TAKE_PROFIT)}
                           disabled={triggerBusy}
-                          className={`${BTN_UTIL} bg-[#121516]`}
+                          className={`${BTN_UTIL} bg-[var(--t-surface)]`}
                         >
                           Clear TP
                         </button>
                       )}
-                      <span className="text-[11px] text-[#838c92]">
+                      <span className="text-[11px] text-[var(--t-text-3)]">
                         Executed by keepers when the mark price crosses — works even if you close this tab.
                       </span>
                     </div>
                     {triggerErr && (
-                      <div className="pt-2 text-[11px] text-[#ef4444] break-all">{triggerErr}</div>
+                      <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{triggerErr}</div>
                     )}
                   </td>
                 </tr>
@@ -515,10 +515,10 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
           </table>
         )}
         {flattenErr && (
-          <div className="pt-2 text-[11px] text-[#ef4444] break-all">{flattenErr}</div>
+          <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{flattenErr}</div>
         )}
         {closeErr && (
-          <div className="pt-2 text-[11px] text-[#ef4444] break-all">{closeErr}</div>
+          <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{closeErr}</div>
         )}
       </div>
     </div>
@@ -536,7 +536,7 @@ function SideBadge({ isLong }: { isLong: boolean }) {
   return (
     <span
       className={`text-[11px] font-semibold tracking-wide ${
-        isLong ? "text-[#22c55e]" : "text-[#ef4444]"
+        isLong ? "text-[var(--t-up)]" : "text-[var(--t-down)]"
       }`}
     >
       {isLong ? "LONG" : "SHORT"}
@@ -585,17 +585,17 @@ function liqAndHealth(
 }
 
 function HealthCell({ health }: { health: number | null }) {
-  if (health === null) return <span className="text-[#838c92]">—</span>;
+  if (health === null) return <span className="text-[var(--t-text-3)]">—</span>;
   const color =
-    health >= 2 ? "text-[#22c55e]" : health >= 1.3 ? "text-[#f59e0b]" : "text-[#ef4444]";
+    health >= 2 ? "text-[var(--t-up)]" : health >= 1.3 ? "text-[var(--t-warn)]" : "text-[var(--t-down)]";
   const bar =
-    health >= 2 ? "bg-[#22c55e]" : health >= 1.3 ? "bg-[#f59e0b]" : "bg-[#ef4444]";
+    health >= 2 ? "bg-[var(--t-up)]" : health >= 1.3 ? "bg-[var(--t-warn)]" : "bg-[var(--t-down)]";
   // Margin meter: health 0 (liquidation) .. 3+ (full bar).
   const pct = Math.max(0, Math.min(100, (health / 3) * 100));
   return (
     <span className="inline-flex flex-col items-end gap-0.5">
       <span className={`tnum ${color}`}>{health.toFixed(2)}</span>
-      <span className="block w-10 h-[2px] bg-[#1d2224] overflow-hidden">
+      <span className="block w-10 h-[2px] bg-[var(--t-border)] overflow-hidden">
         <span className={`block h-full ${bar}`} style={{ width: `${pct}%` }} />
       </span>
     </span>
@@ -603,9 +603,9 @@ function HealthCell({ health }: { health: number | null }) {
 }
 
 function TriggerBadge({ label, price, tone }: { label: string; price: number; tone: "rose" | "emerald" }) {
-  const cls = tone === "rose" ? "text-[#ef4444]" : "text-[#22c55e]";
+  const cls = tone === "rose" ? "text-[var(--t-down)]" : "text-[var(--t-up)]";
   return (
-    <span className={`inline-flex items-center gap-0.5 px-1 rounded-[3px] bg-[#121516] border border-[#1d2224] text-[10px] font-semibold tracking-wide ${cls}`}>
+    <span className={`inline-flex items-center gap-0.5 px-1 rounded-[3px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[10px] font-semibold tracking-wide ${cls}`}>
       {label} <span className="tnum">${price.toFixed(2)}</span>
     </span>
   );

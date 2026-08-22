@@ -23,10 +23,10 @@ function Stat({
   tone?: "up" | "down";
 }) {
   const color =
-    tone === "up" ? "text-[#22c55e]" : tone === "down" ? "text-[#ef4444]" : "text-[#e6e9ea]";
+    tone === "up" ? "text-[var(--t-up)]" : tone === "down" ? "text-[var(--t-down)]" : "text-[var(--t-text)]";
   return (
     <div className="flex shrink-0 flex-col justify-center gap-0.5">
-      <span className="text-[10.5px] leading-none text-[#838c92]">{label}</span>
+      <span className="text-[10.5px] leading-none text-[var(--t-text-3)]">{label}</span>
       <span className={`tnum text-[13px] font-medium leading-none ${color}`}>{value}</span>
     </div>
   );
@@ -63,15 +63,15 @@ export function MarketBar() {
   const markStale = divergence !== null && divergence > MARK_DIVERGENCE_WARN;
 
   return (
-    <div className="flex h-[56px] shrink-0 items-center gap-5 overflow-x-auto border-b border-[#1d2224] px-4">
+    <div className="flex h-[56px] shrink-0 items-center gap-5 overflow-x-auto border-b border-[var(--t-border)] px-4">
       <div className="flex shrink-0 items-center gap-2">
-        <span className="text-[14px] font-semibold tracking-tight text-[#e6e9ea]">SOL-PERP</span>
+        <span className="text-[14px] font-semibold tracking-tight text-[var(--t-text)]">SOL-PERP</span>
         {market?.circuitBreakerActive ? (
-          <span className="rounded bg-[#2b1416] px-1.5 py-0.5 text-[10px] font-semibold text-[#ef4444]">
+          <span className="rounded bg-[var(--t-down-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-down)]">
             PAUSED
           </span>
         ) : market?.restrictedMode ? (
-          <span className="rounded bg-[#2b1416] px-1.5 py-0.5 text-[10px] font-semibold text-[#ef4444]">
+          <span className="rounded bg-[var(--t-down-bg)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--t-down)]">
             CLOSES ONLY
           </span>
         ) : null}
@@ -80,13 +80,13 @@ export function MarketBar() {
       <div className="flex shrink-0 items-baseline gap-2.5">
         <span
           className={`tnum text-[22px] font-semibold leading-none tracking-tight ${
-            up ? "text-[#22c55e]" : "text-[#ef4444]"
+            up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"
           }`}
         >
           {headline !== null ? headline.toFixed(2) : "—"}
         </span>
         {day && (
-          <span className={`tnum text-[12px] font-medium ${up ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+          <span className={`tnum text-[12px] font-medium ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
             {up ? "+" : ""}
             {day.change.toFixed(2)} {up ? "+" : ""}
             {day.changePct.toFixed(2)}%
@@ -94,7 +94,7 @@ export function MarketBar() {
         )}
       </div>
 
-      <div className="h-7 w-px shrink-0 bg-[#1d2224]" />
+      <div className="h-7 w-px shrink-0 bg-[var(--t-border)]" />
 
       <div className="flex items-center gap-6">
         <Stat
@@ -117,14 +117,14 @@ export function MarketBar() {
       {markStale && (
         <div
           role="status"
-          className="ml-auto shrink-0 rounded border border-[#f59e0b]/40 bg-[#f59e0b]/10 px-2.5 py-1 text-[11px] font-medium text-[#f59e0b]"
+          className="ml-auto shrink-0 rounded border border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]"
         >
           Mark is {(divergence! * 100).toFixed(1)}% off the oracle — the TWAP crank has stopped.
         </div>
       )}
 
       {status === "unavailable" && !markStale && (
-        <span className="ml-auto shrink-0 text-[11px] text-[#a2abb1]">
+        <span className="ml-auto shrink-0 text-[11px] text-[var(--t-text-2)]">
           Can&apos;t reach Solana — retrying.
         </span>
       )}

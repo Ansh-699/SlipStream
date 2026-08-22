@@ -63,11 +63,11 @@ export function TradeHistory() {
 
   return (
     <div className="flex flex-col min-h-0">
-      <div className="flex h-9 items-center justify-between gap-3 px-3 border-b border-[#1d2224] shrink-0">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+      <div className="flex h-9 items-center justify-between gap-3 px-3 border-b border-[var(--t-border)] shrink-0">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           Trade History
         </span>
-        <div className="flex items-center gap-3 text-[11px] text-[#838c92] truncate">
+        <div className="flex items-center gap-3 text-[11px] text-[var(--t-text-3)] truncate">
           {fills.length > 0 && (
             <span className="tnum">
               {fills.length} fills · ${volume.toFixed(0)} vol
@@ -80,7 +80,7 @@ export function TradeHistory() {
       </div>
 
       <div className="p-3 flex-1 min-h-0 flex flex-col">
-        <div className={`${GRID} h-[26px] text-[11px] text-[#838c92] border-b border-[#15191a] shrink-0`}>
+        <div className={`${GRID} h-[26px] text-[11px] text-[var(--t-text-3)] border-b border-[var(--t-surface-2)] shrink-0`}>
           <span>Time</span>
           <span className="text-right">Price</span>
           <span className="text-right">Size (SOL)</span>
@@ -91,7 +91,7 @@ export function TradeHistory() {
 
         <div className="max-h-[220px] overflow-y-auto slim-scroll">
           {fills.length === 0 ? (
-            <div className="text-center text-xs text-[#a2abb1] py-6">
+            <div className="text-center text-xs text-[var(--t-text-2)] py-6">
               {indexed ? "No settled fills yet" : "Indexer warming up…"}
             </div>
           ) : (
@@ -108,22 +108,22 @@ export function TradeHistory() {
                   href={explorerAddress(counterparty, "er")}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={`${GRID} group h-7 text-[11.5px] text-[#e6e9ea] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]`}
+                  className={`${GRID} group h-7 text-[11.5px] text-[var(--t-text)] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]`}
                 >
-                  <span className="font-mono tnum text-[#a2abb1]">{fmtTime(f.settled_at)}</span>
+                  <span className="font-mono tnum text-[var(--t-text-2)]">{fmtTime(f.settled_at)}</span>
                   <span className="text-right font-mono tnum">
                     {(f.price / PRICE_SCALE).toFixed(3)}
                   </span>
                   <span className="text-right font-mono tnum">{(f.quantity / 1e9).toFixed(2)}</span>
                   <span
-                    className={`text-right font-semibold ${viewerBought ? "text-[#22c55e]" : "text-[#ef4444]"}`}
+                    className={`text-right font-semibold ${viewerBought ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}
                   >
                     {viewerBought ? "Buy" : "Sell"}
                   </span>
-                  <span className="text-right text-[11px] text-[#a2abb1]">
-                    {wallet ? (isMaker ? "Maker" : "Taker") : <span className="text-[#838c92]">—</span>}
+                  <span className="text-right text-[11px] text-[var(--t-text-2)]">
+                    {wallet ? (isMaker ? "Maker" : "Taker") : <span className="text-[var(--t-text-3)]">—</span>}
                   </span>
-                  <span className="text-right font-mono tnum text-[#58a6ff] underline decoration-dotted underline-offset-2">
+                  <span className="text-right font-mono tnum text-[var(--t-link)] underline decoration-dotted underline-offset-2">
                     {counterparty.slice(0, 4)}…
                   </span>
                 </a>

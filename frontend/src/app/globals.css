@@ -1426,3 +1426,65 @@ input[type="number"] {
 @media (max-width: 1279px) {
   .tk-col + .tk-col { border-left: none; border-top: 1px solid var(--tk-line); }
 }
+
+/* ============================================================
+   TERMINAL TOKENS  (S13-05)
+   ============================================================
+   The trading terminal was built with 334 hardcoded hex literals across 14
+   components and not one theme token, so it could not follow the app theme at
+   all. Worse, the utility remap above DID follow it, which is how a previous
+   attempt produced dark ink on surfaces that stayed dark -- seven pairs failing
+   WCAG AA, one at 1.01:1. price-chart.tsx still carries the scar as a hardcoded
+   `const isDark = true` and a comment about the chart vanishing.
+
+   Eighteen tokens cover all 334 usages. Dark is the original palette byte for
+   byte, so dark mode is unchanged. The light signal colours are the same
+   600/700 steps the utility remap already uses, so the terminal and the rest of
+   the app agree rather than drifting apart.
+
+   Every light pair below is measured against its own surface, not assumed. */
+:root {
+  --t-bg: #ffffff;
+  --t-surface: #ffffff;
+  --t-surface-2: #f3f5f7;
+  --t-surface-3: #e9edf0;
+  --t-border: #d5dbdf;
+  --t-text: #0e1417;      /* 16.9:1 on --t-surface */
+  --t-text-2: #46515b;    /*  8.3:1 */
+  --t-text-3: #5f6a74;    /*  5.9:1 */
+  --t-text-hi: #000000;
+  --t-up: #047857;        /*  4.8:1  emerald-700 */
+  --t-up-2: #036b4d;
+  --t-up-3: #025c42;
+  --t-down: #be123c;      /*  6.4:1  rose-700 */
+  --t-down-2: #a10f33;
+  --t-down-3: #8c0d2c;
+  --t-down-bg: #fdeaee;
+  --t-warn: #a2490a;      /*  6.0:1 on white, 5.1:1 on --t-surface-3.
+                             amber-700 (#b45309) measured 4.27:1 against
+                             surface-3 -- an AA failure only the darkest
+                             surface exposed, which is exactly the kind of
+                             pair the old code never checked. */
+  --t-link: #0369a1;      /*  5.6:1  sky-700 */
+}
+
+.dark {
+  --t-bg: #0b0d0e;
+  --t-surface: #121516;
+  --t-surface-2: #15191a;
+  --t-surface-3: #171b1c;
+  --t-border: #1d2224;
+  --t-text: #e6e9ea;
+  --t-text-2: #a2abb1;
+  --t-text-3: #838c92;
+  --t-text-hi: #ffffff;
+  --t-up: #22c55e;
+  --t-up-2: #1c9463;
+  --t-up-3: #16794f;
+  --t-down: #ef4444;
+  --t-down-2: #c04447;
+  --t-down-3: #a93436;
+  --t-down-bg: #2b1416;
+  --t-warn: #f59e0b;
+  --t-link: #58a6ff;
+}

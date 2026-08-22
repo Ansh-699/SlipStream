@@ -65,21 +65,21 @@ export function OpenOrders() {
 
   return (
     <div>
-      <div className="h-9 flex items-center justify-between px-3 border-b border-[#1d2224]">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+      <div className="h-9 flex items-center justify-between px-3 border-b border-[var(--t-border)]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           Open Orders
         </span>
-        <span className="text-[11px] text-[#838c92] tnum">{orders.length} resting</span>
+        <span className="text-[11px] text-[var(--t-text-3)] tnum">{orders.length} resting</span>
       </div>
       <div className="p-3">
         {orders.length === 0 ? (
-          <div className="text-center text-xs text-[#a2abb1] py-6">
+          <div className="text-center text-xs text-[var(--t-text-2)] py-6">
             {publicKey ? "No open orders" : "Sign in to see your open orders"}
           </div>
         ) : (
           <table className="w-full border-collapse">
             <thead>
-              <tr className="text-[11px] text-[#838c92] border-b border-[#15191a]">
+              <tr className="text-[11px] text-[var(--t-text-3)] border-b border-[var(--t-surface-2)]">
                 <th className="h-[26px] text-left font-normal">Side</th>
                 <th className="h-[26px] text-right font-normal">Price</th>
                 <th className="h-[26px] text-right font-normal">Size</th>
@@ -90,19 +90,19 @@ export function OpenOrders() {
               {orders.map((o) => (
                 <tr
                   key={o.orderId.toString()}
-                  className="h-7 text-[11.5px] border-b border-[#15191a] last:border-b-0 hover:bg-[#121516]"
+                  className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface)]"
                 >
-                  <td className={o.isLong ? "text-left text-[#22c55e]" : "text-left text-[#ef4444]"}>
+                  <td className={o.isLong ? "text-left text-[var(--t-up)]" : "text-left text-[var(--t-down)]"}>
                     {o.isLong ? "LONG" : "SHORT"}
                   </td>
-                  <td className="text-right tnum text-[#e6e9ea]">${o.price.toFixed(3)}</td>
-                  <td className="text-right tnum text-[#e6e9ea]">{o.size.toFixed(3)}</td>
+                  <td className="text-right tnum text-[var(--t-text)]">${o.price.toFixed(3)}</td>
+                  <td className="text-right tnum text-[var(--t-text)]">{o.size.toFixed(3)}</td>
                   <td className="text-right">
                     <button
                       onClick={() => handleCancel(o.orderId)}
                       disabled={cancelling === o.orderId.toString()}
                       aria-label="Cancel order"
-                      className="h-6 px-2 rounded-[4px] text-[12px] bg-[#121516] border border-[#1d2224] text-[#a2abb1] transition-colors hover:text-[#e6e9ea] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="h-6 px-2 rounded-[4px] text-[12px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {cancelling === o.orderId.toString() ? "…" : "Cancel"}
                     </button>
@@ -113,7 +113,7 @@ export function OpenOrders() {
           </table>
         )}
         {cancelErr && (
-          <div className="pt-2 text-[11px] text-[#ef4444] break-all">{cancelErr}</div>
+          <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{cancelErr}</div>
         )}
       </div>
     </div>

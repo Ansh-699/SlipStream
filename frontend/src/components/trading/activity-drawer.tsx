@@ -23,7 +23,7 @@ export function ActivityDrawer({ markPrice }: { markPrice: bigint | null }) {
   const [open, setOpen] = useState(true);
 
   return (
-    <section className="flex shrink-0 flex-col border-t border-[#1d2224]" aria-label="Your activity">
+    <section className="flex shrink-0 flex-col border-t border-[var(--t-border)]" aria-label="Your activity">
       <div className="tk-head gap-4">
         <div role="tablist" aria-label="Activity" className="flex items-center gap-4">
           {TABS.map((t) => (
@@ -46,7 +46,7 @@ export function ActivityDrawer({ markPrice }: { markPrice: bigint | null }) {
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
           aria-label={open ? "Collapse activity" : "Expand activity"}
-          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
         >
           <ChevronDown
             className={`h-4 w-4 transition-transform ${open ? "" : "rotate-180"}`}

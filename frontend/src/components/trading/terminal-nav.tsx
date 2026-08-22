@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Code2, Zap, BookText } from "lucide-react";
 import { ConnectButton } from "@/components/wallet/connect-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * Terminal top bar: identity on the left, utilities and the wallet on the right.
@@ -11,23 +12,23 @@ import { ConnectButton } from "@/components/wallet/connect-button";
  */
 export function TerminalNav() {
   return (
-    <header className="flex h-[52px] shrink-0 items-center border-b border-[#1d2224] px-4">
+    <header className="flex h-[52px] shrink-0 items-center border-b border-[var(--t-border)] px-4">
       <Link href="/" className="flex items-center gap-2.5" aria-label="Slipstream home">
         <span className="relative h-6 w-6 overflow-hidden rounded">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="" className="h-full w-full object-cover" />
         </span>
-        <span className="text-[15px] font-semibold tracking-tight text-[#e6e9ea]">Slipstream</span>
+        <span className="text-[15px] font-semibold tracking-tight text-[var(--t-text)]">Slipstream</span>
       </Link>
 
-      <span className="ml-3 hidden rounded bg-[#121516] px-2 py-0.5 text-[10px] font-medium text-[#a2abb1] sm:inline">
+      <span className="ml-3 hidden rounded bg-[var(--t-surface)] px-2 py-0.5 text-[10px] font-medium text-[var(--t-text-2)] sm:inline">
         devnet
       </span>
 
       <div className="ml-auto flex items-center gap-1">
         <Link
           href="/docs"
-          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
           aria-label="Docs"
           title="Docs"
         >
@@ -37,7 +38,7 @@ export function TerminalNav() {
           href="https://github.com/Ansh-699/SlipStream"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
           aria-label="GitHub repository"
           title="GitHub"
         >
@@ -47,12 +48,18 @@ export function TerminalNav() {
           href="https://www.magicblock.gg/"
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex h-8 w-8 items-center justify-center rounded text-[#a2abb1] transition-colors hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+          className="inline-flex h-8 w-8 items-center justify-center rounded text-[var(--t-text-2)] transition-colors hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
           aria-label="MagicBlock"
           title="MagicBlock"
         >
           <Zap className="h-4 w-4" strokeWidth={1.75} />
         </a>
+        {/* S13-05: the terminal had no theme control at all - ThemeToggle was
+            rendered only on the landing page and /docs. `border-0` because this
+            component's own default border is tuned for the landing glass
+            surface; its text colour is left alone so the existing light-mode
+            remap (which carries !important) keeps winning. */}
+        <ThemeToggle className="border-0 rounded" />
         <div className="ml-2">
           <ConnectButton />
         </div>

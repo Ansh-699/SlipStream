@@ -13,14 +13,14 @@ const LAMPORTS_PER_SOL = 1_000_000_000;
  *  error, so warn before the user starts rather than after. */
 const MIN_SOL_LAMPORTS = 20_000_000; // 0.02 SOL
 
-const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
+const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 const SECONDARY_BTN =
-  `h-[28px] rounded-[4px] border border-[#1d2224] bg-[#121516] px-2.5 text-[12px] text-[#a2abb1] transition-colors hover:text-[#e6e9ea] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS}`;
-const HINT = "text-[10px] leading-tight text-[#838c92]";
+  `h-[28px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-2.5 text-[12px] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS}`;
+const HINT = "text-[10px] leading-tight text-[var(--t-text-3)]";
 
 function primaryBtn(disabled: boolean) {
   return `h-[34px] w-full rounded-[6px] text-[13px] font-semibold ${FOCUS} ${
-    disabled ? "cursor-not-allowed bg-[#171b1c] text-[#a2abb1]" : "bg-[#16794f] text-white hover:bg-[#1c9463]"
+    disabled ? "cursor-not-allowed bg-[var(--t-surface-3)] text-[var(--t-text-2)]" : "bg-[var(--t-up-3)] text-white hover:bg-[var(--t-up-2)]"
   }`;
 }
 
@@ -70,17 +70,17 @@ export function SessionPanel() {
 
   return (
     <div>
-      <div className="flex h-[36px] items-center justify-between border-b border-[#1d2224] px-3">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+      <div className="flex h-[36px] items-center justify-between border-b border-[var(--t-border)] px-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           Wallet
         </span>
         <span
           className={`rounded-[4px] px-1.5 py-0.5 text-[10px] ${
             status === "trading"
-              ? "bg-[rgba(34,197,94,0.12)] text-[#22c55e]"
+              ? "bg-[rgba(34,197,94,0.12)] text-[var(--t-up)]"
               : status === "setup"
-                ? "bg-[rgba(245,158,11,0.12)] text-[#f59e0b]"
-                : "bg-[#121516] text-[#a2abb1]"
+                ? "bg-[rgba(245,158,11,0.12)] text-[var(--t-warn)]"
+                : "bg-[var(--t-surface)] text-[var(--t-text-2)]"
           }`}
         >
           {status}
@@ -90,7 +90,7 @@ export function SessionPanel() {
       <div className="space-y-3 p-3">
         {!connected ? (
           <div className="space-y-2.5">
-            <p className="text-[11.5px] leading-relaxed text-[#a2abb1]">
+            <p className="text-[11.5px] leading-relaxed text-[var(--t-text-2)]">
               Sign in to create your in-app wallet. It holds your funds, signs
               your trades, and needs no browser extension.
             </p>
@@ -122,7 +122,7 @@ export function SessionPanel() {
             </button>
 
             {lowSol && (
-              <p className="text-[10px] leading-tight text-[#f59e0b]">
+              <p className="text-[10px] leading-tight text-[var(--t-warn)]">
                 This wallet needs a little devnet SOL for fees and account rent
                 before setup can run. Send some to the address above.
               </p>
@@ -132,11 +132,11 @@ export function SessionPanel() {
             {(inProtocol > 0n || state.initialized) && (
               <div className="space-y-2 pt-0.5">
                 <div className="flex items-center gap-2">
-                  <div className="h-px flex-1 bg-[#1d2224]" />
-                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#838c92]">
+                  <div className="h-px flex-1 bg-[var(--t-border)]" />
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-3)]">
                     In the market
                   </span>
-                  <div className="h-px flex-1 bg-[#1d2224]" />
+                  <div className="h-px flex-1 bg-[var(--t-border)]" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <Stat label="Committed" value={usd(state.committed)} hint="Locked in orders" amber />
@@ -148,21 +148,21 @@ export function SessionPanel() {
             {state.legacyCredit && <LegacyNotice {...{ state, busy, closeLegacyCredit }} />}
 
             {step && (
-              <div className="flex items-center gap-2 text-[11.5px] text-[#a2abb1]">
+              <div className="flex items-center gap-2 text-[11.5px] text-[var(--t-text-2)]">
                 <span
                   aria-hidden
-                  className="h-3 w-3 shrink-0 rounded-full border-2 border-[#1d2224] border-t-[#22c55e] animate-spin"
+                  className="h-3 w-3 shrink-0 rounded-full border-2 border-[var(--t-border)] border-t-[var(--t-up)] animate-spin"
                 />
                 {step}
               </div>
             )}
             {error && (
-              <div role="alert" className="break-words text-[11.5px] leading-tight text-[#ef4444]">
+              <div role="alert" className="break-words text-[11.5px] leading-tight text-[var(--t-down)]">
                 {error}
               </div>
             )}
             {notice && !error && !step && (
-              <div className="break-words text-[11.5px] leading-tight text-[#a2abb1]">{notice}</div>
+              <div className="break-words text-[11.5px] leading-tight text-[var(--t-text-2)]">{notice}</div>
             )}
 
             {!state.delegated ? (
@@ -234,8 +234,8 @@ function WalletIdentity({ address }: { address: string | null }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 flex-col">
-        <span className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">Your wallet</span>
-        <span className="truncate font-mono text-[12px] text-[#e6e9ea]" title={address}>
+        <span className="text-[10px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">Your wallet</span>
+        <span className="truncate font-mono text-[12px] text-[var(--t-text)]" title={address}>
           {short}
         </span>
       </div>
@@ -263,12 +263,12 @@ function SessionKeyCard({
   expiresIn: string | null;
 }) {
   return (
-    <div className="space-y-1.5 rounded-[4px] border border-[#1d2224] p-2.5">
+    <div className="space-y-1.5 rounded-[4px] border border-[var(--t-border)] p-2.5">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">Trading session</span>
+        <span className="text-[10px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">Trading session</span>
         <span
-          className={`rounded-[4px] bg-[#121516] px-1.5 py-0.5 text-[10px] ${
-            state.sessionActive ? "text-[#22c55e]" : "text-[#a2abb1]"
+          className={`rounded-[4px] bg-[var(--t-surface)] px-1.5 py-0.5 text-[10px] ${
+            state.sessionActive ? "text-[var(--t-up)]" : "text-[var(--t-text-2)]"
           }`}
         >
           {state.sessionActive ? `active · ${expiresIn}` : "none"}
@@ -307,8 +307,8 @@ function LegacyNotice({
   closeLegacyCredit: () => void;
 }) {
   return (
-    <div className="space-y-1.5 rounded-[4px] border border-[#1d2224] p-2.5">
-      <div className="text-[11.5px] font-semibold text-[#f59e0b]">Legacy trading-credit detected</div>
+    <div className="space-y-1.5 rounded-[4px] border border-[var(--t-border)] p-2.5">
+      <div className="text-[11.5px] font-semibold text-[var(--t-warn)]">Legacy trading-credit detected</div>
       {state.legacyDelegated ? (
         <p className={HINT}>
           This credit predates the session-keys upgrade and is delegated to the
@@ -348,10 +348,10 @@ function Stat({
   emerald?: boolean;
   amber?: boolean;
 }) {
-  const color = emerald ? "text-[#22c55e]" : amber ? "text-[#f59e0b]" : "text-[#e6e9ea]";
+  const color = emerald ? "text-[var(--t-up)]" : amber ? "text-[var(--t-warn)]" : "text-[var(--t-text)]";
   return (
-    <div className="rounded-[4px] border border-[#1d2224] bg-[#121516] px-[10px] py-2">
-      <div className="text-[10px] uppercase tracking-[0.06em] text-[#838c92]">{label}</div>
+    <div className="rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-[10px] py-2">
+      <div className="text-[10px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">{label}</div>
       <div className={`text-[14px] font-semibold tnum ${color}`}>{value}</div>
       <div className={`${HINT} mt-0.5`}>{hint}</div>
     </div>

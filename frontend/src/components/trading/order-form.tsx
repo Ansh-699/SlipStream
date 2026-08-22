@@ -226,10 +226,10 @@ export function OrderForm() {
   const showPriceInput = orderType !== "market";
   const availLine = session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet";
   const inputCls =
-    "h-[34px] w-full rounded-[4px] border border-[#1d2224] bg-[#121516] px-[10px] pr-14 text-[13px] text-[#e6e9ea] tnum placeholder:text-[#838c92] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]";
-  const suffixCls = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[#838c92]";
-  const labelCls = "text-[12px] text-[#a2abb1]";
-  const rowCls = "flex h-[22px] items-center justify-between border-b border-[#15191a] last:border-b-0";
+    "h-[34px] w-full rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] tnum placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
+  const suffixCls = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[var(--t-text-3)]";
+  const labelCls = "text-[12px] text-[var(--t-text-2)]";
+  const rowCls = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
 
   const blocker = !publicKey
     ? "Connect a wallet to trade"
@@ -247,18 +247,18 @@ export function OrderForm() {
   const disabled = submitting || blocker !== null;
 
   return (
-    <div className="flex flex-col border border-[#1d2224] bg-[#0b0d0e]">
-      <div className="flex h-[40px] items-stretch gap-4 border-b border-[#1d2224] px-3" role="group" aria-label="Order type">
+    <div className="flex flex-col border border-[var(--t-border)] bg-[var(--t-bg)]">
+      <div className="flex h-[40px] items-stretch gap-4 border-b border-[var(--t-border)] px-3" role="group" aria-label="Order type">
         {(["market", "limit"] as const).map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => setOrderType(t)}
             aria-pressed={orderType === t}
-            className={`relative text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+            className={`relative text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
               orderType === t
-                ? "text-[#e6e9ea] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[#e6e9ea]"
-                : "text-[#a2abb1] hover:text-[#e6e9ea]"
+                ? "text-[var(--t-text)] after:absolute after:inset-x-0 after:-bottom-px after:h-[2px] after:bg-[var(--t-text)]"
+                : "text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
             {t === "market" ? "Market" : "Limit"}
@@ -272,10 +272,10 @@ export function OrderForm() {
             type="button"
             onClick={() => setSide("long")}
             aria-pressed={side === "long"}
-            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
               side === "long"
-                ? "border-[#22c55e] bg-[rgba(34,197,94,0.12)] text-[#22c55e]"
-                : "border-[#1d2224] bg-[#121516] text-[#a2abb1] hover:text-[#e6e9ea]"
+                ? "border-[var(--t-up)] bg-[rgba(34,197,94,0.12)] text-[var(--t-up)]"
+                : "border-[var(--t-border)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
@@ -287,10 +287,10 @@ export function OrderForm() {
             type="button"
             onClick={() => setSide("short")}
             aria-pressed={side === "short"}
-            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+            className={`flex h-[44px] items-center justify-center rounded-[4px] border text-[13px] font-medium focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
               side === "short"
-                ? "border-[#ef4444] bg-[rgba(239,68,68,0.12)] text-[#ef4444]"
-                : "border-[#1d2224] bg-[#121516] text-[#a2abb1] hover:text-[#e6e9ea]"
+                ? "border-[var(--t-down)] bg-[rgba(239,68,68,0.12)] text-[var(--t-down)]"
+                : "border-[var(--t-border)] bg-[var(--t-surface)] text-[var(--t-text-2)] hover:text-[var(--t-text)]"
             }`}
           >
             <span className="flex flex-col items-center leading-tight">
@@ -322,7 +322,7 @@ export function OrderForm() {
         ) : (
           <div className="flex flex-col gap-1.5">
             <span className={labelCls}>Execution</span>
-            <p className="text-[11.5px] text-[#838c92]">
+            <p className="text-[11.5px] text-[var(--t-text-3)]">
             Fills at the best price resting on the book
             {markPrice ? <span className="tnum">, around {markPrice.toFixed(3)}</span> : ""}.
             </p>
@@ -332,7 +332,7 @@ export function OrderForm() {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
             <label htmlFor="order-margin" className={labelCls}>Margin</label>
-            <span className="text-[11.5px] text-[#838c92] tnum">{availLine}</span>
+            <span className="text-[11.5px] text-[var(--t-text-3)] tnum">{availLine}</span>
           </div>
           <div className="relative">
             <input
@@ -353,7 +353,7 @@ export function OrderForm() {
                 key={m}
                 type="button"
                 onClick={() => setMargin(String(m))}
-                className="h-[26px] rounded-[4px] border border-[#1d2224] bg-[#121516] text-[11.5px] text-[#a2abb1] tnum hover:text-[#e6e9ea] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+                className="h-[26px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] tnum hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
               >
                 ${m}
               </button>
@@ -361,7 +361,7 @@ export function OrderForm() {
             <button
               type="button"
               onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")}
-              className="h-[26px] rounded-[4px] border border-[#1d2224] bg-[#121516] text-[11.5px] text-[#a2abb1] hover:text-[#e6e9ea] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+              className="h-[26px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
             >
               Max
             </button>
@@ -371,7 +371,7 @@ export function OrderForm() {
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
             <label htmlFor="order-lev" className={labelCls}>Leverage</label>
-            <span className="text-[12px] font-semibold text-[#22c55e] tnum">{leverage}×</span>
+            <span className="text-[12px] font-semibold text-[var(--t-up)] tnum">{leverage}×</span>
           </div>
           <input
             id="order-lev"
@@ -381,9 +381,9 @@ export function OrderForm() {
             step={1}
             value={leverage}
             onChange={(ev) => setLeverage(parseInt(ev.target.value, 10))}
-            className="w-full cursor-pointer accent-[#22c55e] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+            className="w-full cursor-pointer accent-[var(--t-up)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
           />
-          <div className="flex justify-between text-[11px] text-[#838c92] tnum">
+          <div className="flex justify-between text-[11px] text-[var(--t-text-3)] tnum">
             <span>1×</span><span>5×</span><span>10×</span><span>{MAX_LEVERAGE}×</span>
           </div>
         </div>
@@ -392,7 +392,7 @@ export function OrderForm() {
           <div className="flex flex-col gap-1.5">
             <div className="flex items-baseline justify-between">
               <label htmlFor="order-slippage" className={labelCls}>Max Slippage</label>
-              <span className="text-[11.5px] text-[#838c92]">basis points</span>
+              <span className="text-[11.5px] text-[var(--t-text-3)]">basis points</span>
             </div>
             <div className="relative">
               <input
@@ -413,53 +413,53 @@ export function OrderForm() {
         <div className="flex flex-col">
           <div className={rowCls}>
             <span className={labelCls}>Direction</span>
-            <span className="text-[12px] text-[#e6e9ea]">{side === "long" ? "Long" : "Short"}</span>
+            <span className="text-[12px] text-[var(--t-text)]">{side === "long" ? "Long" : "Short"}</span>
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Size</span>
-            <span className="text-[12px] text-[#e6e9ea] tnum">
+            <span className="text-[12px] text-[var(--t-text)] tnum">
               {derived && derived.sizeSol > 0 ? `${derived.sizeSol.toFixed(1)} SOL` : "—"}
             </span>
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Notional</span>
-            <span className="text-[12px] text-[#e6e9ea] tnum">
+            <span className="text-[12px] text-[var(--t-text)] tnum">
               {derived && derived.sizeSol > 0 ? `$${derived.notional.toFixed(2)}` : "—"}
             </span>
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Margin at risk</span>
-            <span className="text-[12px] text-[#e6e9ea] tnum">
+            <span className="text-[12px] text-[var(--t-text)] tnum">
               {derived && derived.sizeSol > 0 ? `$${derived.actualMargin.toFixed(2)}` : "—"}
             </span>
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Available credit</span>
-            <span className="text-[12px] text-[#e6e9ea] tnum">${availUsd.toFixed(2)}</span>
+            <span className="text-[12px] text-[var(--t-text)] tnum">${availUsd.toFixed(2)}</span>
           </div>
         </div>
 
         {!(derived && derived.sizeSol > 0) && (
-          <p className="text-[11.5px] text-[#838c92]">Enter a margin amount to size the order.</p>
+          <p className="text-[11.5px] text-[var(--t-text-3)]">Enter a margin amount to size the order.</p>
         )}
 
         {belowOneLot && (
-          <p className="text-[11.5px] text-[#f59e0b]">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>
+          <p className="text-[11.5px] text-[var(--t-warn)]">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>
         )}
         {insufficient && !belowOneLot && (
-          <p className="text-[11.5px] text-[#ef4444]">Margin required exceeds available credit. Lower it or fund more credit.</p>
+          <p className="text-[11.5px] text-[var(--t-down)]">Margin required exceeds available credit. Lower it or fund more credit.</p>
         )}
 
         <button
           type="button"
           onClick={handleSubmit}
           disabled={disabled}
-          className={`h-[38px] min-h-[38px] w-full rounded-[6px] text-[14px] font-semibold focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e] ${
+          className={`h-[38px] min-h-[38px] w-full rounded-[6px] text-[14px] font-semibold focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)] ${
             disabled
-              ? "cursor-not-allowed bg-[#171b1c] text-[#a2abb1]"
+              ? "cursor-not-allowed bg-[var(--t-surface-3)] text-[var(--t-text-2)]"
               : side === "long"
-                ? "bg-[#16794f] text-white hover:bg-[#1c9463]"
-                : "bg-[#a93436] text-white hover:bg-[#c04447]"
+                ? "bg-[var(--t-up-3)] text-white hover:bg-[var(--t-up-2)]"
+                : "bg-[var(--t-down-3)] text-white hover:bg-[var(--t-down-2)]"
           }`}
         >
           {submitting
@@ -468,19 +468,19 @@ export function OrderForm() {
         </button>
 
         {session.delegated && (
-          <p className="text-[11.5px] text-[#838c92]">
+          <p className="text-[11.5px] text-[var(--t-text-3)]">
             {session.sessionActive
               ? "Session key active — orders sign locally, no wallet popup."
               : "No active session key — orders will prompt your wallet."}
           </p>
         )}
-        {lastErr && <p className="text-[11.5px] break-all text-[#ef4444]">{lastErr}</p>}
+        {lastErr && <p className="text-[11.5px] break-all text-[var(--t-down)]">{lastErr}</p>}
         {lastSig && (
           <a
             href={explorerTx(lastSig, "er")}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[11.5px] text-[#22c55e] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+            className="text-[11.5px] text-[var(--t-up)] hover:underline focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
           >
             View tx on Explorer: <span className="tnum">{lastSig.slice(0, 12)}…{lastSig.slice(-8)}</span>
           </a>

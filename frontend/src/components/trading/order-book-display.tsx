@@ -49,7 +49,7 @@ export function OrderBookDisplay() {
   const sellPct = 100 - buyPct;
 
   return (
-    <div className="h-full flex flex-col bg-[#0b0d0e] overflow-hidden">
+    <div className="h-full flex flex-col bg-[var(--t-bg)] overflow-hidden">
       {/* Tab header */}
       <div className="tk-head justify-between">
         <div role="tablist" aria-label="Order book" className="flex items-stretch gap-4">
@@ -74,12 +74,12 @@ export function OrderBookDisplay() {
             Trades
           </button>
         </div>
-        <span className="text-[11px] text-[#838c92]">SOL-PERP</span>
+        <span className="text-[11px] text-[var(--t-text-3)]">SOL-PERP</span>
       </div>
 
       {/* Real protocol parameters, not decoration: the tick comes from the
           deploy manifest and the lot from the market's own lot size. */}
-      <div className="h-8 shrink-0 flex items-center gap-1.5 px-3 border-b border-[#1d2224]">
+      <div className="h-8 shrink-0 flex items-center gap-1.5 px-3 border-b border-[var(--t-border)]">
         <span className="tk-chip">Tick {tickSize}</span>
         <span className="tk-chip">SOL-USD</span>
       </div>
@@ -87,7 +87,7 @@ export function OrderBookDisplay() {
       {tab === "book" ? (
         <>
           {/* Column header */}
-          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[#838c92]">
+          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[var(--t-text-3)]">
             <span>Price (USD)</span>
             <span className="text-right">Size (SOL)</span>
             <span className="text-right">Total (SOL)</span>
@@ -96,14 +96,14 @@ export function OrderBookDisplay() {
           <div className="flex-1 flex flex-col min-h-0">
             {empty ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-1 px-4 text-center">
-                <span className="text-[12px] text-[#e6e9ea]">
+                <span className="text-[12px] text-[var(--t-text)]">
                   {status === "loading"
                     ? "Loading the book…"
                     : status === "unavailable"
                       ? "Can't reach the order book"
                       : "No resting orders"}
                 </span>
-                <span className="max-w-[34ch] text-[11px] leading-relaxed text-[#a2abb1]">
+                <span className="max-w-[34ch] text-[11px] leading-relaxed text-[var(--t-text-2)]">
                   {status === "unavailable"
                     ? "Neither the rollup nor the base layer answered."
                     : status === "empty"
@@ -123,12 +123,12 @@ export function OrderBookDisplay() {
 
                 {/* Mid / spread. The mid is neither a bid nor an ask, so it stays
                     neutral — green and red mean side in this panel. */}
-                <div className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[#1d2224]">
-                  <span className="text-[15px] font-bold tnum text-[#e6e9ea] leading-[34px]">
+                <div className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
+                  <span className="text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
                     {mid !== null ? mid.toFixed(3) : "—"}
                   </span>
-                  <span className="text-[11px] text-[#838c92]">mid</span>
-                  <span className="ml-auto text-[11px] text-[#a2abb1] tnum">
+                  <span className="text-[11px] text-[var(--t-text-3)]">mid</span>
+                  <span className="ml-auto text-[11px] text-[var(--t-text-2)] tnum">
                     {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
                   </span>
                 </div>
@@ -146,7 +146,7 @@ export function OrderBookDisplay() {
       ) : (
         <>
           {/* Column header */}
-          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[#838c92]">
+          <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[var(--t-text-3)]">
             <span>Price (USD)</span>
             <span className="text-right">Size (SOL)</span>
             <span className="text-right">Maker</span>
@@ -154,7 +154,7 @@ export function OrderBookDisplay() {
 
           <div className="flex-1 min-h-0 overflow-y-auto slim-scroll">
             {trades.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-[12px] text-[#a2abb1]">
+              <div className="h-full flex items-center justify-center text-[12px] text-[var(--t-text-2)]">
                 No trades yet
               </div>
             ) : (
@@ -165,13 +165,13 @@ export function OrderBookDisplay() {
                   target="_blank"
                   rel="noopener noreferrer"
                   title={`Verify maker ${t.maker} on Explorer`}
-                  className="grid grid-cols-3 items-center h-5 px-3 text-[11.5px] hover:bg-[#171b1c] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#22c55e]"
+                  className="grid grid-cols-3 items-center h-5 px-3 text-[11.5px] hover:bg-[var(--t-surface-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
                 >
-                  <span className={`tnum ${t.side === "buy" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                  <span className={`tnum ${t.side === "buy" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                     {t.price.toFixed(3)}
                   </span>
-                  <span className="text-right tnum text-[#e6e9ea]">{t.size.toFixed(2)}</span>
-                  <span className="text-right tnum text-[#22c55e] underline decoration-dotted underline-offset-2">
+                  <span className="text-right tnum text-[var(--t-text)]">{t.size.toFixed(2)}</span>
+                  <span className="text-right tnum text-[var(--t-up)] underline decoration-dotted underline-offset-2">
                     {t.maker.slice(0, 4)}…
                   </span>
                 </a>
@@ -188,14 +188,14 @@ export function OrderBookDisplay() {
       <div
         role="img"
         aria-label={`Resting depth: ${buyPct.toFixed(0)}% bids, ${sellPct.toFixed(0)}% asks`}
-        className="h-8 shrink-0 flex items-center gap-2 px-3 border-t border-[#1d2224]"
+        className="h-8 shrink-0 flex items-center gap-2 px-3 border-t border-[var(--t-border)]"
       >
-        <span className="text-[11px] tnum text-[#22c55e] shrink-0">Buy {buyPct.toFixed(0)}%</span>
-        <div aria-hidden className="flex-1 flex h-1 rounded-[4px] overflow-hidden bg-[#121516]">
-          <div className="h-full bg-[#22c55e]" style={{ width: `${buyPct}%` }} />
-          <div className="h-full flex-1 bg-[#ef4444]" />
+        <span className="text-[11px] tnum text-[var(--t-up)] shrink-0">Buy {buyPct.toFixed(0)}%</span>
+        <div aria-hidden className="flex-1 flex h-1 rounded-[4px] overflow-hidden bg-[var(--t-surface)]">
+          <div className="h-full bg-[var(--t-up)]" style={{ width: `${buyPct}%` }} />
+          <div className="h-full flex-1 bg-[var(--t-down)]" />
         </div>
-        <span className="text-[11px] tnum text-[#ef4444] shrink-0">{sellPct.toFixed(0)}% Sell</span>
+        <span className="text-[11px] tnum text-[var(--t-down)] shrink-0">{sellPct.toFixed(0)}% Sell</span>
       </div>
       )}
     </div>
@@ -229,11 +229,11 @@ function Row({
           backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
         }}
       />
-      <span className={`relative tnum ${side === "bid" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+      <span className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
         {price.toFixed(3)}
       </span>
-      <span className="relative text-right tnum text-[#e6e9ea]">{fmtAmt(size)}</span>
-      <span className="relative text-right tnum text-[#a2abb1]">{fmtAmt(total)}</span>
+      <span className="relative text-right tnum text-[var(--t-text)]">{fmtAmt(size)}</span>
+      <span className="relative text-right tnum text-[var(--t-text-2)]">{fmtAmt(total)}</span>
     </div>
   );
 }

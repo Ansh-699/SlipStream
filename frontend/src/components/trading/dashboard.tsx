@@ -32,7 +32,7 @@ export function TradingDashboard() {
       {manifestError && (
         <div
           role="alert"
-          className="shrink-0 border-b border-[#f59e0b]/40 bg-[#f59e0b]/10 px-4 py-2 text-[12px] font-medium text-[#f59e0b]"
+          className="shrink-0 border-b border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-4 py-2 text-[12px] font-medium text-[var(--t-warn)]"
         >
           {manifestError}
         </div>

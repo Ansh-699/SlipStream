@@ -83,7 +83,7 @@ export function FillToasts() {
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 40 }}
             transition={{ duration: 0.18 }}
-            className="min-w-[220px] rounded-[6px] border border-[#1d2224] bg-[#121516] px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.5)] pointer-events-auto"
+            className="min-w-[220px] rounded-[6px] border border-[var(--t-border)] bg-[var(--t-surface)] px-3.5 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.5)] pointer-events-auto"
           >
             <div className="flex items-center justify-between gap-3">
               <span

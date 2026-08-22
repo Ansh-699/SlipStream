@@ -50,7 +50,7 @@ export function PriceChart() {
   const latest = candles.length ? candles[candles.length - 1] : null;
 
   return (
-    <div className="w-full h-full flex flex-col min-h-[360px] overflow-hidden rounded-[6px] border border-[#1d2224] bg-[#0b0d0e]">
+    <div className="w-full h-full flex flex-col min-h-[360px] overflow-hidden rounded-[6px] border border-[var(--t-border)] bg-[var(--t-bg)]">
       {/* Header — panel tabs */}
       <div className="tk-head justify-between gap-3">
         <div role="tablist" aria-label="Chart view" className="flex items-stretch gap-4">
@@ -76,11 +76,11 @@ export function PriceChart() {
         </div>
 
         <div className="flex items-baseline gap-2">
-          <span className="text-[13px] font-medium tnum text-[#e6e9ea]">
+          <span className="text-[13px] font-medium tnum text-[var(--t-text)]">
             {lastPrice != null ? `$${lastPrice.toFixed(3)}` : "—"}
           </span>
           {change != null && (
-            <span className={`text-[11px] font-semibold tnum ${up ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+            <span className={`text-[11px] font-semibold tnum ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
               {up ? "+" : "−"}
               {Math.abs(change).toFixed(2)}%
             </span>
@@ -89,7 +89,7 @@ export function PriceChart() {
       </div>
 
       {/* Toolbar — interval chips | chart type chips */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[#1d2224] px-3 py-1.5 sm:h-9 sm:flex-nowrap sm:py-0">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[var(--t-border)] px-3 py-1.5 sm:h-9 sm:flex-nowrap sm:py-0">
         <div role="group" aria-label="Candle interval" className="flex items-center gap-1">
           {RESOLUTIONS.map((r, i) => (
             <button
@@ -100,8 +100,8 @@ export function PriceChart() {
               onClick={() => setResIdx(i)}
               className={`${CHIP} ${
                 resIdx === i
-                  ? "bg-[#171b1c] text-[#e6e9ea]"
-                  : "text-[#a2abb1] hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+                  ? "bg-[var(--t-surface-3)] text-[var(--t-text)]"
+                  : "text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
               }`}
             >
               {r.label}
@@ -109,7 +109,7 @@ export function PriceChart() {
           ))}
         </div>
 
-        <span aria-hidden className="h-4 w-px shrink-0 bg-[#1d2224]" />
+        <span aria-hidden className="h-4 w-px shrink-0 bg-[var(--t-border)]" />
 
         <div role="group" aria-label="Chart type" className="flex items-center gap-1">
           {(["candles", "line", "area"] as ChartType[]).map((t) => (
@@ -120,8 +120,8 @@ export function PriceChart() {
               onClick={() => setChartType(t)}
               className={`${CHIP} capitalize ${
                 chartType === t
-                  ? "bg-[#171b1c] text-[#e6e9ea]"
-                  : "text-[#a2abb1] hover:bg-[#171b1c] hover:text-[#e6e9ea]"
+                  ? "bg-[var(--t-surface-3)] text-[var(--t-text)]"
+                  : "text-[var(--t-text-2)] hover:bg-[var(--t-surface-3)] hover:text-[var(--t-text)]"
               }`}
             >
               {t}
@@ -132,41 +132,41 @@ export function PriceChart() {
 
       {/* Legend */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-[6px] text-[11px]">
-        <span className="text-[#a2abb1]">
-          <span className="font-semibold text-[#e6e9ea]">SOL-PERP</span>
+        <span className="text-[var(--t-text-2)]">
+          <span className="font-semibold text-[var(--t-text)]">SOL-PERP</span>
           {" · "}
           {resolution.label} · SOL/USD via Pyth
         </span>
-        <span className="flex items-center gap-2 text-[#838c92]">
+        <span className="flex items-center gap-2 text-[var(--t-text-3)]">
           <span>
-            O <span className="tnum text-[#e6e9ea]">{latest ? latest.o.toFixed(3) : "—"}</span>
+            O <span className="tnum text-[var(--t-text)]">{latest ? latest.o.toFixed(3) : "—"}</span>
           </span>
           <span>
-            H <span className="tnum text-[#e6e9ea]">{latest ? latest.h.toFixed(3) : "—"}</span>
+            H <span className="tnum text-[var(--t-text)]">{latest ? latest.h.toFixed(3) : "—"}</span>
           </span>
           <span>
-            L <span className="tnum text-[#e6e9ea]">{latest ? latest.l.toFixed(3) : "—"}</span>
+            L <span className="tnum text-[var(--t-text)]">{latest ? latest.l.toFixed(3) : "—"}</span>
           </span>
           <span>
-            C <span className="tnum text-[#e6e9ea]">{latest ? latest.c.toFixed(3) : "—"}</span>
+            C <span className="tnum text-[var(--t-text)]">{latest ? latest.c.toFixed(3) : "—"}</span>
           </span>
         </span>
       </div>
 
       {/* Canvas chart */}
-      <div id="chart-panel" role="tabpanel" aria-label="Price chart" className="relative flex-1 bg-[#0b0d0e]">
+      <div id="chart-panel" role="tabpanel" aria-label="Price chart" className="relative flex-1 bg-[var(--t-bg)]">
         {candles.length >= 2 ? (
           <CandleCanvas candles={candles} chartType={chartType} resolution={resolution} />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
-            <span className="text-[12px] font-medium text-[#e6e9ea]">
+            <span className="text-[12px] font-medium text-[var(--t-text)]">
               {loading
                 ? "Loading price history…"
                 : error
                   ? "Couldn't load price history"
                   : "No candles for this interval"}
             </span>
-            <span className="max-w-[42ch] text-[12px] leading-relaxed text-[#a2abb1]">
+            <span className="max-w-[42ch] text-[12px] leading-relaxed text-[var(--t-text-2)]">
               {error
                 ? "The Pyth Benchmarks feed didn't answer. It retries on its own; pick another interval if it stays empty."
                 : "Crypto.SOL/USD · Pyth Benchmarks"}
@@ -175,7 +175,7 @@ export function PriceChart() {
         )}
       </div>
 
-      <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[#1d2224] px-3 text-[11px] text-[#838c92]">
+      <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[var(--t-border)] px-3 text-[11px] text-[var(--t-text-3)]">
         <span>Scroll to zoom · drag to pan</span>
         <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
       </div>
@@ -199,11 +199,22 @@ function CandleCanvas({
   const [view, setView] = useState({ count: 80, offset: 0 });
   const [hover, setHover] = useState<{ x: number; y: number; i: number } | null>(null);
   const drag = useRef<{ x: number; startOffset: number } | null>(null);
-  // Track the active theme so the canvas grid/axis ink flips with light/dark.
-  // The terminal ground is #0b0d0e regardless of the app theme, so the canvas
-  // must not follow the `dark` class — doing so painted dark ink on a dark
-  // background in light mode and the chart vanished.
-  const isDark = true;
+  // S13-05. This used to be a hardcoded `const isDark = true`, because an
+  // earlier attempt to follow the `dark` class painted dark ink on a ground that
+  // stayed dark and the chart vanished. That was true while the terminal's
+  // colours were hex literals and only the canvas moved. Now the ground is
+  // --t-bg and moves with everything else, so the canvas can follow too — but
+  // it must read the SAME tokens rather than re-deriving a palette, which is
+  // exactly the drift that produced the 1.01:1 pair.
+  //
+  // canvas2d needs real colour strings, not var(), so resolve them from the
+  // element at draw time. Re-resolved on theme change via the observer below.
+  const [themeTick, setThemeTick] = useState(0);
+  useEffect(() => {
+    const ob = new MutationObserver(() => setThemeTick((t) => t + 1));
+    ob.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => ob.disconnect();
+  }, []);
 
   // Clamp the view to the data.
   const total = candles.length;
@@ -235,9 +246,17 @@ function CandleCanvas({
     ctx.clearRect(0, 0, w, h);
 
     // Theme-aware ink: dark text on light bg, light text on dark bg.
+    // Resolved from the same custom properties the rest of the terminal uses.
+    const cs = getComputedStyle(canvas);
+    const tok = (n: string, fallback: string) => cs.getPropertyValue(n).trim() || fallback;
+    const isDark = document.documentElement.classList.contains("dark");
     const ink = (a: number) =>
       isDark ? `rgba(255,255,255,${a})` : `rgba(15,23,23,${a})`;
-    const priceTagText = isDark ? "#000" : "#fff";
+    const upColor = tok("--t-up", "#22c55e");
+    const downColor = tok("--t-down", "#ef4444");
+    // The price tag paints text ON the up/down fill, so it needs the ground
+    // colour, not the ink colour — inverted relative to the surface.
+    const priceTagText = tok("--t-bg", isDark ? "#0b0d0e" : "#ffffff");
 
     const padR = 56; // price axis
     const padB = 22; // time axis
@@ -296,7 +315,7 @@ function CandleCanvas({
         const c = visible[i];
         const x = xOf(i);
         const green = c.c >= c.o;
-        const color = green ? "rgb(34,197,94)" : "rgb(239,68,68)";
+        const color = green ? upColor : downColor;
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
         // wick
@@ -315,7 +334,7 @@ function CandleCanvas({
       const last = visible[n - 1].c;
       const first = visible[0].c;
       const green = last >= first;
-      const color = green ? "rgb(34,197,94)" : "rgb(239,68,68)";
+      const color = green ? upColor : downColor;
       ctx.beginPath();
       visible.forEach((c, i) => {
         const x = xOf(i);
@@ -359,7 +378,7 @@ function CandleCanvas({
     ctx.lineTo(plotW, ly);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = lastC >= visible[n - 1].o ? "rgb(34,197,94)" : "rgb(239,68,68)";
+    ctx.fillStyle = lastC >= visible[n - 1].o ? upColor : downColor;
     ctx.fillRect(plotW, ly - 8, padR, 16);
     ctx.fillStyle = priceTagText;
     ctx.textAlign = "center";
@@ -378,7 +397,7 @@ function CandleCanvas({
       ctx.stroke();
       ctx.setLineDash([]);
     }
-  }, [visible, chartType, hover, resolution.seconds, isDark]);
+  }, [visible, chartType, hover, resolution.seconds, themeTick]);
 
   // Wheel zoom via a NATIVE non-passive listener so preventDefault is allowed
   // (React's onWheel is passive and warns/no-ops on preventDefault).
@@ -437,11 +456,11 @@ function CandleCanvas({
     >
       <canvas ref={canvasRef} className="block" />
       {hoverCandle && (
-        <div className="pointer-events-none absolute left-2 top-2 flex gap-3 rounded-[4px] border border-[#1d2224] bg-[#121516] px-2 py-1 text-[11px] tnum text-[#838c92]">
-          <span>O <span className="text-[#e6e9ea]">{hoverCandle.o.toFixed(3)}</span></span>
-          <span>H <span className="text-[#22c55e]">{hoverCandle.h.toFixed(3)}</span></span>
-          <span>L <span className="text-[#ef4444]">{hoverCandle.l.toFixed(3)}</span></span>
-          <span>C <span className="text-[#e6e9ea]">{hoverCandle.c.toFixed(3)}</span></span>
+        <div className="pointer-events-none absolute left-2 top-2 flex gap-3 rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] px-2 py-1 text-[11px] tnum text-[var(--t-text-3)]">
+          <span>O <span className="text-[var(--t-text)]">{hoverCandle.o.toFixed(3)}</span></span>
+          <span>H <span className="text-[var(--t-up)]">{hoverCandle.h.toFixed(3)}</span></span>
+          <span>L <span className="text-[var(--t-down)]">{hoverCandle.l.toFixed(3)}</span></span>
+          <span>C <span className="text-[var(--t-text)]">{hoverCandle.c.toFixed(3)}</span></span>
           <span>
             {new Date(hoverCandle.t * 1000).toLocaleString([], {
               month: "short",

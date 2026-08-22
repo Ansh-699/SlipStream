@@ -16,16 +16,16 @@ import { PRICE_SCALE } from "@/lib/slipstream";
 type Level = "ok" | "warn" | "down";
 
 const DOT: Record<Level, string> = {
-  ok: "bg-[#22c55e]",
-  warn: "bg-[#f59e0b]",
-  down: "bg-[#ef4444]",
+  ok: "bg-[var(--t-up)]",
+  warn: "bg-[var(--t-warn)]",
+  down: "bg-[var(--t-down)]",
 };
 
 function Row({ label, level, detail }: { label: string; level: Level; detail: string }) {
   return (
-    <div className="flex h-[26px] items-center justify-between border-b border-[#15191a] last:border-b-0">
-      <span className="text-[12px] text-[#a2abb1]">{label}</span>
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-mono tnum text-[#e6e9ea]">
+    <div className="flex h-[26px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0">
+      <span className="text-[12px] text-[var(--t-text-2)]">{label}</span>
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-mono tnum text-[var(--t-text)]">
         {detail}
         <span className={`inline-block w-[6px] h-[6px] rounded-full ${DOT[level]}`} />
       </span>
@@ -114,11 +114,11 @@ export function StatusPanel() {
 
   return (
     <div>
-      <div className="flex h-[36px] items-center justify-between border-b border-[#1d2224] px-3">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#a2abb1]">
+      <div className="flex h-[36px] items-center justify-between border-b border-[var(--t-border)] px-3">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           System Status
         </span>
-        <span className="text-[11px] text-[#838c92]">All signals verifiable on-chain</span>
+        <span className="text-[11px] text-[var(--t-text-3)]">All signals verifiable on-chain</span>
       </div>
       <div className="p-3">
         <Row label="Solana RPC" level={baseLevel} detail={baseDetail} />
