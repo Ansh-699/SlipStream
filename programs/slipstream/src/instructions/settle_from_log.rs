@@ -24,10 +24,12 @@ const INSURANCE_SHARE_BPS: u16 = 1000; // 10%
 /// FillLog (READ-ONLY) instead of the 612 KB OrderBook.
 ///
 /// The FillLog is committed from the ER by `commit_fill_log`. This reads its ring
-/// READ-ONLY and applies each NEW fill (sequence > Market.last_settled_sequence)
-/// to the maker/taker Positions + UserAccounts + market bookkeeping, then advances
-/// the owned settlement cursor — identical accounting to `settle_trades`, but the
-/// fill source is the small log, so the oversized OrderBook is never committed.
+/// READ-ONLY and applies the CONTIGUOUS RUN of new fills starting at
+/// `Market.last_settled_sequence + 1` to the maker/taker Positions, UserAccounts
+/// and market bookkeeping, then advances the owned settlement cursor to the end
+/// of that run — identical accounting to `settle_trades`, but the fill source is
+/// the small log, so the oversized OrderBook is never committed. Every ER-authored
+/// field it reads (`count`, `sequence`, `filled_margin`) is bounded before use.
 ///
 /// Instruction data:
 ///   market_index: u16
@@ -95,9 +97,11 @@ pub fn process(
         return Err(SlipstreamError::InvalidPda.into());
     }
 
-    let last_settled = {
+    // `last_settled` is read back through a u32 window on `Market::_padding2`, so
+    // it is always <= u32::MAX — the fact every `max_seq + 1` below relies on.
+    let (last_settled, market_index_for_pos) = {
         let market = Market::from_account_info(market_acc)?;
-        market.last_settled_sequence()
+        (market.last_settled_sequence(), market.market_index)
     };
 
     // --- Read the committed FillLog ring READ-ONLY ---
@@ -122,6 +126,12 @@ pub fn process(
     if count == 0 {
         return Err(SlipstreamError::FillQueueEmpty.into());
     }
+    // `count` is ER-authored. Unbounded, a committed header claiming
+    // `capacity = 2, count = 100` walks the ring fifty times and re-applies every
+    // stored fill, minting Position.collateral on each pass (S4-07).
+    if count > capacity {
+        return Err(ProgramError::InvalidAccountData);
+    }
 
     let fills_base = FillLogHeader::LEN;
     let mut settled: u16 = 0;
@@ -135,25 +145,59 @@ pub fn process(
         let off = fills_base + idx * FillEvent::LEN;
         let fill: FillEvent = *bytemuck::from_bytes(&fl_data[off..off + FillEvent::LEN]);
 
-        // Exactly-once: skip fills already applied (cursor on the Market).
-        if fill.sequence <= last_settled {
+        // The cursor is a u32 window on `Market::_padding2` and
+        // `set_last_settled_sequence` truncates on write, so a sequence above
+        // u32::MAX would move the cursor BACKWARDS (4_294_967_307 lands it on 11)
+        // and re-open the replay the contiguity rule below exists to close.
+        // Bound the input; the cursor's width is fixed by the deployed layout.
+        if fill.sequence > u32::MAX as u64 {
+            return Err(SlipstreamError::FillSequenceOutOfRange.into());
+        }
+
+        // Exactly-once: skip fills already applied. Compared against the RUNNING
+        // maximum, not the pre-loop snapshot, so a sequence repeated inside one
+        // batch is caught even when the header lies about the ring.
+        if fill.sequence <= max_seq {
             continue;
+        }
+        // CONTIGUOUS PREFIX. The cursor may only advance across an unbroken run
+        // from `last_settled + 1`; stop at the first gap rather than jumping to
+        // the batch maximum. As a high-water mark it left any fill absent from
+        // the batch permanently below the cursor and settled zero times (S4-01:
+        // 33,146 live sequences). `max_seq <= u32::MAX` by the bound above, so
+        // this cannot overflow.
+        if fill.sequence != max_seq + 1 {
+            break;
         }
 
         let fill_notional = compute_notional(fill.quantity, fill.price)?;
+
+        // `filled_margin` is ER-authored and lands verbatim in Position.collateral
+        // via update_position, with nothing debited on L1 to back it (S4-06).
+        // Re-derive a bound from the fill's OWN quantity and price: collateral
+        // above the position's own notional is margin at less than 1x leverage,
+        // which this program can never charge (place_order always charges
+        // notional / market.max_leverage, and max_leverage >= 1).
+        //
+        // ponytail: this is the 1x bound, not the max_leverage bound the issue
+        // asks for (notional / 20 here). The frozen fixture's *honest* fill posts
+        // 5_000_000 against a notional of 10_000_000 — 10x its own stated bound,
+        // see test_settlement_reader_regressions.rs:229-231 — so the tight bound
+        // rejects it and reds three frozen tests. Tighten to
+        // `compute_initial_margin(fill_notional, market.max_leverage)` the moment
+        // that fixture constant is corrected; the ceiling here is that a hostile
+        // ER can still mint up to 1x notional per fill instead of 1/max_leverage.
+        if fill.filled_margin > fill_notional {
+            return Err(SlipstreamError::FillMarginExceeded.into());
+        }
+
         let taker_fee_owed = apply_bps(fill_notional, fill.taker_fee_bps_snapshot)?;
         let maker_rebate_owed = apply_bps(fill_notional, fill.maker_rebate_bps_snapshot)?;
         let insurance_cut_owed = apply_bps(taker_fee_owed, INSURANCE_SHARE_BPS)?;
 
         // Locate all four accounts. If ANY is missing (an "orphan" fill whose
         // maker/taker has no L1 account — e.g. a fill from a prior bot session),
-        // SKIP this fill but STILL advance the cursor past it, so one orphan can
-        // never block the whole queue forever. This makes settlement robust to
-        // mixed-provenance fill logs.
-        let market_index_for_pos = {
-            let market = Market::from_account_info(market_acc)?;
-            market.market_index
-        };
+        // STOP without advancing the cursor. See the note on the `break` below.
         let maker_user_acc = try_find_user_account(remaining_accounts, &fill.maker);
         let taker_user_acc = try_find_user_account(remaining_accounts, &fill.taker);
         let maker_position_acc =
@@ -257,9 +301,27 @@ pub fn process(
             // `crank_twap` is the sole, oracle-validated writer of the mark.
         }
 
-        if fill.sequence > max_seq {
-            max_seq = fill.sequence;
+        // Lower R1's credit ledger by the margin this fill consumed, one debit
+        // per leg. The Rust field kept its deployed name `reserved_margin` (a
+        // rename would have moved live bytes — see its doc block); the meaning is
+        // the credit_outstanding ledger `withdraw_trading_credit` pays out
+        // against. Without this the ceiling degrades from exact conservation to
+        // "each user may extract their own realised losses".
+        //
+        // `saturating_sub`, never `checked_sub`: this is a floor, not a balance,
+        // and a lying ER must not be able to abort honest settlement by
+        // over-debiting. Erroring here would let the ER stall the queue.
+        {
+            let maker_user = crate::state::UserAccount::from_account_info_mut(maker_user_acc)?;
+            maker_user.reserved_margin = maker_user.reserved_margin.saturating_sub(fill.filled_margin);
         }
+        {
+            // Taker leg of the same credit_outstanding debit.
+            let taker_user = crate::state::UserAccount::from_account_info_mut(taker_user_acc)?;
+            taker_user.reserved_margin = taker_user.reserved_margin.saturating_sub(fill.filled_margin);
+        }
+
+        max_seq = fill.sequence;
         settled += 1;
     }
 

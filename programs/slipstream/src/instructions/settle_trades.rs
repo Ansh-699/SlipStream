@@ -87,6 +87,8 @@ pub fn process(
     if market_acc.owner() != program_id {
         return Err(ProgramError::IllegalOwner);
     }
+    // `last_settled` is read back through a u32 window on `Market::_padding2`, so
+    // it is always <= u32::MAX — the fact every `max_seq + 1` below relies on.
     let (last_settled, market_index) = {
         let market = Market::from_account_info(market_acc)?;
         (market.last_settled_sequence(), market.market_index)
@@ -129,6 +131,11 @@ pub fn process(
     if fills_base + max_fills * FillEvent::LEN > ob_data.len() {
         return Err(ProgramError::InvalidAccountData);
     }
+    // `fill_event_count` is ER-authored. Unbounded, a count above the ring's own
+    // capacity walks it repeatedly and re-applies every stored fill (S4-07).
+    if count > max_fills {
+        return Err(ProgramError::InvalidAccountData);
+    }
 
     let mut settled: u16 = 0;
     let mut max_seq: u64 = last_settled;
@@ -142,12 +149,42 @@ pub fn process(
         // Copy the fill out of the read-only account data (FillEvent is Pod+Copy).
         let fill: FillEvent = *bytemuck::from_bytes(&ob_data[off..off + FillEvent::LEN]);
 
-        // Skip fills already settled on a prior keeper call (exactly-once).
-        if fill.sequence <= last_settled {
+        // The cursor is a u32 window on `Market::_padding2` and
+        // `set_last_settled_sequence` truncates on write, so a sequence above
+        // u32::MAX would move the cursor BACKWARDS and re-open the replay the
+        // contiguity rule below exists to close.
+        if fill.sequence > u32::MAX as u64 {
+            return Err(SlipstreamError::FillSequenceOutOfRange.into());
+        }
+
+        // Skip fills already settled (exactly-once). Compared against the RUNNING
+        // maximum, not the pre-loop snapshot, so a sequence repeated inside one
+        // batch is caught even when the header lies about the ring.
+        if fill.sequence <= max_seq {
             continue;
+        }
+        // CONTIGUOUS PREFIX. The cursor may only advance across an unbroken run
+        // from `last_settled + 1`; stop at the first gap rather than jumping to
+        // the batch maximum, which left any fill absent from the batch below the
+        // cursor and settled zero times (S4-01). `max_seq <= u32::MAX` by the
+        // bound above, so this cannot overflow. This path shares
+        // `Market.last_settled_sequence` with settle_from_log, so leaving it
+        // unhardened would leave a live route to the same cursor.
+        if fill.sequence != max_seq + 1 {
+            break;
         }
 
         let fill_notional = compute_notional(fill.quantity, fill.price)?;
+
+        // `filled_margin` is ER-authored and lands verbatim in Position.collateral
+        // via update_position, with nothing debited on L1 to back it (S4-06).
+        // Collateral above the fill's own notional is margin at under 1x leverage,
+        // which place_order can never charge. See the longer note on the same
+        // check in settle_from_log.rs for why this is the 1x bound and not
+        // notional / max_leverage.
+        if fill.filled_margin > fill_notional {
+            return Err(SlipstreamError::FillMarginExceeded.into());
+        }
 
         // Fee calculation — all from snapshots captured at match time.
         let taker_fee_owed = apply_bps(fill_notional, fill.taker_fee_bps_snapshot)?;
@@ -240,9 +277,21 @@ pub fn process(
             // settle against. `crank_twap` (oracle-validated) is the sole writer.
         }
 
-        if fill.sequence > max_seq {
-            max_seq = fill.sequence;
+        // Lower R1's credit ledger by the margin this fill consumed, one debit per
+        // leg — the same credit_outstanding ledger `withdraw_trading_credit` pays
+        // out against (the Rust field kept its deployed name `reserved_margin`).
+        // `saturating_sub`, never `checked_sub`: a floor, not a balance, and a
+        // lying ER must not be able to abort honest settlement by over-debiting.
+        {
+            let maker_user = UserAccount::from_account_info_mut(maker_user_acc)?;
+            maker_user.reserved_margin = maker_user.reserved_margin.saturating_sub(fill.filled_margin);
         }
+        {
+            let taker_user = UserAccount::from_account_info_mut(taker_user_acc)?;
+            taker_user.reserved_margin = taker_user.reserved_margin.saturating_sub(fill.filled_margin);
+        }
+
+        max_seq = fill.sequence;
         settled += 1;
     }
 
@@ -477,9 +526,9 @@ pub(crate) fn find_user_account<'a>(
 }
 
 /// Like `find_user_account` but returns None instead of erroring when the
-/// account is absent. Used by `settle_from_log` to SKIP orphan fills (fills whose
-/// maker/taker has no L1 account, e.g. from a prior bot session) and advance the
-/// settlement cursor past them, rather than blocking the whole queue forever.
+/// account is absent. Used by `settle_from_log` to detect an orphan fill (one
+/// whose maker/taker has no L1 account, e.g. from a prior bot session) and STOP
+/// the batch there without advancing the cursor — never to skip past it.
 pub(crate) fn try_find_user_account<'a>(
     accounts: &'a [AccountInfo],
     owner: &[u8; 32],
