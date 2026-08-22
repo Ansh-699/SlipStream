@@ -1,5 +1,6 @@
 "use client";
 
+import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import { Connection, Transaction } from "@solana/web3.js";
@@ -128,7 +129,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       );
 
       const tx = new Transaction().add(ix);
-      const erConn = new Connection(ER_RPC, "confirmed");
+      const erConn = erConnection;
       const { blockhash } = await erConn.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
 

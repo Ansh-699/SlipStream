@@ -1,5 +1,6 @@
 "use client";
 
+import { baseConnection, erConnection } from "@/lib/connections";
 import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -49,13 +50,13 @@ export function useOpenOrders(owner: PublicKey | null, marketIndex: number = 0) 
       // Live book is on the ER; fall back to base if the ER is unreachable.
       let info = null;
       try {
-        const erConn = new Connection(ER_RPC, "confirmed");
+        const erConn = erConnection;
         info = await erConn.getAccountInfo(pda);
       } catch {
         /* fall through to base */
       }
       if (!info) {
-        const baseConn = new Connection(RPC_URL, "confirmed");
+        const baseConn = baseConnection;
         info = await baseConn.getAccountInfo(pda);
       }
       if (!info) {

@@ -1,5 +1,6 @@
 "use client";
 
+import { baseConnection, erConnection } from "@/lib/connections";
 import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -77,13 +78,13 @@ export function useOrderBook(marketIndex: number = 0) {
       // The live book lives on the Ephemeral Rollup; try ER first, then base.
       let info = null;
       try {
-        const erConn = new Connection(ER_RPC, "confirmed");
+        const erConn = erConnection;
         info = await erConn.getAccountInfo(pda);
       } catch {
         // ER unavailable — fall back to base RPC below.
       }
       if (!info) {
-        const baseConn = new Connection(RPC_URL, "confirmed");
+        const baseConn = baseConnection;
         info = await baseConn.getAccountInfo(pda);
       }
       if (!info) {

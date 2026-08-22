@@ -1,5 +1,6 @@
 "use client";
 
+import { baseConnection, erConnection } from "@/lib/connections";
 import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
@@ -169,13 +170,13 @@ export function useErPosition(
 
       let info = null;
       try {
-        const erConn = new Connection(ER_RPC, "confirmed");
+        const erConn = erConnection;
         info = await erConn.getAccountInfo(pda);
       } catch {
         /* fall through to base */
       }
       if (!info) {
-        const baseConn = new Connection(RPC_URL, "confirmed");
+        const baseConn = baseConnection;
         info = await baseConn.getAccountInfo(pda);
       }
       if (!info) {
@@ -188,7 +189,7 @@ export function useErPosition(
       // means the cursor is treated as 0 (unfiltered), same as before this fix.
       let lastSettledSequence = 0n;
       try {
-        const baseConn = new Connection(RPC_URL, "confirmed");
+        const baseConn = baseConnection;
         const marketInfo = await baseConn.getAccountInfo(marketPda);
         if (marketInfo) {
           lastSettledSequence = BigInt(decodeMarket(marketInfo.data as Buffer).lastSettledSequence);

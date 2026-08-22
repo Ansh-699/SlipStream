@@ -1,5 +1,6 @@
 "use client";
 
+import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
 import { Connection, Transaction } from "@solana/web3.js";
@@ -40,7 +41,7 @@ export function OpenOrders() {
       const tx = new Transaction().add(ix);
 
       // cancel_order runs on the ER (book + credit are delegated there).
-      const erConn = new Connection(ER_RPC, "confirmed");
+      const erConn = erConnection;
       const { blockhash } = await erConn.getLatestBlockhash();
       tx.recentBlockhash = blockhash;
 

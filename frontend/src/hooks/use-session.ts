@@ -1,5 +1,6 @@
 "use client";
 
+import { erConnection } from "@/lib/connections";
 import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
@@ -328,7 +329,7 @@ export function useSession(marketIndex: number = 0) {
       const liveLen = isDelegated
         ? (await (async () => {
             try {
-              const erConn = new Connection(ER_RPC, "confirmed");
+              const erConn = erConnection;
               const erInfo = await erConn.getAccountInfo(pda);
               return erInfo ? erInfo.data.length : data.length;
             } catch {
@@ -363,7 +364,7 @@ export function useSession(marketIndex: number = 0) {
       let credit = decodeTradingCredit(data as Buffer);
       if (isDelegated) {
         try {
-          const erConn = new Connection(ER_RPC, "confirmed");
+          const erConn = erConnection;
           const erInfo = await erConn.getAccountInfo(pda);
           if (erInfo && erInfo.data[0] === DISC_TRADING_CREDIT) {
             credit = decodeTradingCredit(erInfo.data as Buffer);
@@ -825,7 +826,7 @@ export function useSession(marketIndex: number = 0) {
         let live = creditInfo.data;
         if (delegated) {
           try {
-            const erInfo = await new Connection(ER_RPC, "confirmed").getAccountInfo(creditPda);
+            const erInfo = await erConnection.getAccountInfo(creditPda);
             if (erInfo && erInfo.data[0] === DISC_TRADING_CREDIT) live = erInfo.data;
           } catch {
             /* fall back to the base-layer copy */
@@ -847,7 +848,7 @@ export function useSession(marketIndex: number = 0) {
       if (delegated) {
         slog("withdraw", "undelegating trading credit from the ER");
         setStep("Returning funds from the rollup…");
-        const erConn = new Connection(ER_RPC, "confirmed");
+        const erConn = erConnection;
         const tx = new Transaction().add(
           createUndelegateTradingCreditInstruction(
             publicKey,
@@ -984,7 +985,7 @@ export function useSession(marketIndex: number = 0) {
       }
 
       if (delegated) {
-        const erConn = new Connection(ER_RPC, "confirmed");
+        const erConn = erConnection;
         const authTx = new Transaction().add(authIx);
         const { blockhash } = await erConn.getLatestBlockhash();
         authTx.recentBlockhash = blockhash;

@@ -1,5 +1,7 @@
 "use client";
 
+import { baseConnection } from "@/lib/connections";
+
 /**
  * Drop-in replacements for `@solana/wallet-adapter-react`'s `useWallet()` and
  * `useConnection()`, backed by the Phantom Connect embedded wallet.
@@ -25,11 +27,10 @@ import {
   type Transaction,
   type VersionedTransaction,
 } from "@solana/web3.js";
-import { RPC_URL } from "@/lib/manifest";
 
-/** Shared base-layer connection. Constructing one performs no I/O, and RPC_URL
- *  is a build-time constant, so a single module-level instance is safe. */
-const baseConnection = new Connection(RPC_URL, "confirmed");
+/** Re-exported from lib/connections so the whole app shares ONE base-layer
+ *  Connection. Constructing one is not free: each spawns a WebSocket client
+ *  that reconnects forever against a ws:// URL the HTTP proxy cannot serve. */
 
 export function useConnection(): { connection: Connection } {
   return useMemo(() => ({ connection: baseConnection }), []);
