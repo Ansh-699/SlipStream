@@ -231,6 +231,13 @@ export function OrderForm() {
   const labelCls = "text-[12px] text-[var(--t-text-2)]";
   const rowCls = "flex h-[22px] items-center justify-between border-b border-[var(--t-surface-2)] last:border-b-0";
 
+  // "You have no credit" and "your credit is too small for this size" need
+  // different answers, and the UI used to give the second answer to both. A
+  // user with USDC in their wallet and an un-funded credit was told to "lower
+  // it or fund more credit" with no indication that funding happens in the
+  // Session panel, or that wallet USDC is not collateral until it is moved in.
+  const noCreditAtAll = session.delegated && session.available === 0n;
+
   const blocker = !publicKey
     ? "Connect a wallet to trade"
     : !session.delegated
@@ -241,9 +248,11 @@ export function OrderForm() {
           ? "Enter a margin amount"
           : belowOneLot
             ? "Below the 0.1 SOL minimum lot"
-            : insufficient
-              ? "Margin exceeds available credit"
-              : null;
+            : noCreditAtAll
+              ? "Fund trading credit to trade"
+              : insufficient
+                ? "Margin exceeds available credit"
+                : null;
   const disabled = submitting || blocker !== null;
 
   return (
@@ -446,8 +455,18 @@ export function OrderForm() {
         {belowOneLot && (
           <p className="text-[11.5px] text-[var(--t-warn)]">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>
         )}
-        {insufficient && !belowOneLot && (
-          <p className="text-[11.5px] text-[var(--t-down)]">Margin required exceeds available credit. Lower it or fund more credit.</p>
+        {noCreditAtAll && !belowOneLot && (
+          <p className="text-[11.5px] text-[var(--t-warn)]">
+            Your trading credit is empty. USDC in your wallet is not collateral yet — use{" "}
+            <span className="font-semibold text-[var(--t-text)]">Start trading</span> in the Session
+            panel below to move it into the market.
+          </p>
+        )}
+        {insufficient && !noCreditAtAll && !belowOneLot && (
+          <p className="text-[11.5px] text-[var(--t-down)]">
+            Needs ${derived!.actualMargin.toFixed(2)} margin, you have ${availUsd.toFixed(2)}. Lower the
+            margin or leverage, or add credit in the Session panel.
+          </p>
         )}
 
         <button
