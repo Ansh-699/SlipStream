@@ -143,9 +143,9 @@ pub fn process(
     // credit OWNER or a non-expired authorized SESSION key — but the order is
     // always attributed to credit.owner below (owner_bytes), never the signer,
     // so reconcile_credit / settlement / liquidation stay correct.
+    let now = Clock::get()?.unix_timestamp;
     let owner_bytes;
     {
-        let now = Clock::get()?.unix_timestamp;
         let credit = TradingCredit::from_account_info(trading_credit_acc)?;
         if !credit.is_authorized_signer(signer.key(), now) {
             return Err(SlipstreamError::InvalidAuthority.into());
@@ -156,12 +156,24 @@ pub fn process(
         owner_bytes = credit.owner;
     }
 
-    // Reference price for notional computation (MARKET uses mark price)
+    // Reference price for notional computation (MARKET uses mark price).
+    //
+    // S2-X03: this used to accept `last_mark_price` after a bare `== 0` test.
+    // The staleness gate already existed and every other L1 consumer went
+    // through it -- close_position.rs:124, execute_trigger.rs:82,
+    // claim_funding.rs:62 -- but the entry point that OPENS the position did
+    // not, so a market could be entered at a price no instruction would let you
+    // leave at. With the live 16-day-stale mark ($74.11 against $91.85) a MARKET
+    // order margins ~24% light and its slippage window brackets a price from
+    // two weeks ago.
+    //
+    // Named ceiling: `now` here is the ER's clock, which the sequencer controls
+    // (S2-03), so in the ER this bounds honest staleness, not a hostile
+    // sequencer. That is a strictly larger surface and is S2-03's to close.
     let reference_price = if order_type == ORDER_TYPE_MARKET {
-        if market.last_mark_price == 0 {
-            return Err(SlipstreamError::OracleStale.into());
-        }
-        market.last_mark_price
+        market
+            .mark_price_for_close(now)
+            .ok_or(ProgramError::from(SlipstreamError::OracleStale))?
     } else {
         price
     };
@@ -217,10 +229,13 @@ pub fn process(
 
     // Slippage bounds
     let (slippage_lo, slippage_hi) = if order_type == ORDER_TYPE_MARKET && max_slippage_bps > 0 {
-        let window = apply_bps_u64(market.last_mark_price, max_slippage_bps);
+        // Same gated value the notional was sized from (S2-X03). Reading
+        // `last_mark_price` again here would rebuild the user's whole slippage
+        // band around the ungated price the line above just rejected.
+        let window = apply_bps_u64(reference_price, max_slippage_bps);
         (
-            market.last_mark_price.saturating_sub(window),
-            market.last_mark_price.saturating_add(window),
+            reference_price.saturating_sub(window),
+            reference_price.saturating_add(window),
         )
     } else {
         (0u64, u64::MAX)

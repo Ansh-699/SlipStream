@@ -9,7 +9,9 @@ use solana_account::Account;
 use solana_address::Address as Pubkey;
 use solana_instruction::{AccountMeta, Instruction};
 
+use slipstream::error::SlipstreamError;
 use slipstream::state::*;
+use solana_program_error::ProgramError;
 
 const PRICE_SCALE: u64 = 1_000_000;
 
@@ -307,5 +309,133 @@ fn test_place_order_normal_fill_still_works() {
     assert!(
         credit.credit < 10 * PRICE_SCALE,
         "taker's credit must be debited for the real fill"
+    );
+}
+
+/// Build the standard test market but with `mark_price_minute` stamped, so the
+/// staleness gate is actually exercised. `market_account` above leaves the stamp
+/// at 0, which `is_mark_price_fresh` treats as "unstamped, preserve pre-upgrade
+/// behaviour" — fresh. That is why every other test in this file is unaffected.
+fn market_account_stamped(program_id: &Pubkey, market_index: u16, minute: u16) -> Account {
+    let mut m = Market::zeroed();
+    m.discriminator = DISC_MARKET;
+    m.market_index = market_index;
+    m.max_leverage = 20;
+    m.taker_fee_bps = 10;
+    m.maker_rebate_bps = 5;
+    m.tick_size = 1_000;
+    m.lot_size = 100_000_000;
+    m.last_mark_price = 150 * PRICE_SCALE;
+    m.set_mark_price_minute(minute);
+    program_account(program_id, bytemuck::bytes_of(&m))
+}
+
+/// S2-X03 — a MARKET order may not be sized off a stale mark.
+///
+/// `place_order` accepted `market.last_mark_price` after a bare `== 0` test. The
+/// staleness gate already existed and every other L1 consumer went through it
+/// (close_position, execute_trigger, claim_funding) — but the entry point that
+/// OPENS the position did not, so you could enter a market at a price no
+/// instruction would let you leave at. Live, that mark is 16 days old ($74.11
+/// against a $91.85 oracle) and margins a MARKET order ~24% light.
+///
+/// Mollusk's default Clock is unix_timestamp 0, so `now_min` is 0; a stamp of
+/// 100 is `0u16.wrapping_sub(100) = 65436` minutes old, far past the 30-minute
+/// window.
+#[test]
+fn test_place_order_market_rejects_stale_mark_price() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let taker = Pubkey::new_unique();
+
+    let (market, _) = Pubkey::find_program_address(&[SEED_MARKET, &0u16.to_le_bytes()], &program_id);
+    let (order_book, _) =
+        Pubkey::find_program_address(&[SEED_ORDERBOOK, &0u16.to_le_bytes()], &program_id);
+    let credit_pda = Pubkey::new_unique();
+
+    let ob_data = order_book_data(0, 128, 64, 256);
+    let (global_pk, global_acc) = global_state_account(&program_id);
+
+    let accounts = vec![
+        (market, market_account_stamped(&program_id, 0, 100)),
+        (order_book, program_account(&program_id, &ob_data)),
+        (credit_pda, credit_account(&program_id, &taker, 0, 10 * PRICE_SCALE)),
+        (taker, Account::default()),
+        (global_pk, global_acc),
+    ];
+
+    let ix = place_order_ix(
+        &program_id,
+        market,
+        order_book,
+        credit_pda,
+        taker,
+        global_pk,
+        SIDE_ASK,
+        ORDER_TYPE_MARKET,
+        0, // MARKET: price is ignored, the mark is the reference
+        100_000_000,
+        false,
+    );
+    let res = m.process_instruction(&ix, &accounts);
+
+    assert_eq!(
+        res.program_result,
+        MolluskResult::Failure(ProgramError::Custom(SlipstreamError::OracleStale as u32)),
+        "a MARKET order against a 16-day-stale mark must be rejected with \
+         OracleStale, not sized off it"
+    );
+}
+
+/// Companion: the same MARKET order against a FRESHLY stamped mark must get past
+/// the gate. Without this, the test above would still pass if the gate rejected
+/// every MARKET order unconditionally.
+///
+/// `now_min` is 0, so a stamp of 65530 reads as `0u16.wrapping_sub(65530) = 6`
+/// minutes old — inside the 30-minute window.
+#[test]
+fn test_place_order_market_accepts_fresh_mark_price() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let maker = Pubkey::new_unique();
+    let taker = Pubkey::new_unique();
+
+    let (market, _) = Pubkey::find_program_address(&[SEED_MARKET, &0u16.to_le_bytes()], &program_id);
+    let (order_book, _) =
+        Pubkey::find_program_address(&[SEED_ORDERBOOK, &0u16.to_le_bytes()], &program_id);
+    let credit_pda = Pubkey::new_unique();
+
+    let rest_price = 150 * PRICE_SCALE;
+    let rest_size = 100_000_000u64;
+    let ob_data = order_book_with_resting_bid(0, &maker, rest_price, rest_size, 750_000);
+    let (global_pk, global_acc) = global_state_account(&program_id);
+
+    let accounts = vec![
+        (market, market_account_stamped(&program_id, 0, 65_530)),
+        (order_book, program_account(&program_id, &ob_data)),
+        (credit_pda, credit_account(&program_id, &taker, 0, 10 * PRICE_SCALE)),
+        (taker, Account::default()),
+        (global_pk, global_acc),
+    ];
+
+    let ix = place_order_ix(
+        &program_id,
+        market,
+        order_book,
+        credit_pda,
+        taker,
+        global_pk,
+        SIDE_ASK,
+        ORDER_TYPE_MARKET,
+        0,
+        rest_size,
+        false,
+    );
+    let res = m.process_instruction(&ix, &accounts);
+
+    assert!(
+        matches!(res.program_result, MolluskResult::Success),
+        "a MARKET order against a fresh mark must still go through: {:?}",
+        res.program_result
     );
 }
