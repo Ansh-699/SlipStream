@@ -26,6 +26,10 @@ function keeper(name, script, extraEnv) {
     args: `--env-file=${ENV_FILE} src/${script}`,
     interpreter: "none",
     autorestart: true,
+    // Set on the production box (kept): keepers sit ~58M, so 220M is a leak
+    // guard, not a normal-operation bound. A memory restart counts against
+    // max_restarts, which is why that ceiling is raised rather than removed.
+    max_memory_restart: "220M",
     // S7-02. The quota burn this policy was written against is a restart *rate*
     // problem, but `max_restarts: 50` + `restart_delay: 5000` bounded the
     // restart *count*: ~4 minutes of boot-time failure exhausted the budget and
