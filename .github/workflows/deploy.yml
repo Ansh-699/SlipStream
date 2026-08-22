@@ -1,0 +1,71 @@
+name: Deploy frontend
+
+# Deploys the frontend to the production droplet on every push to master.
+#
+# The SSH key in DEPLOY_SSH_KEY is NOT the box's admin key. It is a dedicated
+# ed25519 key whose authorized_keys entry is
+#     restrict,command="/opt/slipstream/deploy.sh master"
+# so it cannot open a shell, forward a port, or run anything else — the remote
+# command below is ignored and the deploy script runs instead. A leaked secret
+# can trigger a deploy of master and nothing more. This matters here: S10-01 in
+# the audit is precisely "one key does everything", and reusing the root key for
+# CI would have made that worse.
+#
+# Frontend only. The keepers hold live delegation and settlement-cursor state
+# and are deliberately left running — see deploy.sh.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+# Never let two deploys interleave on the box. cancel-in-progress is false on
+# purpose: a half-finished npm ci / next build is worse than a queued run.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Deploy over SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "::error::DEPLOY_SSH_KEY and DEPLOY_HOST must be set as repository secrets"
+            exit 1
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Pin the host key rather than accepting blindly on every run.
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # IdentitiesOnly so only this key is offered. The remote command is a
+          # placeholder — the forced command in authorized_keys is what runs.
+          ssh -i ~/.ssh/deploy_key \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o ServerAliveInterval=30 \
+              "root@$DEPLOY_HOST" deploy
+
+      - name: Smoke test
+        env:
+          SITE: https://slipstream.ansht.tech
+        run: |
+          set -euo pipefail
+          sleep 10
+          fail=0
+          for p in / /trade /api/status; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$SITE$p" || echo 000)
+            echo "$p -> $code"
+            [ "$code" = "200" ] || fail=1
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::site did not come back healthy after deploy"
+            exit 1
+          fi
