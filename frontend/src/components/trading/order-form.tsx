@@ -487,8 +487,8 @@ export function OrderForm() {
             disabled
               ? "cursor-not-allowed bg-[var(--t-surface-3)] text-[var(--t-text-2)]"
               : side === "long"
-                ? "bg-[var(--t-up-3)] text-white hover:bg-[var(--t-up-2)]"
-                : "bg-[var(--t-down-3)] text-white hover:bg-[var(--t-down-2)]"
+                ? "bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)]"
+                : "bg-[var(--t-down-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-down-2)]"
           }`}
         >
           {submitting

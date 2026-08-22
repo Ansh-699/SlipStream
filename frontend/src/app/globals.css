@@ -1344,21 +1344,33 @@ input[type="number"] {
 }
 
 /* ── /trade terminal surface ─────────────────────────────────────────────
-   A flat, dense exchange terminal: one near-black ground, hairline dividers,
-   no glass. Deliberately theme-independent — this surface is dark-only, so the
-   values are literal rather than tokenised through the light remap above. The
-   marketing surfaces keep the liquid-glass world described in brand.md. */
+   A flat, dense exchange terminal: one ground, hairline dividers, no glass.
+   The marketing surfaces keep the liquid-glass world described in brand.md.
+
+   These --tk-* names are ALIASES of the --t-* tokens, not a second palette.
+   They used to be literal dark values, with a comment saying this surface was
+   "deliberately theme-independent... dark-only". That was true when it was
+   written. Once the terminal was tokenised and given a toggle, it stopped being
+   true and nobody came back here — so the app had two token sets for one
+   surface, only one of which followed the theme.
+
+   The result was measurable and severe: `.terminal` painted --tk-bg (#0b0d0e)
+   across the whole 1571x718 shell while the text on it correctly resolved to
+   the LIGHT --t-text (#0e1417). Dark ink on a dark ground: 1.05:1, on the
+   wordmark, every market-bar value, and every status row. 44 failing pairs.
+
+   Aliasing rather than deleting keeps the 14 rules below working untouched. */
 .terminal {
-  --tk-bg: #0b0d0e;
-  --tk-elev: #121516;
-  --tk-hover: #171b1c;
-  --tk-line: #1d2224;
-  --tk-line-soft: #15191a;
-  --tk-text: #e6e9ea;
-  --tk-text-2: #a2abb1;
-  --tk-text-3: #838c92;
-  --tk-green: #22c55e;
-  --tk-red: #ef4444;
+  --tk-bg: var(--t-bg);
+  --tk-elev: var(--t-surface);
+  --tk-hover: var(--t-surface-3);
+  --tk-line: var(--t-border);
+  --tk-line-soft: var(--t-surface-2);
+  --tk-text: var(--t-text);
+  --tk-text-2: var(--t-text-2);
+  --tk-text-3: var(--t-text-3);
+  --tk-green: var(--t-up);
+  --tk-red: var(--t-down);
   font-family: var(--font-ui), ui-sans-serif, system-ui, sans-serif;
   background: var(--tk-bg);
   color: var(--tk-text);
@@ -1460,6 +1472,11 @@ input[type="number"] {
   --t-down-2: #a10f33;
   --t-down-3: #8c0d2c;
   --t-down-bg: #fdeaee;
+  /* Ink for text sitting ON a saturated fill (--t-up-3 / --t-down-3). Those
+     fills are dark in BOTH themes, so this stays white in both. Without it,
+     filled buttons took `text-white` -- which the light remap above rewrites to
+     dark ink -- and rendered black-on-dark-green at 2.26:1. */
+  --t-on-fill: #ffffff;
   --t-warn: #a2490a;      /*  6.0:1 on white, 5.1:1 on --t-surface-3.
                              amber-700 (#b45309) measured 4.27:1 against
                              surface-3 -- an AA failure only the darkest
@@ -1485,6 +1502,7 @@ input[type="number"] {
   --t-down-2: #c04447;
   --t-down-3: #a93436;
   --t-down-bg: #2b1416;
+  --t-on-fill: #ffffff;
   --t-warn: #f59e0b;
   --t-link: #58a6ff;
 }

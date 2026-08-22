@@ -479,7 +479,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                       <button
                         onClick={() => handleSetTriggers(positions[0].isLong)}
                         disabled={triggerBusy}
-                        className="h-7 px-3 rounded-[6px] text-[13px] font-semibold bg-[var(--t-up-3)] text-[var(--t-text-hi)] hover:bg-[var(--t-up-2)] disabled:bg-[var(--t-surface-3)] disabled:text-[var(--t-text-2)] disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
+                        className="h-7 px-3 rounded-[6px] text-[13px] font-semibold bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)] disabled:bg-[var(--t-surface-3)] disabled:text-[var(--t-text-2)] disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
                       >
                         {triggerBusy ? "…" : "Set"}
                       </button>

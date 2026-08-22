@@ -20,7 +20,7 @@ const HINT = "text-[10px] leading-tight text-[var(--t-text-3)]";
 
 function primaryBtn(disabled: boolean) {
   return `h-[34px] w-full rounded-[6px] text-[13px] font-semibold ${FOCUS} ${
-    disabled ? "cursor-not-allowed bg-[var(--t-surface-3)] text-[var(--t-text-2)]" : "bg-[var(--t-up-3)] text-white hover:bg-[var(--t-up-2)]"
+    disabled ? "cursor-not-allowed bg-[var(--t-surface-3)] text-[var(--t-text-2)]" : "bg-[var(--t-up-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-up-2)]"
   }`;
 }
 
