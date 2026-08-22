@@ -251,8 +251,9 @@ export interface TradingCredit {
 const ZERO_PUBKEY = new PublicKey(new Uint8Array(32));
 
 export function decodeTradingCredit(data: Buffer): TradingCredit {
-  if (data.length < TRADING_CREDIT_SIZE)
-    throw new Error("TradingCredit buffer too small");
+  // Accept the legacy 56-byte layout the program still supports
+  // (trading_credit.rs:48-54). See the frontend twin for the full note.
+  if (data.length < 56) throw new Error("TradingCredit buffer too small");
   if (data[0] !== DISC_TRADING_CREDIT)
     throw new Error("Invalid TradingCredit discriminator");
   const credit = readU64LE(data, 40);

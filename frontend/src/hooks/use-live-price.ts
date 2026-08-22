@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer } from "react";
 import { ER_RPC_DIRECT } from "@/lib/manifest";
 
 /**
@@ -70,67 +70,114 @@ function decodeFeed(b64: string): LivePrice | null {
   };
 }
 
+/**
+ * ONE socket for the whole app, shared by every caller.
+ *
+ * useLivePrice is called at five mount points on /trade (market-bar,
+ * price-chart, status-panel, status-strip, use-mark-price) and each used to
+ * open its own WebSocket and its own accountSubscribe against the same feed —
+ * five sockets, five 20 msg/s streams, five setState storms driving five
+ * separate render trees, and five independent reconnect loops.
+ *
+ * The reconnect also had no discipline: a flat 2s retry, no attempt counter, no
+ * cap, no jitter. Against an endpoint that accepts TCP and then stalls (what a
+ * proxy or LB outage looks like, as opposed to outright refusal) those sockets
+ * pile up in CONNECTING against the per-host cap. It now backs off
+ * geometrically to a ceiling.
+ */
+interface FeedState {
+  live: LivePrice | null;
+  connected: boolean;
+}
+
+const feed: FeedState = { live: null, connected: false };
+const feedSubscribers = new Set<() => void>();
+let feedSocket: WebSocket | null = null;
+let feedRetry: ReturnType<typeof setTimeout> | null = null;
+let feedFailures = 0;
+
+function publish() {
+  feedSubscribers.forEach((f) => f());
+}
+
+function openFeed() {
+  if (feedSocket) return;
+  const wsUrl = ER_RPC_DIRECT.replace(/^http/, "ws");
+  const ws = new WebSocket(wsUrl);
+  feedSocket = ws;
+
+  ws.onopen = () => {
+    feedFailures = 0;
+    feed.connected = true;
+    publish();
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "accountSubscribe",
+        // `processed` is the whole point: waiting for `confirmed` would throw
+        // away the 50ms cadence we came here for.
+        params: [SOL_USD_FEED, { encoding: "base64", commitment: "processed" }],
+      })
+    );
+  };
+
+  ws.onmessage = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.method !== "accountNotification") return;
+      const b64 = msg.params?.result?.value?.data?.[0];
+      if (!b64) return;
+      const next = decodeFeed(b64);
+      if (next) {
+        feed.live = next;
+        publish();
+      }
+    } catch {
+      /* ignore malformed frame */
+    }
+  };
+
+  ws.onerror = () => {
+    feed.connected = false;
+    publish();
+  };
+
+  ws.onclose = () => {
+    feed.connected = false;
+    feedSocket = null;
+    publish();
+    if (feedSubscribers.size === 0) return; // nobody is listening; stay closed
+    feedFailures = Math.min(feedFailures + 1, 5);
+    const delay = Math.min(2000 * 2 ** (feedFailures - 1), 30_000);
+    feedRetry = setTimeout(openFeed, delay);
+  };
+}
+
+function closeFeedIfIdle() {
+  if (feedSubscribers.size > 0) return;
+  if (feedRetry) {
+    clearTimeout(feedRetry);
+    feedRetry = null;
+  }
+  const ws = feedSocket;
+  feedSocket = null;
+  ws?.close();
+  feed.connected = false;
+}
+
 export function useLivePrice(): { live: LivePrice | null; connected: boolean } {
-  const [live, setLive] = useState<LivePrice | null>(null);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [, rerender] = useReducer((c: number) => c + 1, 0);
 
   useEffect(() => {
-    let cancelled = false;
-    let retry: ReturnType<typeof setTimeout> | null = null;
-    const wsUrl = ER_RPC_DIRECT.replace(/^http/, "ws");
-
-    function connect() {
-      if (cancelled) return;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (cancelled) return;
-        setConnected(true);
-        ws.send(
-          JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "accountSubscribe",
-            // `processed` is the whole point: waiting for `confirmed` would
-            // throw away the 50ms cadence we came here for.
-            params: [SOL_USD_FEED, { encoding: "base64", commitment: "processed" }],
-          })
-        );
-      };
-
-      ws.onmessage = (ev) => {
-        if (cancelled) return;
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.method !== "accountNotification") return;
-          const b64 = msg.params?.result?.value?.data?.[0];
-          if (!b64) return;
-          const next = decodeFeed(b64);
-          if (next) setLive(next);
-        } catch {
-          /* ignore malformed frame */
-        }
-      };
-
-      ws.onerror = () => !cancelled && setConnected(false);
-
-      ws.onclose = () => {
-        if (cancelled) return;
-        setConnected(false);
-        retry = setTimeout(connect, 2000);
-      };
-    }
-
-    connect();
+    const notify = () => rerender();
+    feedSubscribers.add(notify);
+    openFeed();
     return () => {
-      cancelled = true;
-      if (retry) clearTimeout(retry);
-      wsRef.current?.close();
-      wsRef.current = null;
+      feedSubscribers.delete(notify);
+      closeFeedIfIdle();
     };
   }, []);
 
-  return { live, connected };
+  return { live: feed.live, connected: feed.connected };
 }

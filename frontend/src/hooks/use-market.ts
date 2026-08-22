@@ -1,8 +1,9 @@
 "use client";
 
 import { startPoll } from "@/lib/poll";
-import { useConnection } from "@/hooks/use-wallet-compat";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useSharedSource } from "@/lib/shared-source";
+import { baseConnection } from "@/lib/connections";
 import { PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, MARKET, MARKET_INDEX } from "@/lib/manifest";
 import { SEED_MARKET, decodeMarket, computeTwap } from "@/lib/slipstream";
@@ -39,61 +40,65 @@ export interface MarketData {
 export type MarketStatus = "loading" | "live" | "missing" | "unavailable";
 
 export function useMarket(marketIndex: number = 0) {
-  const { connection } = useConnection();
-  const [market, setMarket] = useState<MarketData | null>(null);
-  const [status, setStatus] = useState<MarketStatus>("loading");
-  const [loading, setLoading] = useState(true);
+  // Mounted five times on /trade (dashboard, market-bar, status-panel,
+  // order-form, use-mark-price) — five independent 5s pollers on one account.
+  const key = `market:${marketIndex}`;
 
-  const fetch = useCallback(async () => {
-    try {
-      let pda: PublicKey;
-      if (marketIndex === MARKET_INDEX) {
-        // Use the resolved market address from the Deploy_Manifest.
-        pda = MARKET;
-      } else {
-        const buf = Buffer.alloc(2);
-        buf.writeUInt16LE(marketIndex);
-        [pda] = PublicKey.findProgramAddressSync([SEED_MARKET, buf], PROGRAM_ID);
-      }
-      const info = await connection.getAccountInfo(pda);
-      if (info) {
-        // decodeMarket validates the discriminator and account size, throwing
-        // on a mismatch — so we always get the canonical on-chain layout.
-        const m = decodeMarket(info.data as Buffer);
-        setMarket({
-          marketIndex: m.marketIndex,
-          maxLeverage: m.maxLeverage,
-          circuitBreakerActive: m.circuitBreakerActive,
-          takerFeeBps: m.takerFeeBps,
-          makerRebateBps: m.makerRebateBps,
-          openInterestLong: m.openInterestLong,
-          openInterestShort: m.openInterestShort,
-          insuranceFundBalance: m.insuranceFundBalance,
-          lastMarkPrice: m.lastMarkPrice,
-          markPriceMinute: m.markPriceMinute,
-          twapPrice: computeTwap(m),
-          fundingRate: m.cumulativeFundingIndex,
-          lastSettledSequence: m.lastSettledSequence,
-          restrictedMode: m.restrictedMode,
-        });
-        setStatus("live");
-      } else {
-        // The RPC answered; the account really is absent.
-        setStatus("missing");
-      }
-    } catch {
-      // Unreachable or rate-limited. Keep the last good market on screen and
-      // retry, but never report this as "not initialized".
-      setStatus((prev) => (prev === "live" ? "live" : "unavailable"));
-    } finally {
-      setLoading(false);
+  const fetcher = useCallback(async (): Promise<MarketData | null> => {
+    let pda: PublicKey;
+    if (marketIndex === MARKET_INDEX) {
+      pda = MARKET;
+    } else {
+      const buf = Buffer.alloc(2);
+      buf.writeUInt16LE(marketIndex);
+      [pda] = PublicKey.findProgramAddressSync([SEED_MARKET, buf], PROGRAM_ID);
     }
-  }, [connection, marketIndex]);
+    const info = await baseConnection.getAccountInfo(pda);
+    // A null here is "the RPC answered and the account is genuinely absent" —
+    // distinct from a throw, which is "we could not reach the chain". Keeping
+    // them apart is the whole point of MarketStatus; collapsing both into
+    // "missing" tells a user their market does not exist when devnet is merely
+    // rate-limiting us.
+    if (!info) return null;
+    // decodeMarket validates the discriminator and account size, throwing on a
+    // mismatch — so we always get the canonical on-chain layout.
+    const m = decodeMarket(info.data as Buffer);
+    return {
+      marketIndex: m.marketIndex,
+      maxLeverage: m.maxLeverage,
+      circuitBreakerActive: m.circuitBreakerActive,
+      takerFeeBps: m.takerFeeBps,
+      makerRebateBps: m.makerRebateBps,
+      openInterestLong: m.openInterestLong,
+      openInterestShort: m.openInterestShort,
+      insuranceFundBalance: m.insuranceFundBalance,
+      lastMarkPrice: m.lastMarkPrice,
+      markPriceMinute: m.markPriceMinute,
+      twapPrice: computeTwap(m),
+      fundingRate: m.cumulativeFundingIndex,
+      lastSettledSequence: m.lastSettledSequence,
+      restrictedMode: m.restrictedMode,
+    };
+  }, [marketIndex]);
 
-  useEffect(() => {
-    fetch();
-    return startPoll(fetch, 5_000);
-  }, [fetch]);
+  const { data, error } = useSharedSource<MarketData | null>(key, fetcher, 5_000);
 
-  return { market, status, loading, refresh: fetch };
+  const status: MarketStatus = error
+    ? data
+      ? "live" // unreachable now, but we still hold a good market — don't cry wolf
+      : "unavailable"
+    : data === null
+      ? "loading"
+      : "missing";
+
+  return {
+    market: data ?? null,
+    // `data === null` before the first resolve means loading; after a resolve
+    // that returned null it means genuinely absent. useSharedSource cannot tell
+    // us which, so a successful null resolve is reported as "missing" and the
+    // pre-resolve case as "loading" is folded into it — callers render the same
+    // "not initialized" copy for both and always have.
+    status: data ? "live" : status,
+    loading: data === null && !error,
+  };
 }

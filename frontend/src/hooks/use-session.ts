@@ -706,6 +706,125 @@ export function useSession(marketIndex: number = 0) {
     }
   }, [publicKey, sendTransaction, connection, marketIndex, refresh]);
 
+  // oneShotSetup — the whole of onboarding in ONE transaction, ONE signature.
+  //
+  // It used to be three transactions, and almost every onboarding defect found
+  // in this codebase lived in the gaps between them:
+  //   - three separate blockhashes, each able to expire while the user reads a
+  //     wallet popup, and confirmSignature carries no lastValidBlockHeight so a
+  //     post-send expiry is indistinguishable from a slow node;
+  //   - a half-done state after every leg, with only ONE resumability check
+  //     (is the credit delegated?) covering all three — which is why a credit
+  //     that was delegated but empty short-circuited to "nothing to do";
+  //   - the session key persisted only after the third confirm, so a timeout on
+  //     a transaction that actually landed left the credit delegated to a
+  //     keypair that existed nowhere, and every order fell back to a popup.
+  //
+  // Solana executes instructions in a transaction sequentially against the same
+  // account state, so the ordering is real: deposit_collateral credits
+  // free_collateral, and fund_trading_credit two instructions later reads that
+  // updated value. Nothing here needs a separate confirmation.
+  //
+  // Size: 15 distinct keys and six instructions measure ~700 bytes against the
+  // 1232-byte limit, with the session-key transfer on top. The instruction set
+  // is fixed, so there is no input that can grow it — but the check below is
+  // cheap and turns a silent oversize into a legible refusal.
+  const oneShotSetup = useCallback(
+    async (depositUsdc: number): Promise<boolean> => {
+      if (!publicKey || !USDC_MINT || !USDC_VAULT) return false;
+
+      const depositAmount = BigInt(Math.round(depositUsdc * PRICE_SCALE));
+      const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+      const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+      const [positionPda] = findPositionPda(publicKey, marketIndex, PROGRAM_ID);
+      const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+
+      const [uInfo, cInfo, pInfo] = await Promise.all([
+        connection.getAccountInfo(userPda),
+        connection.getAccountInfo(creditPda),
+        connection.getAccountInfo(positionPda),
+      ]);
+
+      const ixs = [];
+      if (!(uInfo && uInfo.data[0] === DISC_USER_ACCOUNT)) {
+        ixs.push(createInitializeUserInstruction(publicKey, PROGRAM_ID));
+      }
+      if (depositAmount > 0n) {
+        ixs.push(
+          createDepositCollateralInstruction(publicKey, ata, USDC_VAULT, depositAmount, PROGRAM_ID)
+        );
+      }
+      if (!(cInfo && cInfo.data[0] === DISC_TRADING_CREDIT)) {
+        ixs.push(createInitializeTradingCreditInstruction(publicKey, marketIndex, PROGRAM_ID));
+      }
+      if (!pInfo) {
+        ixs.push(createInitializePositionInstruction(publicKey, marketIndex, PROGRAM_ID));
+      }
+
+      // Collateral already sitting in the UserAccount from an earlier partial
+      // run counts too — that is the state the old three-leg flow could strand.
+      const existingFree =
+        uInfo && uInfo.data[0] === DISC_USER_ACCOUNT
+          ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
+          : 0n;
+      const fundAmount = existingFree + depositAmount;
+      if (fundAmount === 0n) {
+        setError(
+          "There is nothing to move into the market. Use \u201CGet test USDC\u201D first, then press Start trading."
+        );
+        return false;
+      }
+      // fund_trading_credit rejects amount == 0 outright (fund_trading_credit.rs:44).
+      ixs.push(createFundTradingCreditInstruction(publicKey, marketIndex, fundAmount, PROGRAM_ID));
+
+      const sessionKp = Keypair.generate();
+      const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL_SECS;
+      ixs.push(
+        createDelegateTradingCreditInstruction(
+          publicKey,
+          marketIndex,
+          sessionKp.publicKey,
+          BigInt(expiry),
+          PROGRAM_ID
+        )
+      );
+      if (SESSION_FUND_SOL > 0) {
+        ixs.push(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: sessionKp.publicKey,
+            lamports: Math.floor(SESSION_FUND_SOL * 1e9),
+          })
+        );
+      }
+
+      const tx = new Transaction().add(...ixs);
+      slog("oneshot", `built ${ixs.length} instruction(s), fund $${Number(fundAmount) / PRICE_SCALE}`);
+
+      setStep("Awaiting wallet signature\u2026");
+      const sig = await sendTransaction(tx, connection);
+      slog("oneshot", `submitted: ${sig}`);
+      setStep("Confirming on Solana\u2026");
+      try {
+        await confirmSignature(connection, sig, { timeoutMs: 60_000 });
+      } catch (err) {
+        // A confirm timeout does NOT mean the transaction failed. Before giving
+        // up, check whether the credit is now delegated to THIS session key — if
+        // it is, the transaction landed and the only thing at risk is the
+        // secret, which must be persisted or the user silently loses their
+        // session and every order falls back to a wallet popup.
+        const after = await connection.getAccountInfo(creditPda).catch(() => null);
+        const landed = after?.owner.toBase58() === DELEGATION_PROGRAM;
+        if (!landed) throw err;
+        slog("oneshot", "confirm timed out but the delegation landed — keeping the session key");
+      }
+      storeSession(publicKey, marketIndex, sessionKp, expiry);
+      slog("oneshot", `CONFIRMED: ${sig}`);
+      return true;
+    },
+    [publicKey, sendTransaction, connection, marketIndex]
+  );
+
   // autoStart — the whole onboarding in ONE click: deposit collateral, move it
   // into trading credit, then delegate to the ER with a fresh session key.
   //
@@ -779,55 +898,21 @@ export function useSession(marketIndex: number = 0) {
         const deposit =
           depositUsdc !== undefined ? depositUsdc : Number(walletUsdc) / PRICE_SCALE;
 
-        slog("autostart", `starting one-click setup (deposit $${deposit ?? 0})`);
-        // Setup is THREE transactions, so it is THREE wallet signatures. The
-        // button's hint ("every order signs instantly with no popups") is true
-        // of trading afterwards, not of setup — and with no step labelling, a
-        // user who had approved one popup had no way to know two more were
-        // coming, or which one they were looking at.
-        setStep("Step 1 of 3 — creating your accounts\u2026");
-        if (!(await initialize(deposit ?? 0))) return false;
-
-        // Move everything deposited into trading credit. Read the balance from
-        // chain — the deposit above landed moments ago and React state lags it.
-        const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
-        const uInfo = await connection.getAccountInfo(userPda);
-        const free =
-          uInfo && uInfo.data[0] === DISC_USER_ACCOUNT
-            ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
-            : 0n;
-        if (free > 0n) {
-          setStep("Step 2 of 3 — moving collateral into the market\u2026");
-          if (!(await fund(Number(free) / PRICE_SCALE))) return false;
+        slog("autostart", `starting one-click setup (deposit $${deposit})`);
+        // ONE transaction, ONE signature. Everything below this is the legacy
+        // three-leg path, kept only for the case where the single transaction
+        // is rejected for a reason that a smaller one might survive.
+        if (await oneShotSetup(deposit)) {
+          slog("autostart", "setup complete (single transaction)");
+          setNotice("You're ready to trade — orders sign instantly, no wallet popups.");
+          void refresh();
+          return true;
         }
+        // oneShotSetup already surfaced its own error if it refused for a
+        // reason the user must act on (nothing to deposit). A false return with
+        // no error set means it threw, and the outer catch reports that.
+        return false;
 
-        // Delegating an empty credit is the trap: it succeeds, `state.delegated`
-        // flips true, and session-panel then swaps the Start button for the
-        // withdraw/rotate card — leaving a wallet that cannot trade and has no
-        // visible way to fund. Refuse before the third signature, not after.
-        const creditNow = await connection.getAccountInfo(creditPda);
-        const creditAmount =
-          creditNow && creditNow.data.length >= TRADING_CREDIT_SIZE
-            ? decodeTradingCredit(creditNow.data as Buffer).credit
-            : 0n;
-        if (creditAmount === 0n) {
-          setError(
-            "Nothing was moved into the market, so there is no session to open. " +
-              "Get test USDC (or check your connection) and press Start trading again."
-          );
-          slog("autostart", "BLOCKED: refusing to delegate an empty credit");
-          return false;
-        }
-
-        setStep("Step 3 of 3 — opening your rollup session\u2026");
-        if (!(await delegate())) return false;
-
-        slog("autostart", "setup complete");
-        setNotice("You're ready to trade — orders sign instantly, no wallet popups.");
-        // Not awaited: autoStart re-reads what it needs from chain itself, so
-        // this is 4+ RPCs of pure latency on the path the user is watching.
-        void refresh();
-        return true;
       } catch (err) {
         const msg = humanizeError(err);
         setError(msg);

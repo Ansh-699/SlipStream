@@ -287,11 +287,22 @@ export interface TradingCredit {
 /** The all-zero pubkey used on-chain to mean "no session authority". */
 const ZERO_PUBKEY = new PublicKey(new Uint8Array(32));
 
+/** The pre-session-keys layout: the first 56 bytes of the current struct,
+ *  byte for byte. `trading_credit.rs:48-54` documents it and states that live
+ *  accounts on devnet still carry it, and `read_common` exists on the Rust side
+ *  specifically to read them. */
+export const TRADING_CREDIT_LEGACY_SIZE = 56;
+
 export function decodeTradingCredit(data: Buffer): TradingCredit {
-  if (data.length < TRADING_CREDIT_SIZE)
+  // Accept the legacy 56-byte layout. Requiring the full 96 was the Round-3
+  // tail pattern inverted: the PROGRAM tolerates the older account, the decoder
+  // did not — so a wallet holding real funds in a legacy credit threw here and
+  // its balance never loaded anywhere in the UI.
+  if (data.length < TRADING_CREDIT_LEGACY_SIZE)
     throw new Error("TradingCredit buffer too small");
   if (data[0] !== DISC_TRADING_CREDIT)
     throw new Error("Invalid TradingCredit discriminator");
+  const isLegacy = data.length < TRADING_CREDIT_SIZE;
   const credit = readU64LE(data, 40);
   const committed = readU64LE(data, 48);
   return {
@@ -303,8 +314,10 @@ export function decodeTradingCredit(data: Buffer): TradingCredit {
     credit,
     committed,
     // New session fields: session_authority [u8;32] @ 56, session_expiry i64 @ 88.
-    sessionAuthority: readPubkey(data, 56),
-    sessionExpiry: readI64LE(data, 88),
+    // A legacy account has neither — all-zero authority and expiry 0 is exactly
+    // what `is_authorized_signer` treats as "no active session".
+    sessionAuthority: isLegacy ? ZERO_PUBKEY : readPubkey(data, 56),
+    sessionExpiry: isLegacy ? 0n : readI64LE(data, 88),
     available: credit > committed ? credit - committed : 0n,
   };
 }
@@ -526,6 +539,26 @@ export interface OrderBookState {
 
 export function decodeOrderBook(data: Buffer): OrderBookState {
   const header = decodeOrderBookHeader(data);
+
+  // The loops below trust maxOrderSlots / maxPriceLevelsPerSide / maxFillEvents
+  // straight from the header and read at increasing offsets. Without this check
+  // a short buffer — a header bumped ahead of a grow_orderbook realloc, an RPC
+  // dataSlice, a partial ER read — walks off the end: the numeric readers throw
+  // RangeError, and readPubkey is worse, because Buffer.subarray does NOT throw
+  // and silently yields a short view, so `new PublicKey()` fails with "Invalid
+  // public key input" naming nothing. The Rust side does exactly this check and
+  // refuses (order_book.rs:92-100); the TypeScript twin was missing it, and the
+  // caller swallows the throw and keeps showing a frozen ladder.
+  const needed = computeOrderBookAccountSize(
+    header.maxOrderSlots,
+    header.maxPriceLevelsPerSide,
+    header.maxFillEvents
+  );
+  if (data.length < needed) {
+    throw new Error(
+      `OrderBook buffer truncated: header declares ${needed} bytes, got ${data.length}`
+    );
+  }
 
   let offset = ORDER_BOOK_HEADER_SIZE;
 

@@ -1,8 +1,8 @@
 "use client";
 
 import { baseConnection, erConnection } from "@/lib/connections";
-import { startPoll } from "@/lib/poll";
-import { useCallback, useEffect, useState } from "react";
+import { useSharedSource } from "@/lib/shared-source";
+import { useCallback, useMemo } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
 import {
@@ -60,78 +60,75 @@ const EMPTY: OrderBookData = {
   updatedAt: null,
 };
 
-export function useOrderBook(marketIndex: number = 0) {
-  const [data, setData] = useState<OrderBookData>(EMPTY);
+export function useOrderBook(marketIndex: number = 0): OrderBookData {
+  // ONE poller for this market, however many components mount this hook. It is
+  // mounted three times on /trade (order-book-display, status-panel,
+  // fill-toasts) and the account is 626,736 bytes, so the two redundant copies
+  // every 2s were ~835 KB/s of pure duplication — and status-panel reads eight
+  // bytes of it. useErPosition and useOpenOrders pull the same account again on
+  // their own schedules; those are separate call sites, not separate data.
+  const key = `orderbook:${marketIndex}`;
 
-  const fetch = useCallback(async () => {
-    try {
-      let pda: PublicKey;
-      if (marketIndex === MARKET_INDEX) {
-        // Use the resolved orderbook address from the Deploy_Manifest.
-        pda = ORDER_BOOK;
-      } else {
-        const buf = Buffer.alloc(2);
-        buf.writeUInt16LE(marketIndex);
-        [pda] = PublicKey.findProgramAddressSync([SEED_ORDERBOOK, buf], PROGRAM_ID);
-      }
-
-      // The live book lives on the Ephemeral Rollup; try ER first, then base.
-      let info = null;
-      try {
-        const erConn = erConnection;
-        info = await erConn.getAccountInfo(pda);
-      } catch {
-        // ER unavailable — fall back to base RPC below.
-      }
-      if (!info) {
-        const baseConn = baseConnection;
-        info = await baseConn.getAccountInfo(pda);
-      }
-      if (!info) {
-        // Neither the ER nor the base layer returned the account.
-        setData((prev) => ({ ...prev, status: "unavailable" }));
-        return;
-      }
-
-      // Decode with the canonical SDK decoder (correct 88-byte order slots, etc).
-      const book = decodeOrderBook(info.data as Buffer);
-      const { bids, asks, spread } = buildLadders(book, { depth: 20 });
-
-      const trades: RecentTrade[] = recentFills(book, 40).map((fe) => ({
-        sequence: Number(fe.sequence),
-        price: Number(fe.price) / PRICE_SCALE,
-        size: Number(fe.quantity) / 1e9,
-        // makerSide is the resting side that was hit. If the maker was a bid,
-        // the taker sold into it; otherwise the taker bought.
-        side: fe.makerSide === SIDE_BID ? "sell" : "buy",
-        taker: fe.taker.toBase58(),
-        maker: fe.maker.toBase58(),
-      }));
-
-      setData({
-        bids,
-        asks,
-        spread,
-        trades,
-        nextFillSequence: Number(book.header.nextFillSequence),
-        status: bids.length || asks.length ? "live" : "empty",
-        updatedAt: Date.now(),
-      });
-    } catch {
-      // Transient RPC/decode error. Keep the last good ladder on screen — a
-      // single blip should not blank the book — but stop calling it live, so
-      // callers can say "stale" instead of showing frozen quotes as current.
-      setData((prev) => {
-        if (prev.updatedAt === null) return { ...prev, status: "unavailable" };
-        return prev.status === "stale" ? prev : { ...prev, status: "stale" };
-      });
+  const fetcher = useCallback(async (): Promise<OrderBookData> => {
+    let pda: PublicKey;
+    if (marketIndex === MARKET_INDEX) {
+      // Use the resolved orderbook address from the Deploy_Manifest.
+      pda = ORDER_BOOK;
+    } else {
+      const buf = Buffer.alloc(2);
+      buf.writeUInt16LE(marketIndex);
+      [pda] = PublicKey.findProgramAddressSync([SEED_ORDERBOOK, buf], PROGRAM_ID);
     }
+
+    // The live book lives on the Ephemeral Rollup; try ER first, then base.
+    let info = null;
+    try {
+      info = await erConnection.getAccountInfo(pda);
+    } catch {
+      // ER unavailable — fall back to base RPC below.
+    }
+    if (!info) {
+      info = await baseConnection.getAccountInfo(pda);
+    }
+    if (!info) {
+      // Neither layer returned it. Throwing (rather than returning an
+      // "unavailable" shape) lets the shared source keep the last good ladder,
+      // which the status mapping below then marks stale.
+      throw new Error("order book account not found on either layer");
+    }
+
+    const book = decodeOrderBook(info.data as Buffer);
+    const { bids, asks, spread } = buildLadders(book, { depth: 20 });
+
+    const trades: RecentTrade[] = recentFills(book, 40).map((fe) => ({
+      sequence: Number(fe.sequence),
+      price: Number(fe.price) / PRICE_SCALE,
+      size: Number(fe.quantity) / 1e9,
+      // makerSide is the resting side that was hit. If the maker was a bid,
+      // the taker sold into it; otherwise the taker bought.
+      side: fe.makerSide === SIDE_BID ? "sell" : "buy",
+      taker: fe.taker.toBase58(),
+      maker: fe.maker.toBase58(),
+    }));
+
+    return {
+      bids,
+      asks,
+      spread,
+      trades,
+      nextFillSequence: Number(book.header.nextFillSequence),
+      status: bids.length || asks.length ? "live" : "empty",
+      updatedAt: Date.now(),
+    };
   }, [marketIndex]);
 
-  useEffect(() => {
-    fetch();
-    return startPoll(fetch, 2_000);
-  }, [fetch]);
+  const { data, error } = useSharedSource<OrderBookData>(key, fetcher, 2_000);
 
-  return data;
+  // Same three-way distinction as before: never fetched, fetched and empty, or
+  // last-good-but-failing. A blip must not blank the book, and frozen quotes
+  // must not be shown as current.
+  return useMemo(() => {
+    if (!data) return error ? { ...EMPTY, status: "unavailable" as const } : EMPTY;
+    return error ? { ...data, status: "stale" as const } : data;
+  }, [data, error]);
 }

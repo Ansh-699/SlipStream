@@ -5,7 +5,8 @@ import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
-import { PROGRAM_ID } from "@/lib/manifest";
+import { findPositionPda } from "@/lib/slipstream";
+import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
 import {
   SEED_USER,
   DISC_POSITION,
@@ -81,19 +82,21 @@ export function usePositions(markPrice: bigint | null) {
   const fetch = useCallback(async () => {
     if (!publicKey) return;
     try {
-      const accounts = await connection.getProgramAccounts(PROGRAM_ID, {
-        filters: [
-          // getProgramAccounts memcmp `bytes` decodes as base58 by default (no
-          // `encoding` field here); base64 isn't valid base58, so this filter
-          // used to throw and get silently swallowed by the catch below, making
-          // every wallet's positions look empty regardless of actual state.
-          { memcmp: { offset: 0, bytes: bs58.encode([DISC_POSITION]) } },
-          { memcmp: { offset: 8, bytes: publicKey.toBase58() } },
-        ],
-      });
+      // The Position address is DERIVABLE, so scanning the program for it was
+      // never necessary. getProgramAccounts reads every account the program
+      // owns — including the 626 KiB order book and every other user's
+      // accounts — and applies the memcmp filters node-side afterwards. It was
+      // the single most expensive request this app made, it is the shape that
+      // returns 429/502 first under load, and the proxy comment at
+      // api/rpc/[layer]/route.ts:69-70 names it as how the project burned its
+      // RPC quota once already.
+      const [positionPda] = findPositionPda(publicKey, MARKET_INDEX, PROGRAM_ID);
+      const info = await connection.getAccountInfo(positionPda);
+      const accounts = info ? [{ account: info }] : [];
 
       const result: Omit<PositionData, "unrealizedPnl">[] = [];
       for (const { account } of accounts) {
+        if (account.data[0] !== DISC_POSITION) continue;
         const pos = decodePosition(account.data as Buffer);
         if (pos.size === 0n) continue;
 

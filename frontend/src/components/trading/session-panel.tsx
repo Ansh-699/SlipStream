@@ -177,7 +177,7 @@ export function SessionPanel() {
                 </button>
                 <p className={HINT}>
                   {state.usdcBalance > 0n
-                    ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session. Three wallet approvals — after that, orders sign instantly with no popups.`
+                    ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups.`
                     : "Get test USDC first — then this moves it into the market and opens your trading session."}
                 </p>
               </div>
