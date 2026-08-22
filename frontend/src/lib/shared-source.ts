@@ -96,6 +96,10 @@ export function useSharedSource<T>(
     };
   }, [key, intervalMs]);
 
-  const e = key ? entryFor<T>(key) : null;
+  // Read WITHOUT creating. entryFor() inserts into the registry as a side
+  // effect, and calling it here ran that mutation during the render phase —
+  // leaking an entry for any key that renders but never subscribes (a key that
+  // changes before the effect commits, or a component that unmounts first).
+  const e = key ? (registry.get(key) as Entry<T> | undefined) : undefined;
   return { data: e?.data ?? null, error: e?.error ?? null };
 }

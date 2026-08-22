@@ -44,7 +44,7 @@ export function useMarket(marketIndex: number = 0) {
   // order-form, use-mark-price) — five independent 5s pollers on one account.
   const key = `market:${marketIndex}`;
 
-  const fetcher = useCallback(async (): Promise<MarketData | null> => {
+  const fetcher = useCallback(async (): Promise<{ market: MarketData | null }> => {
     let pda: PublicKey;
     if (marketIndex === MARKET_INDEX) {
       pda = MARKET;
@@ -59,11 +59,16 @@ export function useMarket(marketIndex: number = 0) {
     // them apart is the whole point of MarketStatus; collapsing both into
     // "missing" tells a user their market does not exist when devnet is merely
     // rate-limiting us.
-    if (!info) return null;
+    // Wrapped, not bare null. useSharedSource uses `null` to mean "no value
+    // yet", so returning bare null here made a genuinely ABSENT market
+    // indistinguishable from one that simply had not loaded — collapsing
+    // MarketStatus's "missing" into "loading". That is exactly the distinction
+    // this file was written to preserve.
+    if (!info) return { market: null };
     // decodeMarket validates the discriminator and account size, throwing on a
     // mismatch — so we always get the canonical on-chain layout.
     const m = decodeMarket(info.data as Buffer);
-    return {
+    return { market: {
       marketIndex: m.marketIndex,
       maxLeverage: m.maxLeverage,
       circuitBreakerActive: m.circuitBreakerActive,
@@ -78,27 +83,26 @@ export function useMarket(marketIndex: number = 0) {
       fundingRate: m.cumulativeFundingIndex,
       lastSettledSequence: m.lastSettledSequence,
       restrictedMode: m.restrictedMode,
-    };
+    } };
   }, [marketIndex]);
 
-  const { data, error } = useSharedSource<MarketData | null>(key, fetcher, 5_000);
+  const { data, error } = useSharedSource<{ market: MarketData | null }>(key, fetcher, 5_000);
 
-  const status: MarketStatus = error
-    ? data
-      ? "live" // unreachable now, but we still hold a good market — don't cry wolf
-      : "unavailable"
-    : data === null
-      ? "loading"
-      : "missing";
+  const market = data?.market ?? null;
 
-  return {
-    market: data ?? null,
-    // `data === null` before the first resolve means loading; after a resolve
-    // that returned null it means genuinely absent. useSharedSource cannot tell
-    // us which, so a successful null resolve is reported as "missing" and the
-    // pre-resolve case as "loading" is folded into it — callers render the same
-    // "not initialized" copy for both and always have.
-    status: data ? "live" : status,
-    loading: data === null && !error,
-  };
+  // Four genuinely different states, kept apart:
+  //   loading      — no fetch has resolved yet
+  //   live         — we hold a market (even if the latest poll just failed;
+  //                  a blip must not relabel a good market as broken)
+  //   missing      — the RPC answered and the account is absent
+  //   unavailable  — we could not reach the chain and have nothing cached
+  const status: MarketStatus = market
+    ? "live"
+    : data
+      ? "missing"
+      : error
+        ? "unavailable"
+        : "loading";
+
+  return { market, status, loading: status === "loading" };
 }
