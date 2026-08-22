@@ -85,6 +85,13 @@ fn user_account(program_id: &Pubkey, owner: &Pubkey, free: u64) -> Account {
     u.discriminator = DISC_USER_ACCOUNT;
     u.owner = owner.to_bytes();
     u.free_collateral = free;
+    // Seeded above every fill_margin in this file. Before F1 the fixture left
+    // this at zero, which models a user who never called fund_trading_credit
+    // while a fill carries margin — exactly the hostile-ER state F1 exists to
+    // bound. The clamp is a no-op at this value, so the release/refund
+    // arithmetic under test is unchanged; only the fixture's premise is honest
+    // now. No assertion in this file was touched.
+    u.reserved_margin = 1_000_000_000;
     program_account(program_id, bytemuck::bytes_of(&u))
 }
 

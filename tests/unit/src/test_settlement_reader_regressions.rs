@@ -306,3 +306,101 @@ fn test_settle_rejects_sequence_above_cursor_range() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// F1 / F2 — defects introduced by the R4+R5 remediation wave.
+//
+// New tests only. Nothing above this line is touched: `tests/unit/src/lib.rs`
+// is frozen, so a new module cannot be declared and these live beside the R4
+// fixtures they reuse.
+// ---------------------------------------------------------------------------
+
+/// **F1.** The `filled_margin > fill_notional` bound R4 shipped is RELATIONAL:
+/// `fill_notional = compute_notional(fill.quantity, fill.price)` is computed
+/// from ER-authored quantity and price and is bounded only by `u64::MAX`. The
+/// absolute bound was supposed to come from the L1 debit, but that debit is
+/// `reserved_margin.saturating_sub(filled_margin)` and CANNOT FAIL — so a user
+/// who funded 0.10 USDC can have a fill stamped at 10.00 USDC of margin, watch
+/// the ledger saturate to zero, and end up with 200x what L1 ever recorded
+/// going in. `close_position` then releases it into `free_collateral` and
+/// `withdraw_collateral`'s gate 2 passes *because* the mint zeroed the ledger.
+///
+/// The invariant: a user's total claim on the vault after settlement can never
+/// exceed what `fund_trading_credit` recorded. Both legs are the same party, so
+/// this fixture holds the whole claim in three fields.
+#[test]
+fn test_settlement_cannot_credit_more_margin_than_the_ledger_backs() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let party = Pubkey::new_unique();
+    let f = fixture(program_id, party);
+
+    // Every atom L1 ever saw: `fund_trading_credit` is the ledger's sole raiser.
+    const FUNDED: u64 = 100_000; // 0.10 USDC
+    // compute_notional(QTY, PRICE) = 10_000_000, so this clears the RELATIONAL
+    // bound exactly while being 100x what was funded.
+    let forged: u64 = 10_000_000;
+
+    let fills = [fill(1, &party, forged)];
+    let log = fill_log_bytes(1, FILL_LOG_CAPACITY, &fills);
+
+    // free_collateral starts at 0 so the whole post-state is attributable.
+    let accounts = f.accounts(market(0), log, 0, FUNDED, 2);
+    let res = m.process_instruction(&f.ix(1), &accounts);
+    assert!(matches!(res.program_result, MolluskResult::Success), "{:?}", res.program_result);
+
+    let u: &UserAccount =
+        bytemuck::from_bytes(&res.resulting_accounts[3].1.data[..UserAccount::LEN]);
+    let pos: &Position = bytemuck::from_bytes(&res.resulting_accounts[4].1.data[..Position::LEN]);
+
+    let claim = pos.collateral as u128 + u.free_collateral as u128 + u.reserved_margin as u128;
+    assert!(
+        claim <= FUNDED as u128,
+        "settlement created value: total claim {} against a credit ledger of {} \
+         (position {}, free {}, ledger {}) — the vault pays the difference",
+        claim,
+        FUNDED,
+        pos.collateral,
+        u.free_collateral,
+        u.reserved_margin,
+    );
+}
+
+/// **F2.** R4 made `settle_from_log` stop at the first sequence gap and write
+/// only the prefix maximum, but it reports NOTHING — no log, no return data. So
+/// a keeper that submits a window of 3 and settles 1 cannot tell, and R5's
+/// per-(fill, side) `pending_fills` bump for the whole window leaves
+/// `2 x (window - settled)` permanently outstanding on every partial settle
+/// while the keeper's own cursor jumps to the window max and skips the
+/// remainder forever. Settlement must publish what it actually settled.
+///
+/// Log {1, 2, 5} with the cursor at 0: two settle, the third does not.
+#[test]
+fn test_settle_from_log_reports_what_it_actually_settled() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let party = Pubkey::new_unique();
+    let f = fixture(program_id, party);
+
+    let margin = QTY / MAX_LEVERAGE as u64;
+    let fills = [fill(1, &party, margin), fill(2, &party, margin), fill(5, &party, margin)];
+    let log = fill_log_bytes(3, FILL_LOG_CAPACITY, &fills);
+
+    let accounts = f.accounts(market(0), log, 1_000_000_000, 1_000_000_000, 6);
+    let res = m.process_instruction(&f.ix(10), &accounts);
+    assert!(matches!(res.program_result, MolluskResult::Success), "{:?}", res.program_result);
+
+    // 10 bytes: settled count (u16 LE) then the resulting cursor (u64 LE).
+    assert_eq!(
+        res.return_data.len(),
+        10,
+        "settle_from_log published no return data, so a caller that asked for 3 fills \
+         cannot learn that only 2 settled: {:?}",
+        res.return_data
+    );
+    let settled = u16::from_le_bytes([res.return_data[0], res.return_data[1]]);
+    let cursor = u64::from_le_bytes(res.return_data[2..10].try_into().unwrap());
+    assert_eq!(settled, 2, "the batch asked for 3 and settled 2; it must say so");
+    assert_eq!(cursor, 2, "the reported cursor must be the one actually written");
+    assert_eq!(cursor, cursor_of(&res.resulting_accounts[0].1), "reported cursor must match chain");
+}

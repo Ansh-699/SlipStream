@@ -202,6 +202,29 @@ pub fn process(
         let taker_position_acc =
             find_position_account(remaining_accounts, &fill.taker, market_acc)?;
 
+        // THE ABSOLUTE MARGIN BOUND. The `filled_margin > fill_notional` check
+        // above is RELATIONAL — `fill_notional` is computed from ER-authored
+        // quantity and price and is bounded only by u64::MAX — so it cannot stop
+        // a mint. Apply, and debit, exactly `min(filled_margin, credit ledger)`
+        // per leg: the ledger on the never-delegated `UserAccount` is the only
+        // quantity here the ER cannot author, so it is the only absolute bound
+        // available. Clamping (rather than rejecting an over-debit) binds without
+        // handing a lying ER a way to abort settlement and stall the cursor. See
+        // the longer note on the identical block in settle_from_log.rs.
+        let maker_applied = {
+            let maker_user = UserAccount::from_account_info_mut(maker_user_acc)?;
+            let applied = fill.filled_margin.min(maker_user.reserved_margin);
+            // Exact, not saturating: `applied <= reserved_margin` by construction.
+            maker_user.reserved_margin -= applied;
+            applied
+        };
+        let taker_applied = {
+            let taker_user = UserAccount::from_account_info_mut(taker_user_acc)?;
+            let applied = fill.filled_margin.min(taker_user.reserved_margin);
+            taker_user.reserved_margin -= applied;
+            applied
+        };
+
         // --- Taker side FIRST: collect only what the taker's L1 balance can
         // actually cover. Downstream payouts (maker rebate, insurance cut) are
         // scaled to what was truly collected below, instead of being paid in
@@ -245,7 +268,7 @@ pub fn process(
             fill.maker_side,
             fill.price,
             fill.quantity,
-            fill.filled_margin,
+            maker_applied,
             now_slot,
             market_acc,
         )?;
@@ -257,7 +280,7 @@ pub fn process(
             taker_side,
             fill.price,
             fill.quantity,
-            fill.filled_margin, // same-leverage MVP: taker_margin == maker_filled_margin
+            taker_applied, // same-leverage MVP: taker_margin == maker_filled_margin
             now_slot,
             market_acc,
         )?;
@@ -277,19 +300,9 @@ pub fn process(
             // settle against. `crank_twap` (oracle-validated) is the sole writer.
         }
 
-        // Lower R1's credit ledger by the margin this fill consumed, one debit per
-        // leg — the same credit_outstanding ledger `withdraw_trading_credit` pays
-        // out against (the Rust field kept its deployed name `reserved_margin`).
-        // `saturating_sub`, never `checked_sub`: a floor, not a balance, and a
-        // lying ER must not be able to abort honest settlement by over-debiting.
-        {
-            let maker_user = UserAccount::from_account_info_mut(maker_user_acc)?;
-            maker_user.reserved_margin = maker_user.reserved_margin.saturating_sub(fill.filled_margin);
-        }
-        {
-            let taker_user = UserAccount::from_account_info_mut(taker_user_acc)?;
-            taker_user.reserved_margin = taker_user.reserved_margin.saturating_sub(fill.filled_margin);
-        }
+        // R1's credit ledger was already lowered above, by exactly the margin each
+        // leg applied — the same credit_outstanding ledger `withdraw_trading_credit`
+        // pays out against (the Rust field kept its deployed name `reserved_margin`).
 
         max_seq = fill.sequence;
         settled += 1;
@@ -304,6 +317,15 @@ pub fn process(
     // Advance the owned settlement cursor so these fills are never re-applied.
     let market = Market::from_account_info_mut(market_acc)?;
     market.set_last_settled_sequence(max_seq);
+
+    // Report what actually settled — the loop above stops at the first sequence
+    // gap, so the caller's window and the settled prefix are routinely different
+    // sizes and nothing said so. Same 10-byte shape as settle_from_log: settled
+    // count (u16 LE) then the cursor actually written (u64 LE).
+    let mut out = [0u8; 10];
+    out[..2].copy_from_slice(&settled.to_le_bytes());
+    out[2..].copy_from_slice(&max_seq.to_le_bytes());
+    pinocchio::cpi::set_return_data(&out);
 
     Ok(())
 }

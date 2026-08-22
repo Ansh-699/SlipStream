@@ -62,7 +62,18 @@ async function main() {
   // Req 6.1: resolve the orderbook + program addresses from the Deploy_Manifest
   // (with the SDK-derived PDA as the configured fallback). Throws a descriptive
   // error if the manifest is missing (Req 6.3).
-  const { orderBook: orderBookPda, programId } = getKeeperAddresses();
+  const { orderBook: orderBookPda, programId, market } = getKeeperAddresses();
+
+  // Market::_padding2[0..4] holds the L1 settlement cursor (little-endian u32);
+  // see programs/slipstream/src/state/market.rs last_settled_sequence().
+  const MARKET_CURSOR_OFFSET = 2058;
+
+  /** Read Market.last_settled_sequence from L1 (0 if the account is unreadable). */
+  async function readMarketCursor(): Promise<bigint> {
+    const info = await baseConnection.getAccountInfo(market);
+    if (!info || info.data.length < MARKET_CURSOR_OFFSET + 4) return 0n;
+    return BigInt(info.data.readUInt32LE(MARKET_CURSOR_OFFSET));
+  }
 
   // Local mirror of the program's owned settlement cursor (Market.last_settled_
   // sequence). settle_trades reads the committed OrderBook READ-ONLY and tracks
@@ -157,26 +168,41 @@ async function main() {
 
     // Walk the queue from the head, skipping fills already settled (sequence at or
     // below our mirrored cursor), and collect the next window of NEW fills.
+    // `Market.last_settled_sequence` is the only authority on what has settled.
+    // The in-memory mirror was advanced to the WINDOW maximum on every send, so
+    // a settle that stopped early (R4 stops at the first sequence gap and writes
+    // only the prefix maximum) left the rest below the keeper's cursor and they
+    // were never re-submitted — while record_pending_fill had already bumped
+    // them, leaving 2 x (window - settled) permanently outstanding.
+    const cursor = await readMarketCursor();
+    lastProcessedSeq = cursor;
+
+    // Build the CONTIGUOUS run from cursor + 1, mirroring settle_trades' own
+    // rule, so the window submitted is exactly the set it will consume and the
+    // record_pending_fill bump is symmetric with the decrement. (Unlike
+    // settle_from_log there is no orphan case to mirror: settle_trades uses the
+    // erroring find_user_account / find_position_account, so a missing account
+    // reverts the whole bundle and rolls the bump back with it.)
     const newFills: { sequence: bigint; maker: PublicKey; taker: PublicKey }[] = [];
     let maxSeqInWindow: bigint | null = null;
+    let next = cursor + 1n;
     for (let i = 0; i < count && newFills.length < MAX_FILLS_PER_TX; i++) {
       const idx = (head + i) % maxFills;
       const fill = decodeFillEvent(data, base + idx * FILL_EVENT_SIZE);
-      if (lastProcessedSeq !== null && fill.sequence <= lastProcessedSeq) {
-        continue;
-      }
+      if (fill.sequence < next) continue; // already settled
+      if (fill.sequence !== next) break; // gap — the program stops here too
       newFills.push({
         sequence: fill.sequence,
         maker: new PublicKey(fill.maker),
         taker: new PublicKey(fill.taker),
       });
-      if (maxSeqInWindow === null || fill.sequence > maxSeqInWindow) {
-        maxSeqInWindow = fill.sequence;
-      }
+      maxSeqInWindow = fill.sequence;
+      next += 1n;
     }
 
     if (newFills.length === 0) {
-      // Everything currently in the queue is already settled per our cursor.
+      // Everything currently in the queue is already settled per the chain
+      // cursor, or the next fill is behind a gap the program will not cross.
       return;
     }
 
@@ -221,22 +247,28 @@ async function main() {
 
     try {
       const sig = await sendAndConfirm(baseConnection, tx, [keeper]);
+      // What settled is what the chain cursor says settled, never the window
+      // maximum. settle_trades now also returns (settled_count, cursor).
+      const after = await readMarketCursor();
+      const settledCount = newFills.filter((f) => f.sequence <= after).length;
       log(
         "SETTLEMENT",
-        `settled ${numFills} fills (seq ${firstSeq}..${maxSeqInWindow}): ${sig}`
+        `settled ${settledCount}/${numFills} fills (seq ${firstSeq}..${maxSeqInWindow}, ` +
+          `cursor ${cursor} -> ${after}): ${sig}`
       );
-      if (maxSeqInWindow !== null) lastProcessedSeq = maxSeqInWindow;
+      lastProcessedSeq = after;
     } catch (e: any) {
       const classified = classifyTxError(e);
       if (classified.code === ERR_FILL_QUEUE_EMPTY) {
-        // No-op: the program's cursor is already at/past this window (e.g. another
-        // keeper settled it, or we restarted). Advance our mirror so we walk
-        // forward to genuinely-new fills instead of retrying the same window.
+        // No-op: the tx reverted, so the record_pending_fill bump rolled back
+        // with it and nothing settled. Do NOT push the mirror to the window
+        // maximum — that is the skip-forever move. Re-read instead; the loop
+        // guard in tick() stops once the chain cursor stops advancing.
+        lastProcessedSeq = await readMarketCursor();
         log(
           "SETTLEMENT",
-          `FillQueueEmpty for seq ${firstSeq}..${maxSeqInWindow} — already settled, advancing cursor`
+          `FillQueueEmpty for seq ${firstSeq}..${maxSeqInWindow} — chain cursor is ${lastProcessedSeq}`
         );
-        if (maxSeqInWindow !== null) lastProcessedSeq = maxSeqInWindow;
       } else {
         log("SETTLEMENT", `settle error: ${classified.name ?? classified.raw}`);
       }

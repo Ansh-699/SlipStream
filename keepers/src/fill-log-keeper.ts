@@ -229,30 +229,75 @@ async function main() {
     if (header.count === 0) return;
     const fills = decodeFillLogFills(l1.data as Buffer);
 
+    // `Market.last_settled_sequence` is the ONLY authority on what has settled.
+    // Reading it once at startup and thereafter trusting the WINDOW maximum is
+    // what let a partial settle skip the unsettled remainder forever while the
+    // keeper logged "settled N fills" and indexed them as settled.
+    let cursor = await readMarketCursor();
+
     let progressed = true;
     while (progressed) {
       progressed = false;
 
-      const window: { sequence: bigint; maker: PublicKey; taker: PublicKey }[] = [];
+      // Mirror settle_from_log's OWN stop rules, so the window submitted is
+      // exactly the set it will consume. `decodeFillLogFills` walks the ring in
+      // the same `(head + i) % capacity` order the program does, so the two
+      // walks see the same sequence.
+      //
+      // Rule (a): the CONTIGUOUS run from cursor + 1. The program breaks at the
+      // first gap (R4's S4-01 fix) and writes only the prefix maximum.
       const windowFills: typeof fills = [];
-      let maxSeq: bigint | null = null;
+      let next = cursor + 1n;
       for (const f of fills) {
-        if (lastSettledSeq !== null && f.sequence <= lastSettledSeq) continue;
-        window.push({
-          sequence: f.sequence,
-          maker: new PublicKey(f.maker),
-          taker: new PublicKey(f.taker),
-        });
+        if (f.sequence < next) continue; // already settled
+        if (f.sequence !== next) break; // gap — the program stops here too
         windowFills.push(f);
-        if (maxSeq === null || f.sequence > maxSeq) maxSeq = f.sequence;
-        if (window.length >= MAX_FILLS_PER_TX) break;
+        next += 1n;
+        if (windowFills.length >= MAX_FILLS_PER_TX) break;
       }
-      if (window.length === 0) return;
+      if (windowFills.length === 0) return;
+
+      // Rule (b): the program also breaks at the first fill any of whose four
+      // L1 accounts is absent, and 75% of live fills have no L1 Position
+      // (s4.md), so a partial settle is the EXPECTED case. Drop the tail from
+      // the first such fill rather than submitting a window that cannot settle.
+      const pdasFor = (f: (typeof fills)[number]) =>
+        [new PublicKey(f.maker), new PublicKey(f.taker)].flatMap((owner) => [
+          findUserAccountPda(owner, programId)[0],
+          findPositionPda(owner, MARKET_INDEX, programId)[0],
+        ]);
+      const probe = new Map<string, PublicKey>();
+      for (const f of windowFills) for (const pk of pdasFor(f)) probe.set(pk.toBase58(), pk);
+      const probeKeys = Array.from(probe.values());
+      const live = new Set<string>();
+      // MAX_FILLS_PER_TX is 8, so this is at most 32 keys — one batched call.
+      const infos = await base.getMultipleAccountsInfo(probeKeys);
+      infos.forEach((info, i) => {
+        if (info && info.owner.equals(programId) && info.data.length > 0) {
+          live.add(probeKeys[i].toBase58());
+        }
+      });
+      const firstOrphan = windowFills.findIndex(
+        (f) => !pdasFor(f).every((pk) => live.has(pk.toBase58()))
+      );
+      if (firstOrphan >= 0) windowFills.length = firstOrphan;
+      if (windowFills.length === 0) {
+        // The queue is blocked on an orphan fill. R4 made this a liveness
+        // problem with an operator fix (supply the accounts or rotate the
+        // epoch) rather than unauthenticated destruction of settled trades.
+        // Say so instead of bumping pending_fills for a window that cannot
+        // settle and then silently skipping past it.
+        log(
+          "FILLLOG-KEEPER",
+          `epoch ${epoch}: seq ${cursor + 1n} has no L1 UserAccount/Position — queue blocked, not skipped`
+        );
+        return;
+      }
 
       const userSet = new Map<string, PublicKey>();
       const posSet = new Map<string, PublicKey>();
-      for (const f of window) {
-        for (const owner of [f.maker, f.taker]) {
+      for (const f of windowFills) {
+        for (const owner of [new PublicKey(f.maker), new PublicKey(f.taker)]) {
           const [u] = findUserAccountPda(owner, programId);
           userSet.set(u.toBase58(), u);
           const [p] = findPositionPda(owner, MARKET_INDEX, programId);
@@ -267,8 +312,15 @@ async function main() {
       // intentional and cost one byte each in the compiled message. The
       // remaining-account set below stays deduplicated; settlement resolves it
       // by key.
-      const bumps = window.flatMap((f) =>
-        [f.maker, f.taker].map((owner) => findUserAccountPda(owner, programId)[0])
+      //
+      // The bump is symmetric ONLY because `windowFills` is now the truncated,
+      // will-actually-settle set. Bumping a whole window against a settlement
+      // that stops at the first gap or orphan left 2 x (window - settled)
+      // outstanding, and re-bumped the same fills on every retry.
+      const bumps = windowFills.flatMap((f) =>
+        [new PublicKey(f.maker), new PublicKey(f.taker)].map(
+          (owner) => findUserAccountPda(owner, programId)[0]
+        )
       );
       const remaining = [
         ...users.map((pk) => ({ pubkey: pk, isSigner: false, isWritable: true })),
@@ -282,20 +334,34 @@ async function main() {
       const tx = new Transaction()
         .add(createRecordPendingFillInstruction(bumps, keeper.publicKey, programId))
         .add(
-          createSettleFromLogInstruction(marketIndex, epoch, window.length, remaining, programId)
+          createSettleFromLogInstruction(
+            marketIndex,
+            epoch,
+            windowFills.length,
+            remaining,
+            programId
+          )
         );
 
       try {
         const sig = await sendAndConfirm(base, tx, [keeper]);
+        // What settled is what the CHAIN cursor says settled, never the window
+        // maximum. settle_from_log also returns (settled_count, cursor) now; the
+        // cursor read here is one RPC either way and needs no getTransaction.
+        const after = await readMarketCursor();
+        const settledFills = windowFills.filter((f) => f.sequence <= after);
         log(
           "FILLLOG-KEEPER",
-          `epoch ${epoch}: settled ${window.length} fills (seq ${window[0].sequence}..${maxSeq}) ${sig}`
+          `epoch ${epoch}: settled ${settledFills.length}/${windowFills.length} fills ` +
+            `(cursor ${cursor} -> ${after}) ${sig}`
         );
-        if (maxSeq !== null) lastSettledSeq = maxSeq;
+        lastSettledSeq = after;
+        if (after <= cursor) return; // no forward progress — do not spin
+        cursor = after;
         progressed = true;
-        // Index the settled fills (best-effort; never breaks settlement).
+        // Index only what actually settled (best-effort; never breaks settlement).
         recordSettledFills(
-          windowFills.map((f) => ({
+          settledFills.map((f) => ({
             sequence: f.sequence,
             marketIndex: MARKET_INDEX,
             price: f.price,
@@ -311,7 +377,9 @@ async function main() {
       } catch (e: any) {
         const c = classifyTxError(e);
         if (c.code === ERR_FILL_QUEUE_EMPTY) {
-          if (maxSeq !== null) lastSettledSeq = maxSeq;
+          // The tx reverted, so the bump rolled back with it. Re-read rather
+          // than assuming the window settled.
+          lastSettledSeq = await readMarketCursor();
           return;
         }
         log("FILLLOG-KEEPER", `settle_from_log error: ${c.name ?? c.raw}`);

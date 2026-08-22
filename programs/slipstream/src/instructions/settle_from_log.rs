@@ -231,6 +231,47 @@ pub fn process(
             }
         };
 
+        // THE ABSOLUTE MARGIN BOUND. The `filled_margin > fill_notional` check
+        // above is RELATIONAL: `fill_notional` is `compute_notional(fill.quantity,
+        // fill.price)` over ER-AUTHORED quantity and price, bounded only by
+        // u64::MAX, so it converts "unbounded" into "unbounded in two variables"
+        // and cannot stop a mint. The only quantity on this path the ER cannot
+        // author is the credit ledger on the never-delegated `UserAccount`, whose
+        // sole raiser is `fund_trading_credit` — R1's credit_outstanding ledger,
+        // whose Rust field kept its deployed name. So APPLY, and debit, exactly
+        // `min(filled_margin, ledger)` per leg: a Position can never be credited
+        // more margin than L1 itself recorded going in, which is the absolute
+        // bound the L1 debit was supposed to provide and did not.
+        //
+        // Clamp, never `checked_sub`-and-reject. R4 chose `saturating_sub` for a
+        // real reason — a rejecting debit lets a lying ER abort settlement, and
+        // under the contiguity rule below that stalls the cursor permanently —
+        // but a debit that cannot fail is also a debit that does not bind. The
+        // clamp binds absolutely AND cannot fail, so it closes the mint without
+        // handing the ER a denial-of-settlement lever. Under an honest ER the
+        // ledger tracks `TradingCredit.credit` atom for atom, so
+        // `filled_margin <= ledger` and this is a no-op.
+        //
+        // Order matters when maker == taker (settlement has no self-trade check):
+        // the maker leg debits first, so the taker leg sees the reduced ledger and
+        // the two legs together can never apply more than the ledger held.
+        let maker_applied = {
+            let maker_user = crate::state::UserAccount::from_account_info_mut(maker_user_acc)?;
+            let applied = fill.filled_margin.min(maker_user.reserved_margin);
+            // Exact subtraction, not saturating: `applied <= reserved_margin` by
+            // construction one line above, so this cannot underflow even under
+            // the workspace's `overflow-checks = true`. Saturating here would
+            // hide a bug rather than prevent one.
+            maker_user.reserved_margin -= applied;
+            applied
+        };
+        let taker_applied = {
+            let taker_user = crate::state::UserAccount::from_account_info_mut(taker_user_acc)?;
+            let applied = fill.filled_margin.min(taker_user.reserved_margin);
+            taker_user.reserved_margin -= applied;
+            applied
+        };
+
         // Taker side FIRST: collect only what the taker's L1 balance can actually
         // cover. Downstream payouts (maker rebate, insurance cut) are scaled to
         // what was truly collected below, instead of being paid in full
@@ -273,7 +314,7 @@ pub fn process(
             fill.maker_side,
             fill.price,
             fill.quantity,
-            fill.filled_margin,
+            maker_applied,
             now_slot,
             market_acc,
         )?;
@@ -284,7 +325,7 @@ pub fn process(
             taker_side,
             fill.price,
             fill.quantity,
-            fill.filled_margin,
+            taker_applied,
             now_slot,
             market_acc,
         )?;
@@ -301,25 +342,12 @@ pub fn process(
             // `crank_twap` is the sole, oracle-validated writer of the mark.
         }
 
-        // Lower R1's credit ledger by the margin this fill consumed, one debit
-        // per leg. The Rust field kept its deployed name `reserved_margin` (a
+        // R1's credit ledger was already lowered above, by exactly the margin each
+        // leg applied. The Rust field kept its deployed name `reserved_margin` (a
         // rename would have moved live bytes — see its doc block); the meaning is
-        // the credit_outstanding ledger `withdraw_trading_credit` pays out
-        // against. Without this the ceiling degrades from exact conservation to
+        // the credit_outstanding ledger `withdraw_trading_credit` pays out against.
+        // Debit == credit is what makes the ceiling exact conservation rather than
         // "each user may extract their own realised losses".
-        //
-        // `saturating_sub`, never `checked_sub`: this is a floor, not a balance,
-        // and a lying ER must not be able to abort honest settlement by
-        // over-debiting. Erroring here would let the ER stall the queue.
-        {
-            let maker_user = crate::state::UserAccount::from_account_info_mut(maker_user_acc)?;
-            maker_user.reserved_margin = maker_user.reserved_margin.saturating_sub(fill.filled_margin);
-        }
-        {
-            // Taker leg of the same credit_outstanding debit.
-            let taker_user = crate::state::UserAccount::from_account_info_mut(taker_user_acc)?;
-            taker_user.reserved_margin = taker_user.reserved_margin.saturating_sub(fill.filled_margin);
-        }
 
         max_seq = fill.sequence;
         settled += 1;
@@ -331,6 +359,19 @@ pub fn process(
 
     let market = Market::from_account_info_mut(market_acc)?;
     market.set_last_settled_sequence(max_seq);
+
+    // Report what actually settled. This loop stops at the first sequence gap and
+    // at the first fill whose L1 accounts are absent — and 75% of live fills have
+    // no L1 Position, so a partial settle is the expected case, not the exception.
+    // With no log and no return data the caller could not tell a full settle from
+    // a one-of-eighty settle, so the keeper advanced its own cursor to the WINDOW
+    // maximum, skipped the remainder forever, indexed them as settled, and
+    // re-bumped `pending_fills` for them on every retry. 10 bytes: the settled
+    // count, then the cursor actually written.
+    let mut out = [0u8; 10];
+    out[..2].copy_from_slice(&settled.to_le_bytes());
+    out[2..].copy_from_slice(&max_seq.to_le_bytes());
+    pinocchio::cpi::set_return_data(&out);
 
     Ok(())
 }
