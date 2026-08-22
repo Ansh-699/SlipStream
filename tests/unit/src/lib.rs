@@ -81,3 +81,20 @@ mod test_initialize_market_regressions;
 // Regression test for compute_funding's interval-scaling fix.
 #[cfg(test)]
 mod test_compute_funding_regressions;
+
+// Round 9 — remediate: regression tests, pre-landed at freeze so each builder
+// inherits a RED test to turn green rather than authoring its own acceptance.
+#[cfg(test)]
+mod test_credit_ceiling_regressions;
+#[cfg(test)]
+mod test_legacy_credit_recovery;
+#[cfg(test)]
+mod test_fill_ring_lossless;
+#[cfg(test)]
+mod test_settlement_reader_regressions;
+#[cfg(test)]
+mod test_pending_fills_regressions;
+#[cfg(test)]
+mod test_keeper_role_regressions;
+#[cfg(test)]
+mod test_funding_clamp_regressions;

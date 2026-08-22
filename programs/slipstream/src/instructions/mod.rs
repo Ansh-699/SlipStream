@@ -38,6 +38,10 @@ pub mod execute_trigger;
 pub mod set_market_oracle;
 pub mod propose_authority;
 pub mod accept_authority;
+// Round 9 — remediate: credit ledger repair, pending-fills reset, keeper role.
+pub mod seed_credit_ledger;
+pub mod reset_pending_fills;
+pub mod set_keeper;
 
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult};
 
@@ -99,6 +103,11 @@ pub const IX_SET_MARKET_ORACLE: u8 = 0x25;
 // Round 8 — two-step GlobalState.authority rotation.
 pub const IX_PROPOSE_AUTHORITY: u8 = 0x26;
 pub const IX_ACCEPT_AUTHORITY: u8 = 0x27;
+
+// Round 9 — remediate: credit ledger repair, pending-fills reset, keeper role.
+pub const IX_SEED_CREDIT_LEDGER: u8 = 0x28;
+pub const IX_RESET_PENDING_FILLS: u8 = 0x29;
+pub const IX_SET_KEEPER: u8 = 0x2A;
 
 pub fn process(
     program_id: &Pubkey,
@@ -162,6 +171,9 @@ pub fn process(
         IX_SET_MARKET_ORACLE => set_market_oracle::process(program_id, accounts, data),
         IX_PROPOSE_AUTHORITY => propose_authority::process(program_id, accounts, data),
         IX_ACCEPT_AUTHORITY => accept_authority::process(program_id, accounts, data),
+        IX_SEED_CREDIT_LEDGER => seed_credit_ledger::process(program_id, accounts, data),
+        IX_RESET_PENDING_FILLS => reset_pending_fills::process(program_id, accounts, data),
+        IX_SET_KEEPER => set_keeper::process(program_id, accounts, data),
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

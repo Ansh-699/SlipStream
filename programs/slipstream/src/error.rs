@@ -63,6 +63,10 @@ pub enum SlipstreamError {
     // Appended at the END so existing `e as u32` codes do not shift.
     SelfTrade,
     PositionStillOpen,
+    // Round 9 — remediate. APPEND ONLY: keepers decode by ordinal.
+    CreditCeilingExceeded,
+    FillSequenceOutOfRange,
+    LegacyLayoutRejected,
 }
 
 impl From<SlipstreamError> for ProgramError {
