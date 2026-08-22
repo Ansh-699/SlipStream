@@ -19,7 +19,7 @@ async function main() {
   const uInfo = await base.getAccountInfo(userPda);
   if (uInfo && uInfo.data[0] === DISC_USER_ACCOUNT) {
     const u = decodeUserAccount(uInfo.data as Buffer);
-    console.log(`UserAccount ${userPda.toBase58()} free=${u.freeCollateral} reserved=${u.reservedMargin} pendingFills=${u.pendingFills}`);
+    console.log(`UserAccount ${userPda.toBase58()} free=${u.freeCollateral} creditOutstanding=${u.creditOutstanding} pendingFills=${u.pendingFills}`);
   } else {
     console.log(`UserAccount ${userPda.toBase58()} ABSENT`);
   }

@@ -1259,7 +1259,9 @@ export function createMirrorFillsInstruction(
 
   return new TransactionInstruction({
     keys: [
-      { pubkey: orderBook, isSigner: false, isWritable: false },
+      // WRITABLE: mirror_fills drains the ring of already-mirrored fills so
+      // place_order can push again. Read-only here and the ring never clears.
+      { pubkey: orderBook, isSigner: false, isWritable: true },
       { pubkey: fillLog, isSigner: false, isWritable: true },
     ],
     programId,

@@ -66,6 +66,16 @@ pub fn process(
     // Vault USDC doesn't move — this is pure accounting.
     let user_mut = UserAccount::from_account_info_mut(user_account_acc)?;
     user_mut.free_collateral = user_mut.free_collateral.saturating_sub(amount);
+    // Raise L1's own credit ledger in the same instruction that lowers
+    // free_collateral: this is the ONLY site that raises it, and it is the
+    // ceiling withdraw_trading_credit pays out under. `checked_add`, not
+    // saturating: a saturated ledger would silently overstate the ceiling, and
+    // this is the one arm where refusing the call costs the honest user
+    // nothing (the transfer is atomic, so nothing has moved yet).
+    user_mut.reserved_margin = user_mut
+        .reserved_margin
+        .checked_add(amount)
+        .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
 
     let credit_mut = TradingCredit::from_account_info_mut(trading_credit_acc)?;
     credit_mut.credit = credit_mut

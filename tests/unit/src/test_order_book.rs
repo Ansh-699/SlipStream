@@ -268,23 +268,31 @@ fn test_fill_event_queue_wraparound() {
     ob.push_fill_event(fill).unwrap();
     assert_eq!(ob.header.fill_event_count, 3);
 
-    // Full: the next push now OVERWRITES the oldest entry instead of erroring
-    // (true ring; the OrderBook is delegated to the ER and L1 never drains it,
-    // so erroring here would brick trading — see push_fill_event docs).
-    ob.push_fill_event(fill).unwrap();
-    assert_eq!(ob.header.fill_event_count, 3); // pinned at max
-    assert_eq!(ob.header.fill_event_head, 1); // oldest dropped, head advanced
-    assert_eq!(ob.header.fill_event_tail, 1); // wrapped
+    // Full: the next push REFUSES. It used to overwrite the oldest entry, and
+    // this test asserted that — which is the defect audit-e2e filed as S2-01
+    // (P0): a fill destroyed here is unrecoverable and neither side can detect
+    // the gap. The old rationale ("erroring would brick trading") is answered by
+    // R3 making mirror_fills drain the ring, so a refusal is now recoverable.
+    assert!(
+        ob.push_fill_event(fill).is_err(),
+        "a full ring must refuse, not silently destroy the oldest unmirrored fill"
+    );
+    assert_eq!(ob.header.fill_event_count, 3); // still pinned at max
+    assert_eq!(ob.header.fill_event_head, 0); // nothing dropped
+    assert_eq!(ob.header.fill_event_tail, 0); // wrapped, unchanged by the refusal
 
-    // Pop one still works (count drops, head advances).
+    // Pop one still works (count drops, head advances). Indices are one lower
+    // than they used to be here, because the refused push no longer advanced
+    // head past a destroyed entry.
     ob.pop_fill_event().unwrap();
     assert_eq!(ob.header.fill_event_count, 2);
-    assert_eq!(ob.header.fill_event_head, 2);
+    assert_eq!(ob.header.fill_event_head, 1);
 
-    // And we can push again into the freed space.
+    // And we can push again into the freed space — this is the recovery path
+    // that makes refusing safe: drain, then the producer proceeds.
     ob.push_fill_event(fill).unwrap();
     assert_eq!(ob.header.fill_event_count, 3);
-    assert_eq!(ob.header.fill_event_tail, 2); // wrapped again
+    assert_eq!(ob.header.fill_event_tail, 1); // wrapped again
 }
 
 #[test]

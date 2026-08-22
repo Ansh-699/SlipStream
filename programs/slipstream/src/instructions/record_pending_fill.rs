@@ -57,8 +57,12 @@ pub fn process(
     if global_state_acc.key() != &global_pda {
         return Err(SlipstreamError::InvalidPda.into());
     }
-    let global = GlobalState::from_account_info(global_state_acc)?;
-    if global.authority != *authority.key() {
+    // S10-01: accept the installed keeper as well as the admin key, so the
+    // fill-log keeper VM no longer has to hold the key that is also the BPF
+    // upgrade authority and the USDC mint authority. A stranger is still
+    // refused, and an unextended GlobalState still accepts `authority` alone.
+    let global_data = unsafe { global_state_acc.borrow_data_unchecked() };
+    if !GlobalState::is_authority_or_keeper(global_data, authority.key()) {
         return Err(SlipstreamError::InvalidAuthority.into());
     }
 

@@ -78,7 +78,10 @@ pub fn process(
     if user.pending_fills > 0 {
         return Err(SlipstreamError::PendingFillsExist.into());
     }
-    // Gate 2: no resting orders
+    // Gate 2: no collateral parked in a trading credit. Dead until the credit
+    // ledger went live; now it means "withdraw your credit first". If it refuses
+    // while the user has no credit left to withdraw, the ledger is stale and
+    // `seed_credit_ledger` is the repair path (spec Decision 4b).
     if user.reserved_margin > 0 {
         return Err(SlipstreamError::ReservedMarginExists.into());
     }

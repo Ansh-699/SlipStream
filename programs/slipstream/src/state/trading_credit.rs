@@ -45,8 +45,36 @@ pub struct TradingCredit {
     pub session_expiry: i64,
 }
 
+/// The pre-session-keys `TradingCredit` layout: everything up to and including
+/// `committed`, i.e. the first 56 bytes of the current struct byte-for-byte.
+///
+/// Four live accounts on devnet still carry it. Every typed load in this file
+/// rejects them (`data.len() < LEN`), which is why `close_trading_credit` reads
+/// them through `read_common` instead. See `docs/audit/audit-e2e/s1.md` (S1-01).
+pub const LEGACY_LEN: usize = 56;
+
 impl TradingCredit {
     pub const LEN: usize = core::mem::size_of::<Self>();
+
+    /// Fixed-offset read of the fields that are byte-identical in BOTH the legacy
+    /// 56-byte layout and the current 96-byte one. Returns
+    /// `(owner, credit, committed, active_orders)`.
+    ///
+    /// This is the only length-tolerant reader in the program. It is a *read*: it
+    /// authorises nothing, and the caller still discriminates on `data.len()`
+    /// before deciding what the values mean — a 96-byte account must never reach
+    /// a legacy-recovery path.
+    pub fn read_common(data: &[u8]) -> Result<([u8; 32], u64, u64, u16), ProgramError> {
+        if data.len() < LEGACY_LEN || data[0] != DISC_TRADING_CREDIT {
+            return Err(ProgramError::InvalidAccountData);
+        }
+        Ok((
+            data[8..40].try_into().unwrap(),
+            u64::from_le_bytes(data[40..48].try_into().unwrap()),
+            u64::from_le_bytes(data[48..56].try_into().unwrap()),
+            u16::from_le_bytes(data[4..6].try_into().unwrap()),
+        ))
+    }
 
     pub fn from_account_info(account: &AccountInfo) -> Result<&Self, ProgramError> {
         let data = unsafe { account.borrow_data_unchecked() };

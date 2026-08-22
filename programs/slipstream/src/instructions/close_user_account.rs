@@ -13,7 +13,7 @@ use crate::state::{GlobalState, Position, UserAccount, SEED_GLOBAL, SEED_POSITIO
 /// Closes the caller's `UserAccount` PDA and refunds the rent to the owner. Only
 /// permitted when the user has zero state across the protocol:
 ///   - `free_collateral == 0`
-///   - `reserved_margin == 0`
+///   - `reserved_margin == 0` (the credit ledger — nothing parked in a credit)
 ///   - `pending_fills == 0`
 ///   - no open Position on any market (see below)
 ///
@@ -31,9 +31,10 @@ use crate::state::{GlobalState, Position, UserAccount, SEED_GLOBAL, SEED_POSITIO
 ///         fully closed (`Position.size == 0`).
 ///
 /// The three field checks above were the ONLY gate before this fix, and none of
-/// them catch an open position: `reserved_margin` is never incremented anywhere
-/// in the program (permanently 0 — dead code, kept here only for layout/ABI
-/// stability), `free_collateral` is naturally 0 once margin has moved into a
+/// them catch an open position: `reserved_margin` is now the credit ledger and
+/// tracks only collateral parked in a TradingCredit, not position exposure
+/// (it was dead — permanently 0 — when this gate was written),
+/// `free_collateral` is naturally 0 once margin has moved into a
 /// position via `fund_trading_credit`, and `pending_fills` is 0 as soon as the
 /// keeper settles. A user could close their UserAccount while holding an
 /// arbitrarily underwater open position: `liquidate_position` requires a live

@@ -6,10 +6,31 @@ use pinocchio::program_error::ProgramError;
 /// In 18-decimal fixed point: 0.0001 * 10^18 = 10^14
 pub const INTEREST_RATE_PER_INTERVAL: i128 = 100_000_000_000_000; // 10^14
 
+/// Maximum |funding rate| applied in a single interval, 18-dp fixed point.
+/// 0.5% = 5 * 10^15.
+///
+/// ECONOMIC POLICY, not a safety constant. The *shape* — a clamped premium
+/// times a capped catch-up (`MAX_CATCHUP_INTERVALS`) — is the safety property
+/// that makes a permissionless `compute_funding` harmless; it does not depend
+/// on these numbers. Changing them is a constant edit, not a redesign.
+/// 50x the ordinary per-interval rate (`INTEREST_RATE_PER_INTERVAL`), so
+/// ordinary funding never touches the clamp.
+pub const MAX_FUNDING_RATE_PER_INTERVAL: i128 = 5_000_000_000_000_000;
+
+/// Maximum catch-up intervals one permissionless `compute_funding` call may
+/// accrue. With the rate clamp above this bounds one call to +/-1.5% of
+/// notional. Also economic policy; see `MAX_FUNDING_RATE_PER_INTERVAL`.
+pub const MAX_CATCHUP_INTERVALS: i64 = 3;
+
 /// Compute the funding rate for one interval.
 ///
-/// formula: funding_rate = premium_rate + interest_rate
+/// formula: funding_rate = clamp(premium_rate + interest_rate)
 /// premium_rate = (mark_price - index_price) / index_price
+///
+/// The clamp is here, at the source, and not at the caller: this feeds a
+/// permissionless instruction, so there is no caller to gate. Unclamped, the
+/// live devnet state (mark 74_114_120 vs index 91_317_865 — a stale local TWAP
+/// against a moved oracle) yields -18.9% in a *single* interval.
 ///
 /// Returns funding rate in 18-decimal fixed point (FUNDING_SCALE).
 pub fn compute_funding_rate(mark_price: u64, index_price: u64) -> Result<i128, ProgramError> {
@@ -30,7 +51,7 @@ pub fn compute_funding_rate(mark_price: u64, index_price: u64) -> Result<i128, P
         .checked_add(INTEREST_RATE_PER_INTERVAL)
         .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
 
-    Ok(funding_rate)
+    Ok(funding_rate.clamp(-MAX_FUNDING_RATE_PER_INTERVAL, MAX_FUNDING_RATE_PER_INTERVAL))
 }
 
 /// Compute the funding payment for a position.
@@ -104,20 +125,33 @@ mod tests {
 
     #[test]
     fn test_funding_rate_premium() {
-        // mark = $101, index = $100: premium = 1% = 0.01
-        let rate = compute_funding_rate(101_000_000, 100_000_000).unwrap();
-        // premium = 10^16 (1% in 18-decimal), interest = 10^14
-        // total = 10^16 + 10^14 = 10_100_000_000_000_000
-        assert_eq!(rate, 10_100_000_000_000_000);
+        // mark = $100.10, index = $100: premium = 0.1% = 0.001, inside the clamp,
+        // so this still asserts the raw premium+interest arithmetic exactly.
+        let rate = compute_funding_rate(100_100_000, 100_000_000).unwrap();
+        // premium = 10^15 (0.1% in 18-decimal), interest = 10^14
+        // total = 10^15 + 10^14 = 1_100_000_000_000_000
+        assert_eq!(rate, 1_100_000_000_000_000);
+
+        // mark = $101, index = $100: premium = 1%, which is ABOVE the 0.5%
+        // per-interval bound and must come back clamped, not raw. Before the
+        // S3-01 clamp this returned 10_100_000_000_000_000.
+        let clamped = compute_funding_rate(101_000_000, 100_000_000).unwrap();
+        assert_eq!(clamped, MAX_FUNDING_RATE_PER_INTERVAL);
     }
 
     #[test]
     fn test_funding_rate_discount() {
-        // mark = $99, index = $100: premium = -1%
-        let rate = compute_funding_rate(99_000_000, 100_000_000).unwrap();
-        // premium = -10^16, interest = 10^14
-        // total = -10^16 + 10^14 = -9_900_000_000_000_000
-        assert_eq!(rate, -9_900_000_000_000_000);
+        // mark = $99.90, index = $100: premium = -0.1%, inside the clamp.
+        let rate = compute_funding_rate(99_900_000, 100_000_000).unwrap();
+        // premium = -10^15, interest = 10^14
+        // total = -10^15 + 10^14 = -900_000_000_000_000
+        assert_eq!(rate, -900_000_000_000_000);
+
+        // mark = $99, index = $100: premium = -1%, below the bound, so the clamp
+        // must bite in the NEGATIVE direction too. Before S3-01 this returned
+        // -9_900_000_000_000_000; the live devnet replay was -18.9%.
+        let clamped = compute_funding_rate(99_000_000, 100_000_000).unwrap();
+        assert_eq!(clamped, -MAX_FUNDING_RATE_PER_INTERVAL);
     }
 
     #[test]

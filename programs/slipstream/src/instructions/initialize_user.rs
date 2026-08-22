@@ -60,6 +60,7 @@ pub fn process(
     user.pending_fills = 0;
     user.owner = *owner.key();
     user.free_collateral = 0;
+    // The credit ledger starts empty; nothing is parked in a trading credit yet.
     user.reserved_margin = 0;
 
     Ok(())

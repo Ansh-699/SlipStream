@@ -15,7 +15,7 @@ import {
 
 export interface UserData {
   freeCollateral: bigint;
-  reservedMargin: bigint;
+  creditOutstanding: bigint;
   pendingFills: number;
 }
 
@@ -46,7 +46,7 @@ export function useUserAccount() {
         const u = decodeUserAccount(info.data as Buffer);
         setUser({
           freeCollateral: u.freeCollateral,
-          reservedMargin: u.reservedMargin,
+          creditOutstanding: u.creditOutstanding,
           pendingFills: u.pendingFills,
         });
       }

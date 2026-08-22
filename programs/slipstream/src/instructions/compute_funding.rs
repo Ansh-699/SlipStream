@@ -7,7 +7,7 @@ use pinocchio::{
 };
 
 use crate::error::SlipstreamError;
-use crate::math::funding::compute_funding_rate;
+use crate::math::funding::{compute_funding_rate, MAX_CATCHUP_INTERVALS};
 use crate::oracle::{apply_dual_oracle, DualOracleOutcome};
 use crate::state::Market;
 
@@ -38,11 +38,37 @@ pub fn process(
         if elapsed < interval_secs {
             return Err(SlipstreamError::InvalidExpiryTimestamp.into());
         }
-        let intervals = elapsed / interval_secs;
-        // Advance by whole intervals only (not to `now`): any partial remainder
-        // stays owed and counts toward the NEXT call's elapsed time, instead of
-        // being silently discarded every time this is called mid-interval.
-        (intervals, market.last_funding_ts + intervals * interval_secs)
+        // Truncating integer division, toward zero (S3-C1): the discarded
+        // remainder is sub-interval and is not lost — see `next_funding_ts`.
+        let raw_intervals = elapsed / interval_secs;
+        // Cap the catch-up. This is half of the S3-01 bound; the other half is
+        // the per-interval clamp inside compute_funding_rate. Together they
+        // bound ONE call of this permissionless instruction to
+        // MAX_FUNDING_RATE_PER_INTERVAL * MAX_CATCHUP_INTERVALS of notional,
+        // which is what lets it stay permissionless as designed.
+        let intervals = raw_intervals.min(MAX_CATCHUP_INTERVALS);
+
+        let next_funding_ts = if raw_intervals > MAX_CATCHUP_INTERVALS {
+            // Open decision 8 — FORGIVE the excess. Deferring it would hand the
+            // cap straight back: the backlog would still be paid in full, just
+            // spread over ceil(raw_intervals / cap) further permissionless
+            // calls, so the aggregate would be unbounded again. A multi-day gap
+            // is an operator outage, not a market signal.
+            now
+        } else {
+            // Within the cap the original shape stands: advance by whole
+            // intervals only (not to `now`), so a partial remainder stays owed
+            // and counts toward the NEXT call's elapsed time instead of being
+            // silently discarded every time this is called mid-interval.
+            // Checked, not saturating: a saturated timestamp would silently
+            // freeze funding accrual forever, whereas an overflow here can only
+            // come from a corrupt `funding_interval_secs` and must abort.
+            intervals
+                .checked_mul(interval_secs)
+                .and_then(|span| market.last_funding_ts.checked_add(span))
+                .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?
+        };
+        (intervals, next_funding_ts)
     };
 
     // Mark price = local TWAP from book midprice samples

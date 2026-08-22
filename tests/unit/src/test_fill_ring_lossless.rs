@@ -272,3 +272,103 @@ fn test_mirror_fills_drains_already_mirrored_prefix_with_zero_appends() {
         "mirror_fills must drain every already-mirrored entry so the ring can accept new fills"
     );
 }
+
+/// EPOCH ROTATION. `last_mirrored_sequence` is per-FillLog and the keeper
+/// rotates epochs routinely, so a fresh log re-mirrors the ring from sequence 0
+/// by design (`keepers/src/fill-log-keeper.ts`). On any live book the ring's
+/// oldest surviving sequence is far beyond `last_mirrored + 1 == 1`, so a gap
+/// check WITHOUT a virgin-log exemption errors on every rotation, forever.
+#[test]
+fn test_mirror_fills_succeeds_on_virgin_log_after_rotation() {
+    let program_id = Pubkey::new_unique();
+    let m = mollusk(&program_id);
+    let market_index: u16 = 0;
+    let epoch: u32 = 7; // a rotated-to epoch, hence a brand-new FillLog
+
+    // The same wrapped ring the gap test uses: sequences 6..=9 survive, so
+    // oldest_surviving == 6 while the fresh cursor is 0.
+    let mut data = book_bytes(market_index, FILLS);
+    let base_idx = {
+        let mut view = OrderBookView::from_account_data(&mut data).unwrap();
+        view.header.next_fill_sequence = 10;
+        view.header.fill_event_head as usize
+    };
+    {
+        let base = OrderBookHeader::LEN
+            + SLOTS as usize * OrderSlot::LEN
+            + LEVELS as usize * PriceLevel::LEN * 2;
+        for i in 0..FILLS as usize {
+            let idx = (base_idx + i) % FILLS as usize;
+            let off = base + idx * FillEvent::LEN;
+            let f = fill(6 + i as u64);
+            data[off..off + FillEvent::LEN].copy_from_slice(bytemuck::bytes_of(&f));
+        }
+    }
+
+    let (ob_pk, _) =
+        Pubkey::find_program_address(&[SEED_ORDERBOOK, &market_index.to_le_bytes()], &program_id);
+    let (fl_pk, _) = Pubkey::find_program_address(
+        &[SEED_FILL_LOG, &market_index.to_le_bytes(), &epoch.to_le_bytes()],
+        &program_id,
+    );
+
+    let mut log = vec![0u8; fill_log_account_size(FILL_LOG_CAPACITY)];
+    {
+        let h: &mut FillLogHeader = bytemuck::from_bytes_mut(&mut log[..FillLogHeader::LEN]);
+        h.discriminator = DISC_FILL_LOG;
+        h.market_index = market_index;
+        h.epoch = epoch;
+        h.capacity = FILL_LOG_CAPACITY;
+        h.count = 0; // virgin: nothing mirrored yet
+        h.head = 0;
+        h.last_mirrored_sequence = 0; // virgin cursor, NOT a gap
+    }
+
+    let accounts = vec![
+        (
+            ob_pk,
+            Account { lamports: 10_000_000, data, owner: program_id, executable: false, rent_epoch: 0 },
+        ),
+        (
+            fl_pk,
+            Account { lamports: 10_000_000, data: log, owner: program_id, executable: false, rent_epoch: 0 },
+        ),
+    ];
+
+    let mut ixd = vec![IX_MIRROR_FILLS];
+    ixd.extend_from_slice(&market_index.to_le_bytes());
+    ixd.extend_from_slice(&epoch.to_le_bytes());
+    ixd.extend_from_slice(&0u16.to_le_bytes());
+
+    let ix = Instruction {
+        program_id,
+        accounts: vec![
+            AccountMeta::new(ob_pk, false),
+            AccountMeta::new(fl_pk, false),
+        ],
+        data: ixd,
+    };
+    let res = m.process_instruction(&ix, &accounts);
+
+    assert!(
+        matches!(res.program_result, MolluskResult::Success),
+        "a virgin FillLog re-mirroring a wrapped ring after an epoch rotation must \
+         succeed — the gap check needs a virgin-log exemption: {:?}",
+        res.program_result
+    );
+
+    let after: &FillLogHeader =
+        bytemuck::from_bytes(&res.resulting_accounts[1].1.data[..FillLogHeader::LEN]);
+    assert_eq!(after.count, FILLS, "every surviving ring entry must be mirrored");
+    assert_eq!(
+        after.last_mirrored_sequence, 9,
+        "the cursor must land on the highest sequence mirrored"
+    );
+
+    let ob_after: &OrderBookHeader =
+        bytemuck::from_bytes(&res.resulting_accounts[0].1.data[..OrderBookHeader::LEN]);
+    assert_eq!(
+        ob_after.fill_event_count, 0,
+        "the ring must also drain what this call mirrored"
+    );
+}

@@ -193,6 +193,14 @@ async function main() {
     }
 
     const userAccounts = Array.from(userAccountSet.values());
+    // Same S4-04 asymmetry as fill-log-keeper: settle_trades decrements once per
+    // (fill, side) while record_pending_fill bumps once per listed account, so
+    // the bump list must be per (fill, side), not the deduplicated set. This
+    // service is the one being stopped (Open decision 4); the fix lands anyway
+    // so the remaining caller is not left half-broken.
+    const bumps = newFills.flatMap((fill) =>
+      [fill.maker, fill.taker].map((owner) => findUserAccountPda(owner, programId)[0])
+    );
     const remainingForSettle = [
       ...userAccounts.map((pk) => ({ pubkey: pk, isSigner: false, isWritable: true })),
       ...Array.from(positionSet.values()).map((pk) => ({
@@ -208,7 +216,7 @@ async function main() {
     // Bundle: record_pending_fill (bumps pending_fills) + settle_trades. Atomic —
     // both land in one tx so a FillQueueEmpty revert also rolls back the bump.
     const tx = new Transaction()
-      .add(createRecordPendingFillInstruction(userAccounts, keeper.publicKey, programId))
+      .add(createRecordPendingFillInstruction(bumps, keeper.publicKey, programId))
       .add(createSettleTradesInstruction(MARKET_INDEX, numFills, remainingForSettle, programId));
 
     try {

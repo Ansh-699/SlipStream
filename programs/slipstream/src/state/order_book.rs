@@ -190,35 +190,73 @@ impl<'a> OrderBookView<'a> {
 
     /// Push a fill event to the ring buffer queue.
     ///
-    /// This is a TRUE ring: when full, it OVERWRITES the oldest entry (advances
-    /// head) instead of erroring. The OrderBook is delegated to the ER and L1
-    /// can't pop it, so nothing ever drains `fill_event_count` — making the old
-    /// "error when full" behavior a hard wall that bricked trading after
-    /// `max_fill_events` cumulative fills (surfaced as `FillQueueFull` /
-    /// custom 0x11e on place_order and on close/flatten IOC orders).
+    /// LOSSLESS: refuses with `FillQueueFull` once full instead of overwriting
+    /// the oldest entry. The previous behaviour advanced `fill_event_head` over
+    /// an entry `mirror_fills` had not taken yet and returned `Ok(())`, so the
+    /// fill was destroyed with no on-chain signal while `reconcile_credit` had
+    /// already debited the maker's credit for it (`S2-01` / `S4-03`).
     ///
-    /// Overwriting is safe because settlement does not depend on this ring being
-    /// drained: `mirror_fills` copies fills (sequence > last_mirrored) into the
-    /// small FillLog and the keeper runs continuously, so already-mirrored old
-    /// fills are the only thing ever overwritten. Mirrors the FillLog ring's
-    /// overwrite-when-full semantics. Kept returning Result for call-site compat;
-    /// it now never returns Err.
+    /// Refusing is only safe because there is now a drain:
+    /// `mirror_fills` calls [`Self::drain_through_sequence`] to release every
+    /// entry the FillLog has already mirrored. Without that drain this is the
+    /// hard wall that bricked trading after `max_fill_events` cumulative fills.
+    /// A full ring therefore means "full of fills the mirror has not taken",
+    /// and halting matching is the correct response — a halt is recoverable,
+    /// a destroyed fill is not.
     pub fn push_fill_event(&mut self, event: FillEvent) -> Result<(), ProgramError> {
         let max = self.header.max_fill_events;
-        if max == 0 {
-            return Ok(());
+        if max == 0 || self.header.fill_event_count >= max {
+            return Err(SlipstreamError::FillQueueFull.into());
         }
         let tail = self.header.fill_event_tail;
         self.fill_events[tail as usize] = event;
         self.header.fill_event_tail = (tail + 1) % max;
-        if self.header.fill_event_count < max {
-            self.header.fill_event_count += 1;
-        } else {
-            // Full: the write above overwrote the oldest entry — advance head so
-            // head/tail stay coincident and count stays pinned at max.
-            self.header.fill_event_head = (self.header.fill_event_head + 1) % max;
-        }
+        self.header.fill_event_count += 1;
         Ok(())
+    }
+
+    /// The lowest sequence still present in the ring. Anything below it has
+    /// left the ring (drained, popped, or destroyed by the pre-fix overwrite).
+    ///
+    /// Derived rather than stored: `OrderBookHeader` sits before four
+    /// variable-length arrays whose offsets are computed from
+    /// `OrderBookHeader::LEN`, so adding a field would misread every live book.
+    ///
+    /// `saturating_sub`: on an honest book `next_fill_sequence` is incremented
+    /// once per push before `fill_event_count` is, so it is always >= the count
+    /// and the subtraction cannot underflow. On a header corrupt enough to
+    /// break that, saturating to 0 makes the caller's gap check pass, i.e. it
+    /// degrades to the pre-fix behaviour rather than erroring out of a getter.
+    pub fn oldest_surviving_sequence(&self) -> u64 {
+        self.header
+            .next_fill_sequence
+            .saturating_sub(self.header.fill_event_count as u64)
+    }
+
+    /// Release every entry at the head of the ring whose sequence is at or
+    /// below `through`, advancing `fill_event_head` and lowering
+    /// `fill_event_count`. Returns how many entries were released.
+    ///
+    /// Sequences are assigned monotonically by `next_fill_sequence`, so the
+    /// entries at or below `through` are exactly a prefix of the ring and the
+    /// scan stops at the first entry above it.
+    pub fn drain_through_sequence(&mut self, through: u64) -> u16 {
+        let max = self.header.max_fill_events;
+        if max == 0 {
+            return 0;
+        }
+        let mut drained: u16 = 0;
+        while self.header.fill_event_count > 0 {
+            // `% max` so a header carrying an out-of-range head cannot panic.
+            let head = self.header.fill_event_head % max;
+            if self.fill_events[head as usize].sequence > through {
+                break;
+            }
+            self.header.fill_event_head = (head + 1) % max;
+            self.header.fill_event_count -= 1;
+            drained += 1;
+        }
+        drained
     }
 
     /// Pop a fill event from the head of the queue.

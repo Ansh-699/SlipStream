@@ -171,7 +171,7 @@ export interface UserAccount {
   pendingFills: number;
   owner: PublicKey;
   freeCollateral: bigint;
-  reservedMargin: bigint;
+  creditOutstanding: bigint;
 }
 
 export function decodeUserAccount(data: Buffer): UserAccount {
@@ -185,7 +185,7 @@ export function decodeUserAccount(data: Buffer): UserAccount {
     pendingFills: readU16LE(data, 2),
     owner: readPubkey(data, 8),
     freeCollateral: readU64LE(data, 40),
-    reservedMargin: readU64LE(data, 48),
+    creditOutstanding: readU64LE(data, 48),
   };
 }
 

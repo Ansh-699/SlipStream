@@ -12,6 +12,27 @@ pub struct UserAccount {
     pub _padding1: [u8; 4],
     pub owner: [u8; 32],
     pub free_collateral: u64,
+    /// THE CREDIT LEDGER (offset 48). L1's own record of how much of this
+    /// user's collateral is currently parked inside trading credits.
+    ///
+    /// `UserAccount` is never delegated and never appears in an ER transaction,
+    /// so unlike `TradingCredit.credit` — every byte of which a hostile ER owns
+    /// while a session is live — these bytes can only be authored by this
+    /// program. `withdraw_trading_credit` pays out at most
+    /// `min(credit.credit, reserved_margin)`, which bounds what the ER can pull
+    /// out of the vault by what L1 itself saw go in.
+    ///
+    /// Invariant: raised only by `fund_trading_credit` (`checked_add`); lowered
+    /// by `withdraw_trading_credit` (by what it paid) and by settlement (by the
+    /// `filled_margin` it applied, saturating at zero); set by
+    /// `seed_credit_ledger` (authority-gated grandfather/repair path).
+    ///
+    /// Historically named `reserved_margin` and dead — one write site, writing
+    /// zero, and 45 of 45 live accounts read zero on chain — which is exactly
+    /// the correct initial value for this meaning. The name is retained so that
+    /// zero bytes move and `LEN` stays 56 (S1-01: a layout change stranded
+    /// $13,313 of real funds). Off-chain decoders expose it as
+    /// `creditOutstanding`.
     pub reserved_margin: u64,
 }
 

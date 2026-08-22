@@ -260,6 +260,16 @@ async function main() {
         }
       }
       const users = Array.from(userSet.values());
+      // record_pending_fill bumps once per listed account; settle_from_log
+      // decrements once per (fill, side). Listing the deduplicated set here is
+      // what left 13 live accounts permanently stuck behind the withdrawal gate
+      // (S4-04), so list one entry per (fill, side) instead — duplicates are
+      // intentional and cost one byte each in the compiled message. The
+      // remaining-account set below stays deduplicated; settlement resolves it
+      // by key.
+      const bumps = window.flatMap((f) =>
+        [f.maker, f.taker].map((owner) => findUserAccountPda(owner, programId)[0])
+      );
       const remaining = [
         ...users.map((pk) => ({ pubkey: pk, isSigner: false, isWritable: true })),
         ...Array.from(posSet.values()).map((pk) => ({
@@ -270,7 +280,7 @@ async function main() {
       ];
 
       const tx = new Transaction()
-        .add(createRecordPendingFillInstruction(users, keeper.publicKey, programId))
+        .add(createRecordPendingFillInstruction(bumps, keeper.publicKey, programId))
         .add(
           createSettleFromLogInstruction(marketIndex, epoch, window.length, remaining, programId)
         );
