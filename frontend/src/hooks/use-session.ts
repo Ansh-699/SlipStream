@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import {
   Connection,
@@ -220,6 +220,18 @@ export function useSession(marketIndex: number = 0) {
     legacyDelegated: false,
   });
   const [busy, setBusy] = useState(false);
+  // autoStart used to set no busy state of its own: `busy` was raised inside
+  // initialize(), TWO RPC round trips later. For those two round trips the
+  // button looked completely idle, so it got clicked again — and every click
+  // started another full chain, which is why it got slower the more it was
+  // pressed. This ref makes a second click while one is in flight a no-op even
+  // before React has re-rendered the disabled state.
+  const autoStartInFlight = useRef(false);
+  // The ref guards re-entry synchronously; this state keeps the spinner up for
+  // the WHOLE run. initialize()/fund()/delegate() each clear `busy` in their own
+  // finally, so without it the button flickers back to enabled between the three
+  // legs of a single click.
+  const [autoRunning, setAutoRunning] = useState(false);
   /** Human label for the in-flight step (drives the loading text), or null. */
   const [step, setStep] = useState<string | null>(null);
   /** Last error message (human-readable), or null. */
@@ -425,14 +437,27 @@ export function useSession(marketIndex: number = 0) {
         // Catch that here with a clear, actionable message instead of letting
         // the wallet throw a generic "Unexpected error" at simulate time.
         const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+        const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+        const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+        const [positionPda] = findPositionPda(publicKey, marketIndex, PROGRAM_ID);
+
+        // ONE round trip, not five. These five reads are mutually independent —
+        // nothing here needs a previous result — but they used to run strictly
+        // sequentially, so the wallet could not prompt until all five had
+        // returned. At the ~1.3s devnet latency this path actually sees, that
+        // was the difference between a prompt in ~1s and a prompt in ~7s, and
+        // it is why the button felt dead long enough to be clicked repeatedly.
+        const [bal, lamports, uInfo, cInfo, pInfo] = await Promise.all([
+          depositAmount > 0n
+            ? getAccount(connection, ata).then((a) => a.amount).catch(() => 0n)
+            : Promise.resolve(0n),
+          connection.getBalance(publicKey).catch(() => null),
+          connection.getAccountInfo(userPda),
+          connection.getAccountInfo(creditPda),
+          connection.getAccountInfo(positionPda),
+        ]);
+
         if (depositAmount > 0n) {
-          let bal = 0n;
-          try {
-            const acct = await getAccount(connection, ata);
-            bal = acct.amount;
-          } catch {
-            bal = 0n; // ATA doesn't exist yet
-          }
           slog("init", `wallet USDC balance = ${Number(bal) / PRICE_SCALE}`);
           if (bal < depositAmount) {
             const msg =
@@ -445,21 +470,17 @@ export function useSession(marketIndex: number = 0) {
           }
         }
 
-        // Also ensure the wallet has a little SOL for fees/rent.
-        try {
-          const lamports = await connection.getBalance(publicKey);
+        // Also ensure the wallet has a little SOL for fees/rent. A null here is
+        // an unreachable RPC, which was non-fatal before and stays non-fatal.
+        if (lamports !== null) {
           slog("init", `wallet SOL = ${(lamports / 1e9).toFixed(4)}`);
           if (lamports < 3_000_000) {
             setError("Your wallet has almost no devnet SOL — airdrop some SOL (for fees/rent) and retry.");
             return false;
           }
-        } catch {
-          /* non-fatal */
         }
 
         const ixs = [];
-        const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
-        const uInfo = await connection.getAccountInfo(userPda);
         if (!(uInfo && uInfo.data[0] === DISC_USER_ACCOUNT)) {
           slog("init", "will create UserAccount");
           ixs.push(createInitializeUserInstruction(publicKey, PROGRAM_ID));
@@ -472,8 +493,6 @@ export function useSession(marketIndex: number = 0) {
           );
         }
 
-        const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
-        const cInfo = await connection.getAccountInfo(creditPda);
         if (!(cInfo && cInfo.data[0] === DISC_TRADING_CREDIT)) {
           slog("init", "will create TradingCredit");
           ixs.push(createInitializeTradingCreditInstruction(publicKey, marketIndex, PROGRAM_ID));
@@ -481,8 +500,6 @@ export function useSession(marketIndex: number = 0) {
 
         // Create the L1 Position account too, so settled fills have somewhere to
         // land (settle_from_log skips fills whose owner has no Position).
-        const [positionPda] = findPositionPda(publicKey, marketIndex, PROGRAM_ID);
-        const pInfo = await connection.getAccountInfo(positionPda);
         if (!pInfo) {
           slog("init", "will create Position");
           ixs.push(createInitializePositionInstruction(publicKey, marketIndex, PROGRAM_ID));
@@ -693,9 +710,30 @@ export function useSession(marketIndex: number = 0) {
   const autoStart = useCallback(
     async (depositUsdc?: number): Promise<boolean> => {
       if (!publicKey) return false;
+      if (autoStartInFlight.current) {
+        slog("autostart", "already running — ignoring repeat click");
+        return false;
+      }
+      autoStartInFlight.current = true;
+      setAutoRunning(true);
+      // Feedback on the CLICK, not two round trips later.
+      setBusy(true);
+      setStep("Checking your accounts\u2026");
       try {
         const [creditPda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
-        const creditInfo = await connection.getAccountInfo(creditPda);
+        // Both preflight reads at once. They are independent: the credit's owner
+        // decides whether there is anything to do, the wallet balance decides
+        // how much to move. Running them in series added a whole round trip
+        // before the wallet could be asked for anything.
+        const [creditInfo, walletUsdc] = await Promise.all([
+          connection.getAccountInfo(creditPda),
+          depositUsdc !== undefined || !USDC_MINT
+            ? Promise.resolve(0n)
+            : getAssociatedTokenAddress(USDC_MINT, publicKey)
+                .then((ata) => getAccount(connection, ata))
+                .then((a) => a.amount)
+                .catch(() => 0n),
+        ]);
         if (creditInfo?.owner.toBase58() === DELEGATION_PROGRAM) {
           // Silent `return true` here read to the user as "the button does
           // nothing": no spinner, no error, no notice, no state change they
@@ -721,17 +759,8 @@ export function useSession(marketIndex: number = 0) {
         // With no amount given, move the wallet's entire USDC balance in. Read
         // it from chain rather than from a UI field: there is no deposit input
         // any more, and React state can lag a faucet drip by a whole poll.
-        let deposit = depositUsdc;
-        if (deposit === undefined && USDC_MINT) {
-          let bal = 0n;
-          try {
-            const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-            bal = (await getAccount(connection, ata)).amount;
-          } catch {
-            bal = 0n;
-          }
-          deposit = Number(bal) / PRICE_SCALE;
-        }
+        const deposit =
+          depositUsdc !== undefined ? depositUsdc : Number(walletUsdc) / PRICE_SCALE;
 
         slog("autostart", `starting one-click setup (deposit $${deposit ?? 0})`);
         if (!(await initialize(deposit ?? 0))) return false;
@@ -757,6 +786,11 @@ export function useSession(marketIndex: number = 0) {
         setError(msg);
         slog("autostart", `FAILED: ${msg}`, err);
         return false;
+      } finally {
+        autoStartInFlight.current = false;
+        setAutoRunning(false);
+        setBusy(false);
+        setStep(null);
       }
     },
     [publicKey, connection, marketIndex, initialize, fund, delegate, refresh]
@@ -994,7 +1028,7 @@ export function useSession(marketIndex: number = 0) {
 
   return {
     state,
-    busy,
+    busy: busy || autoRunning,
     step,
     error,
     notice,
