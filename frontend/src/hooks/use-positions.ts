@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
 import { useCallback, useEffect, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
@@ -57,8 +58,7 @@ export function useUserAccount() {
 
   useEffect(() => {
     fetch();
-    const id = setInterval(fetch, 5_000);
-    return () => clearInterval(id);
+    return startPoll(fetch, 5_000);
   }, [fetch]);
 
   return { user, refresh: fetch };
@@ -118,8 +118,7 @@ export function usePositions(markPrice: bigint | null) {
 
   useEffect(() => {
     fetch();
-    const id = setInterval(fetch, 5_000);
-    return () => clearInterval(id);
+    return startPoll(fetch, 5_000);
   }, [fetch]);
 
   return { positions, refresh: fetch };

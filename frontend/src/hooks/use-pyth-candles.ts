@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface Candle {
@@ -81,8 +82,7 @@ export function usePythCandles(resolution: Resolution) {
     load();
     // Refresh history periodically so closed candles stay accurate; the live
     // stream handles the forming candle in between.
-    const iv = setInterval(load, 60_000);
-    return () => clearInterval(iv);
+    return startPoll(load, 60_000);
   }, [load]);
 
   return { candles, loading, error, reload: load };

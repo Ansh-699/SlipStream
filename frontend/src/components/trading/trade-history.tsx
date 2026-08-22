@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useEffect, useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
 import { explorerAddress } from "@/lib/manifest";
@@ -52,10 +53,10 @@ export function TradeHistory() {
       }
     };
     poll();
-    const id = setInterval(poll, 10_000);
+    const stopPoll = startPoll(poll, 10_000);
     return () => {
       stop = true;
-      clearInterval(id);
+      stopPoll();
     };
   }, [wallet]);
 

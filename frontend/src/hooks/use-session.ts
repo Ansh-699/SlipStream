@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import {
@@ -257,44 +258,34 @@ export function useSession(marketIndex: number = 0) {
   const refresh = useCallback(async () => {
     if (!publicKey) return;
     try {
-      // UserAccount (deposited collateral) state.
+      // FOUR independent reads, one round trip. These ran in series, and
+      // refresh() is called after EVERY leg of autoStart as well as on a 5s
+      // poll — so the serial version charged ~4 round trips to each of the
+      // three setup steps, on top of the transactions themselves. Nothing here
+      // depends on anything else here.
+      const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+      const [pda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+      const [uInfo, usdcBalance, solBalance, info] = await Promise.all([
+        connection.getAccountInfo(userPda).catch(() => null),
+        USDC_MINT
+          ? getAssociatedTokenAddress(USDC_MINT, publicKey)
+              .then((ata) => getAccount(connection, ata))
+              .then((a) => a.amount)
+              .catch(() => 0n) // no ATA / no balance yet
+          : Promise.resolve(0n),
+        connection.getBalance(publicKey).then((l) => BigInt(l)).catch(() => 0n),
+        connection.getAccountInfo(pda).catch(() => null),
+      ]);
+
       let freeCollateral = 0n;
       let userInitialized = false;
-      try {
-        const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
-        const uInfo = await connection.getAccountInfo(userPda);
-        if (uInfo && uInfo.data[0] === DISC_USER_ACCOUNT) {
-          userInitialized = true;
-          freeCollateral = decodeUserAccount(uInfo.data as Buffer).freeCollateral;
-        }
-      } catch {
-        /* ignore */
-      }
-
-      // Wallet SPL USDC balance (so the UI can prompt the faucet when it's 0).
-      let usdcBalance = 0n;
-      if (USDC_MINT) {
-        try {
-          const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-          const acct = await getAccount(connection, ata);
-          usdcBalance = acct.amount;
-        } catch {
-          usdcBalance = 0n; // no ATA / no balance yet
-        }
-      }
-
-      let solBalance = 0n;
-      try {
-        solBalance = BigInt(await connection.getBalance(publicKey));
-      } catch {
-        solBalance = 0n;
+      if (uInfo && uInfo.data[0] === DISC_USER_ACCOUNT) {
+        userInitialized = true;
+        freeCollateral = decodeUserAccount(uInfo.data as Buffer).freeCollateral;
       }
 
       const stored = loadStoredSession(publicKey, marketIndex);
       const sessionPublicKey = stored ? stored.keypair.publicKey.toBase58() : null;
-
-      const [pda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
-      const info = await connection.getAccountInfo(pda);
       if (!info) {
         setState((s) => ({
           ...s,
@@ -413,8 +404,7 @@ export function useSession(marketIndex: number = 0) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 5_000);
-    return () => clearInterval(id);
+    return startPoll(refresh, 5_000);
   }, [refresh]);
 
   // FULL session setup in ONE click (base layer): initialize_user (if needed) →
@@ -763,6 +753,12 @@ export function useSession(marketIndex: number = 0) {
           depositUsdc !== undefined ? depositUsdc : Number(walletUsdc) / PRICE_SCALE;
 
         slog("autostart", `starting one-click setup (deposit $${deposit ?? 0})`);
+        // Setup is THREE transactions, so it is THREE wallet signatures. The
+        // button's hint ("every order signs instantly with no popups") is true
+        // of trading afterwards, not of setup — and with no step labelling, a
+        // user who had approved one popup had no way to know two more were
+        // coming, or which one they were looking at.
+        setStep("Step 1 of 3 — creating your accounts\u2026");
         if (!(await initialize(deposit ?? 0))) return false;
 
         // Move everything deposited into trading credit. Read the balance from
@@ -773,8 +769,12 @@ export function useSession(marketIndex: number = 0) {
           uInfo && uInfo.data[0] === DISC_USER_ACCOUNT
             ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
             : 0n;
-        if (free > 0n && !(await fund(Number(free) / PRICE_SCALE))) return false;
+        if (free > 0n) {
+          setStep("Step 2 of 3 — moving collateral into the market\u2026");
+          if (!(await fund(Number(free) / PRICE_SCALE))) return false;
+        }
 
+        setStep("Step 3 of 3 — opening your rollup session\u2026");
         if (!(await delegate())) return false;
 
         slog("autostart", "setup complete");

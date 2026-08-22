@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState } from "react";
 import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
 import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
@@ -50,8 +51,7 @@ export function useTriggers(marketIndex: number = MARKET_INDEX) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 5_000);
-    return () => clearInterval(id);
+    return startPoll(refresh, 5_000);
   }, [refresh]);
 
   return { triggers, refresh };

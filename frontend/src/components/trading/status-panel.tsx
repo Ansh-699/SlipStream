@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useEffect, useState } from "react";
 import { useMarket } from "@/hooks/use-market";
 import { useOrderBook } from "@/hooks/use-orderbook";
@@ -65,10 +66,10 @@ export function StatusPanel() {
       }
     };
     poll();
-    const id = setInterval(poll, 10_000);
+    const stopPoll = startPoll(poll, 10_000);
     return () => {
       stop = true;
-      clearInterval(id);
+      stopPoll();
     };
   }, []);
 

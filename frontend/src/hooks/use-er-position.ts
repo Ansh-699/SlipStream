@@ -1,5 +1,6 @@
 "use client";
 
+import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, MARKET, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
@@ -206,8 +207,7 @@ export function useErPosition(
 
   useEffect(() => {
     fetch();
-    const id = setInterval(fetch, 2_000);
-    return () => clearInterval(id);
+    return startPoll(fetch, 2_000);
   }, [fetch]);
 
   return { position, refresh: fetch };
