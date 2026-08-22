@@ -18,7 +18,7 @@ use crate::math::funding::compute_funding_payment;
 use crate::oracle::{apply_dual_oracle, DualOracleOutcome};
 use crate::state::{
     LiquidationIntent, Market, Position, UserAccount,
-    DISC_LIQUIDATION_INTENT, SEED_LIQ_INTENT, SEED_MARKET,
+    DISC_LIQUIDATION_INTENT, DISC_USER_ACCOUNT, SEED_LIQ_INTENT, SEED_MARKET,
 };
 
 // liquidate_position instruction data: empty (oracle prices come from accounts)
@@ -40,6 +40,9 @@ pub fn process(
     //   [5] liquidation_intent   (W) — PDA, may be uninitialized
     //   [6] liquidator           (signer, payer for intent creation)
     //   [7] system_program       (R) — for intent creation
+    //   [8..] remaining          — OPTIONAL: the liquidator's own UserAccount,
+    //         which is where the bounty is paid. See the S3-04 note below for
+    //         why it is optional rather than required.
     let [
         market_acc,
         position_acc,
@@ -49,7 +52,7 @@ pub fn process(
         liquidation_intent_acc,
         liquidator,
         system_program,
-        _remaining @ ..
+        remaining @ ..
     ] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
@@ -236,6 +239,38 @@ pub fn process(
         }
     }
 
+    // --- Pay the bounty (S3-04) ---
+    //
+    // `liquidator_bonus` was subtracted from `total_settlement` above, so the
+    // trader has already been charged for it. Before this, the value was
+    // referenced on exactly two lines of this file and neither paid anybody:
+    // the USDC simply stayed in the vault with no `free_collateral` claim
+    // against it. Charged and destroyed.
+    //
+    // The liquidator's `UserAccount` is OPTIONAL, read from `remaining`.
+    // Requiring it would break every already-deployed caller, and — worse —
+    // would make liquidation FAIL when it is missing. A failed liquidation is a
+    // solvency risk; a bounty routed to the insurance fund is not. So the value
+    // is conserved unconditionally, and paid to the liquidator when they ask
+    // for it by passing their account.
+    if liquidator_bonus > 0 {
+        match find_user_account_owned_by(program_id, remaining, liquidator.key()) {
+            Some(acc) => {
+                let liq_user = UserAccount::from_account_info_mut(acc)?;
+                liq_user.free_collateral = liq_user
+                    .free_collateral
+                    .checked_add(liquidator_bonus)
+                    .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
+            }
+            None => {
+                let market_mut = Market::from_account_info_mut(market_acc)?;
+                market_mut.insurance_fund_balance = market_mut
+                    .insurance_fund_balance
+                    .saturating_add(liquidator_bonus);
+            }
+        }
+    }
+
     // Successful liquidation — clean up any leftover intent
     if !liquidation_intent_acc.data_is_empty() {
         close_liquidation_intent(program_id, liquidation_intent_acc, position_acc, liquidator)?;
@@ -360,4 +395,30 @@ fn close_liquidation_intent(
         *liquidator.borrow_mut_lamports_unchecked() += lamports;
     }
     Ok(())
+}
+
+/// Find a program-owned `UserAccount` whose `owner` field is `owner`.
+///
+/// Unlike `settle_trades::try_find_user_account` this checks `owner() ==
+/// program_id` first. That check is what makes the account safe to CREDIT:
+/// without it the search matches on account *contents* alone, and contents are
+/// whatever the caller supplied.
+fn find_user_account_owned_by<'a>(
+    program_id: &Pubkey,
+    accounts: &'a [AccountInfo],
+    owner: &Pubkey,
+) -> Option<&'a AccountInfo> {
+    for acc in accounts {
+        if acc.owner() != program_id {
+            continue;
+        }
+        let data = unsafe { acc.borrow_data_unchecked() };
+        if data.len() >= UserAccount::LEN && data[0] == DISC_USER_ACCOUNT {
+            let user: &UserAccount = bytemuck::from_bytes(&data[..UserAccount::LEN]);
+            if user.owner == *owner {
+                return Some(acc);
+            }
+        }
+    }
+    None
 }
