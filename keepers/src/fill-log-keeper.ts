@@ -418,7 +418,24 @@ async function main() {
     await settle();
   }
 
-  epoch = await discoverEpoch(epoch);
+  // Startup needs ER reads (discoverEpoch) and base-RPC writes (init/delegate).
+  // Retry with backoff instead of crashing: the old exit(1)-into-pm2-restart
+  // loop burned RPC quota on every relaunch (33k restarts observed).
+  //
+  // S7-02: discoverEpoch is an unbounded for(;;) of ER getAccountInfo calls and
+  // used to run ABOVE this guard, so an ER outage at boot crashed straight into
+  // main().catch(exit(1)) - the exact path the guard was written to replace.
+  // Everything that touches the network at boot now lives inside it.
+  for (;;) {
+    try {
+      epoch = await discoverEpoch(epoch);
+      await ensureEpochReady(epoch);
+      break;
+    } catch (e: any) {
+      log("FILLLOG-KEEPER", `startup not ready: ${errText(e)}; retrying in 30s`);
+      await sleep(30_000);
+    }
+  }
   // Seed the local settle cursor from chain so restart doesn't re-send settle
   // windows for fills the program will just report as already settled.
   try {
@@ -426,18 +443,6 @@ async function main() {
     log("FILLLOG-KEEPER", `L1 settlement cursor: ${lastSettledSeq}`);
   } catch {
     /* base may be unreachable at boot; settle() copes with a null cursor */
-  }
-  // Startup needs base-RPC writes (init/delegate). Retry with backoff instead
-  // of crashing: the old exit(1)-into-pm2-restart loop burned RPC quota on
-  // every relaunch (33k restarts observed).
-  for (;;) {
-    try {
-      await ensureEpochReady(epoch);
-      break;
-    } catch (e: any) {
-      log("FILLLOG-KEEPER", `startup not ready: ${errText(e)}; retrying in 30s`);
-      await sleep(30_000);
-    }
   }
   log("FILLLOG-KEEPER", `ready on epoch ${epoch}; entering loop`);
 

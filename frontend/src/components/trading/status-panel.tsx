@@ -37,6 +37,14 @@ interface ApiStatus {
   base: { ok: boolean; slot: number | null };
   er: { ok: boolean; slot: number | null };
   indexer: { lastFillAt: number | null };
+  keepers: { lastFundingTs: number | null; ageSecs: number | null; stalled: boolean | null };
+}
+
+function since(secs: number): string {
+  if (secs < 90) return `${Math.max(0, secs)}s ago`;
+  if (secs < 5_400) return `${Math.round(secs / 60)}m ago`;
+  if (secs < 172_800) return `${Math.round(secs / 3_600)}h ago`;
+  return `${Math.round(secs / 86_400)}d ago`;
 }
 
 export function StatusPanel() {
@@ -91,6 +99,19 @@ export function StatusPanel() {
   const [baseLevel, baseDetail] = rpcRow(api?.base);
   const [erLevel, erDetail] = rpcRow(api?.er);
 
+  // Keeper liveness, stated rather than inferred (S7-01). Every other row here
+  // is a proxy: "Mark freshness" needs the oracle stream up to say anything, and
+  // both RPC rows read healthy right through a total keeper outage. This one
+  // reads Market.last_funding_ts, which only compute_funding advances and only a
+  // keeper sends, so it is the fleet's own heartbeat.
+  const k = api?.keepers;
+  let keeperLevel: Level = "warn";
+  let keeperDetail = api ? "unknown" : "checking…";
+  if (k && k.ageSecs !== null) {
+    keeperDetail = `funding ${since(k.ageSecs)}`;
+    keeperLevel = k.stalled === true ? "down" : k.stalled === false ? "ok" : "warn";
+  }
+
   return (
     <div>
       <div className="flex h-[36px] items-center justify-between border-b border-[#1d2224] px-3">
@@ -108,6 +129,7 @@ export function StatusPanel() {
           detail={connected && live ? `$${live.price.toFixed(2)}` : "disconnected"}
         />
         <Row label="Mark freshness" level={markLevel} detail={markDetail} />
+        <Row label="Keepers" level={keeperLevel} detail={keeperDetail} />
         <Row label="Settlement" level={settleLevel} detail={settleDetail} />
       </div>
     </div>

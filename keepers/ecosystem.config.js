@@ -26,12 +26,23 @@ function keeper(name, script, extraEnv) {
     args: `--env-file=${ENV_FILE} src/${script}`,
     interpreter: "none",
     autorestart: true,
-    // A keeper that dies within 30s is crash-looping; stop after 50 tries
-    // instead of restarting forever (a boot-time crash loop once burned the
-    // RPC quota at ~1 restart/18s for days).
+    // S7-02. The quota burn this policy was written against is a restart *rate*
+    // problem, but `max_restarts: 50` + `restart_delay: 5000` bounded the
+    // restart *count*: ~4 minutes of boot-time failure exhausted the budget and
+    // pm2 parked the app in `errored` permanently, silently, until a human ran
+    // `pm2 restart`. That converted every transient RPC outage into an
+    // indefinite one -- the failure mode that left this fleet down for 17 days.
+    //
+    // exp_backoff_restart_delay is pm2's own answer: the delay grows
+    // exponentially from 5s and caps at 15s, so a sustained outage costs ~4
+    // boot attempts/minute instead of 12, while the process is still trying
+    // when the RPC comes back. max_restarts is raised past any real outage
+    // rather than removed, because pm2's default when it is absent is 16 --
+    // stricter than the value being replaced. pm2 resets the counter once the
+    // app stays up past min_uptime, so a keeper that recovers starts clean.
     min_uptime: "30s",
-    max_restarts: 50,
-    restart_delay: 5000,
+    max_restarts: 10000,
+    exp_backoff_restart_delay: 5000,
     env: extraEnv || {},
     out_file: path.join(process.env.HOME || "/root", `.pm2/logs/${name}-out.log`),
     error_file: path.join(process.env.HOME || "/root", `.pm2/logs/${name}-err.log`),

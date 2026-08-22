@@ -5,10 +5,17 @@ import { getKeeperAddresses } from "./shared/manifest";
 import { createComputeFundingInstruction } from "../../client/src/instructions";
 import { PublicKey } from "@solana/web3.js";
 
-// Switchboard SOL/USD on devnet — override via SWITCHBOARD_FEED env
-const SWITCHBOARD_SOL_USD = new PublicKey(
-  process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
-);
+// Switchboard SOL/USD on devnet — override via SWITCHBOARD_FEED env.
+// S7-02: resolved lazily. At module scope a malformed SWITCHBOARD_FEED throws
+// during module evaluation, before main() exists and outside every try, so the
+// process dies on the one path no retry guard can cover. Deferring the parse to
+// first use puts it inside the caller's try.
+let switchboardFeed: PublicKey | null = null;
+function getSwitchboardFeed(): PublicKey {
+  return (switchboardFeed ??= new PublicKey(
+    process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
+  ));
+}
 
 const MARKET_INDEX = 0;
 const CHECK_INTERVAL_MS = 60_000; // Check every minute
@@ -47,7 +54,7 @@ async function main() {
 
       log("FUNDING", `Funding interval elapsed (${elapsed}s >= ${interval}s), computing...`);
 
-      const ix = createComputeFundingInstruction(MARKET_INDEX, pythFeed, SWITCHBOARD_SOL_USD);
+      const ix = createComputeFundingInstruction(MARKET_INDEX, pythFeed, getSwitchboardFeed());
       const tx = new Transaction().add(ix);
       const sig = await sendAndConfirm(connection, tx, [keeper]);
       log("FUNDING", `Computed funding, sig=${sig}`);

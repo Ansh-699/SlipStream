@@ -11,9 +11,14 @@ import { PRICE_SCALE, DISC_TRIGGER_ORDER } from "../../client/src/constants";
 import { decodeTriggerOrder, TRIGGER_ORDER_SIZE } from "../../client/src/accounts";
 import bs58 from "bs58";
 
-const SWITCHBOARD_SOL_USD = new PublicKey(
-  process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
-);
+// S7-02: resolved lazily — see the note in funding-keeper.ts. A malformed
+// SWITCHBOARD_FEED must not throw during module evaluation, where no guard runs.
+let switchboardFeed: PublicKey | null = null;
+function getSwitchboardFeed(): PublicKey {
+  return (switchboardFeed ??= new PublicKey(
+    process.env.SWITCHBOARD_FEED || "GvDMxPzN1sCj7L26YDK2HnMRXEQmQ2aemov8YBtPS7vR"
+  ));
+}
 import { computeTwap, decodePosition, type Position } from "../../client/src/accounts";
 
 const MARKET_INDEX = 0;
@@ -247,7 +252,7 @@ async function main() {
             new PublicKey(posOwner),
             MARKET_INDEX,
             pythFeed,
-            SWITCHBOARD_SOL_USD,
+            getSwitchboardFeed(),
           );
           const tx = new Transaction().add(ix);
           const sig = await sendAndConfirm(connection, tx, [keeper]);
