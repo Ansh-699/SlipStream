@@ -176,7 +176,11 @@ export function PriceChart() {
       </div>
 
       <div className="flex h-[30px] shrink-0 items-center justify-between gap-3 border-t border-[var(--t-border)] px-3 text-[11px] text-[var(--t-text-3)]">
-        <span>Scroll to zoom · drag to pan</span>
+        {/* Below xl a plain wheel scrolls the page instead of zooming (see the
+            wheel handler), so the hint has to say which gesture actually works
+            at this width rather than promise one that no longer does. */}
+        <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
+        <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
         <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
       </div>
     </div>
@@ -235,14 +239,38 @@ function CandleCanvas({
     const dpr = window.devicePixelRatio || 1;
     const w = wrap.clientWidth;
     const h = wrap.clientHeight;
-    dims.current = { w, h, dpr };
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = `${w}px`;
-    canvas.style.height = `${h}px`;
+    // Nothing to draw into, and the guard below would read a 0x0 as "unchanged"
+    // from its initial value and leave the canvas at its unstyled 300x150
+    // default. Assigning canvas.width = 0 used to hide that by making the
+    // element itself zero-sized.
+    if (w === 0 || h === 0) return;
+    // This effect re-runs on every live tick (~20/s) because `visible` carries
+    // the forming candle. Assigning canvas.width/height ALWAYS reallocates and
+    // zeroes the backing store even when the value is unchanged: at a typical xl
+    // layout of ~1200x500 CSS px and dpr 2 that is a 9.6 MB buffer thrown away
+    // and re-created twenty times a second, ~191 MB/s of churn on the main
+    // thread, which is what made scrolling the positions table drop frames.
+    // `dims` was already declared for this guard but never consulted. Resize is
+    // still picked up: the effect keeps re-reading clientWidth/Height each tick,
+    // it just no longer touches the canvas when they agree.
+    if (dims.current.w !== w || dims.current.h !== h || dims.current.dpr !== dpr) {
+      dims.current = { w, h, dpr };
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+    }
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Resizing the canvas used to reset the whole 2D state for free. Now that it
+    // usually does not, anything this draw mutates must be re-established here.
+    // lineWidth is the only one that survives a frame: line/area mode sets 1.6
+    // below and nothing puts it back, so the grid, the last-price dash and the
+    // crosshair would thicken on the second frame onwards. (setLineDash is
+    // already cleared at each use site; every fillStyle/strokeStyle/textAlign is
+    // assigned before it is read.)
+    ctx.lineWidth = 1;
     ctx.clearRect(0, 0, w, h);
 
     // Theme-aware ink: dark text on light bg, light text on dark bg.
@@ -257,6 +285,15 @@ function CandleCanvas({
     // The price tag paints text ON the up/down fill, so it needs the ground
     // colour, not the ink colour — inverted relative to the surface.
     const priceTagText = tok("--t-bg", isDark ? "#0b0d0e" : "#ffffff");
+    // The axis labels are TEXT and owe 4.5:1 at 10px. Painting them with ink()
+    // did not: ink(0.4) alpha-composited to rgb(159,162,162) on white = 2.57:1,
+    // and ink(0.35) on the time axis to 2.23:1 — a trader could not resolve the
+    // digits on the price scale. Dark was no better (3.81 / 3.17). --t-text-3 is
+    // the token the rest of the terminal uses for exactly this rank of label and
+    // is measured at 5.9:1 light / AA dark, so use it instead of a private alpha.
+    // The fallback is theme-branched so a failed token read cannot paint
+    // near-white ink on a white ground.
+    const axisInk = tok("--t-text-3", isDark ? "#838c92" : "#5f6a74");
 
     const padR = 56; // price axis
     const padB = 22; // time axis
@@ -291,13 +328,13 @@ function CandleCanvas({
       ctx.moveTo(0, y);
       ctx.lineTo(plotW, y);
       ctx.stroke();
-      ctx.fillStyle = ink(0.4);
+      ctx.fillStyle = axisInk;
       ctx.textAlign = "left";
       ctx.fillText(`$${price.toFixed(3)}`, plotW + 6, y);
     }
 
     // Time axis labels (a handful)
-    ctx.fillStyle = ink(0.35);
+    ctx.fillStyle = axisInk;
     ctx.textAlign = "center";
     const labelEvery = Math.ceil(n / 6);
     for (let i = 0; i < n; i += labelEvery) {
@@ -339,7 +376,8 @@ function CandleCanvas({
       visible.forEach((c, i) => {
         const x = xOf(i);
         const y = yOf(c.c);
-        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
       });
       if (chartType === "area") {
         ctx.lineTo(xOf(n - 1), padT + plotH);
@@ -355,7 +393,8 @@ function CandleCanvas({
         visible.forEach((c, i) => {
           const x = xOf(i);
           const y = yOf(c.c);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
         });
       }
       ctx.strokeStyle = color;
@@ -404,7 +443,18 @@ function CandleCanvas({
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    // 80rem is Tailwind's `xl`, the same breakpoint dashboard.tsx uses for
+    // `xl:overflow-hidden`. AT xl the terminal is viewport-locked, so there is
+    // no page scroll to steal and swallowing the wheel is exactly what the
+    // footer advertises. BELOW xl the columns stack and the page scrolls
+    // normally — and this handler used to preventDefault unconditionally, so
+    // scrolling down /trade on a 1024px tablet stopped dead the moment the
+    // cursor crossed the 420px chart and zoomed the chart out instead. The
+    // MediaQueryList is live, so a resize needs no re-subscription.
+    const xl = window.matchMedia("(min-width: 80rem)");
     const handler = (e: WheelEvent) => {
+      // ctrl+wheel (trackpad pinch) is a zoom gesture everywhere, never a scroll.
+      if (!e.ctrlKey && !xl.matches) return;
       e.preventDefault();
       setView((v) => {
         const factor = e.deltaY > 0 ? 1.15 : 0.87;

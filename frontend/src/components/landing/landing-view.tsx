@@ -49,8 +49,10 @@ export function LandingView() {
       <header className="relative z-30 max-w-[1200px] mx-auto px-5 h-16 flex items-center">
         <Link href="/" className="flex items-center gap-2.5">
           <span className="relative h-8 w-8 rounded-lg overflow-hidden shadow-[0_0_18px_rgba(16,185,129,0.5)]">
+            {/* logo-32.png, not logo.png: the render box is 32px and the 512px
+                original cost 160 KB to paint it. 2.7 KB, same artwork. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="Slipstream" className="h-full w-full object-cover" />
+            <img src="/logo-32.png" alt="Slipstream" className="h-full w-full object-cover" />
           </span>
           <span className="text-lg font-bold tracking-tight">Slipstream</span>
         </Link>
@@ -81,13 +83,27 @@ export function LandingView() {
             borderRadius="24px"
             className="glass-surface overflow-hidden"
           >
+            {/* width/height are the INTRINSIC 1600x900, not a render size --
+                `w-full h-auto` still governs the painted box. They exist so the
+                browser reserves the aspect-ratio box before the 487 KB lands;
+                without them the hero was 0px tall until decode and both CTAs
+                below jumped ~189px down under the user's finger. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/banner.png" alt="Slipstream" className="w-full h-auto block" />
+            <img src="/banner.png" alt="Slipstream" width={1600} height={900} className="w-full h-auto block" />
           </LiquidGlassCard>
         </div>
 
         <h1 className="mt-9 text-5xl sm:text-6xl md:text-7xl font-bold tracking-tight leading-[1.05]">
-          <span className="bg-gradient-to-r from-emerald-300 via-teal-300 to-emerald-400 bg-clip-text text-transparent">Slipstream</span>
+          {/* The light stops are the DEFAULT and the 300/400 stops are behind
+              `dark:` -- the same shape the two CTAs below use. Palette classes
+              like `from-emerald-300` are invisible to the light-mode remap
+              block in globals.css (it only rewrites the neutral white/N
+              utilities), so as bare defaults this 72px wordmark rendered at
+              1.24-1.43:1 on the light `.app-bg` gradient; the 700/800 stops
+              measure 4.50-7.17:1 across the same gradient. Dark mode is
+              unchanged: `.dark .dark\:from-emerald-300` (0,2,0) beats the bare
+              class (0,1,0). */}
+          <span className="bg-gradient-to-r from-emerald-700 via-teal-700 to-emerald-800 dark:from-emerald-300 dark:via-teal-300 dark:to-emerald-400 bg-clip-text text-transparent">Slipstream</span>
         </h1>
         <p className="mt-5 mx-auto max-w-[620px] text-base sm:text-lg text-white/60 leading-relaxed">
           A perpetual-futures central-limit order book on Solana. Matching runs in a
@@ -215,7 +231,7 @@ export function LandingView() {
           <div className="flex items-center gap-2">
             <span className="relative h-5 w-5 rounded overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="Slipstream" className="h-full w-full object-cover" />
+              <img src="/logo-32.png" alt="Slipstream" className="h-full w-full object-cover" />
             </span>
             <span className="font-medium text-white/70">Slipstream</span>
             <span className="text-white/30">· Devnet MVP</span>

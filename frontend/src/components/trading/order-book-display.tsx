@@ -10,7 +10,12 @@ const PRICE_SCALE = 1_000_000;
 const tickSize = (Number(TICK_SIZE) / PRICE_SCALE).toFixed(3);
 
 export function OrderBookDisplay() {
-  const { bids, asks, trades, status } = useOrderBook(0);
+  // `status` and `updatedAt` are the point of this hook's return shape: an empty
+  // ladder has three different causes and a POPULATED ladder has two — current,
+  // or the last good one held on screen while every read since has failed. That
+  // second one used to render byte-for-byte identically to a live book, so a
+  // trader could price a limit order off quotes that stopped minutes ago.
+  const { bids, asks, trades, status, updatedAt } = useOrderBook(0);
   const [tab, setTab] = useState<"book" | "trades">("book");
 
   // Build cumulative ladders. Asks render top→down moving DOWN toward the mid,
@@ -84,8 +89,43 @@ export function OrderBookDisplay() {
         <span className="tk-chip">SOL-USD</span>
       </div>
 
+      {/* The one thing separating a live panel from a frozen one, and it sits
+          outside the tab switch because BOTH tabs are fed by the same read of
+          the same account. useSharedSource deliberately keeps the last good
+          value on screen through a failed fetch (a blip must not blank the
+          book), so without this every level, the mid, the spread and every
+          "recent" trade render during an outage exactly as they render current
+          data — and someone prices a limit order off quotes that stopped
+          minutes ago.
+
+          It states the clock time of the last good read rather than an age in
+          seconds: an age needs Date.now() during render, which is impure and
+          lints as such, and running a clock purely to count it up is a
+          re-render a second for a number the reader already has. */}
+      {status === "stale" && updatedAt !== null && (
+        <div
+          role="status"
+          className="shrink-0 border-b border-[var(--t-warn)]/30 bg-[var(--t-warn)]/10 px-3 py-1 text-[11px] font-medium text-[var(--t-warn)]"
+        >
+          Not updating — last read at {new Date(updatedAt).toLocaleTimeString()}
+        </div>
+      )}
+
+      {/* Both branches are real tabpanel elements. They used to be fragments, so
+          the tabs' aria-controls resolved to nothing and the ladder announced as
+          a run of unlabelled divs. `flex-1 flex flex-col min-h-0` is load-bearing,
+          not decoration: the wrapper sits between the `h-full flex flex-col`
+          container above and the shrink-0 header + flex-1 min-h-0 scroll region
+          below, and without it the ladder stops scrolling. The inactive tab's
+          aria-controls still dangles because only one panel renders at a time —
+          the same trade-off activity-drawer.tsx makes. */}
       {tab === "book" ? (
-        <>
+        <div
+          id="book-panel"
+          role="tabpanel"
+          aria-label="Order book"
+          className="flex-1 flex flex-col min-h-0"
+        >
           {/* Column header */}
           <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[var(--t-text-3)]">
             <span>Price (USD)</span>
@@ -101,14 +141,18 @@ export function OrderBookDisplay() {
                     ? "Loading the book…"
                     : status === "unavailable"
                       ? "Can't reach the order book"
-                      : "No resting orders"}
+                      : status === "stale"
+                        ? "Book not updating"
+                        : "No resting orders"}
                 </span>
                 <span className="max-w-[34ch] text-[11px] leading-relaxed text-[var(--t-text-2)]">
                   {status === "unavailable"
                     ? "Neither the rollup nor the base layer answered."
-                    : status === "empty"
-                      ? "The book decoded cleanly but nobody is quoting."
-                      : ""}
+                    : status === "stale"
+                      ? "Nothing was resting when the last read succeeded."
+                      : status === "empty"
+                        ? "The book decoded cleanly but nobody is quoting."
+                        : ""}
                 </span>
               </div>
             ) : (
@@ -142,9 +186,14 @@ export function OrderBookDisplay() {
               </>
             )}
           </div>
-        </>
+        </div>
       ) : (
-        <>
+        <div
+          id="trades-panel"
+          role="tabpanel"
+          aria-label="Recent trades"
+          className="flex-1 flex flex-col min-h-0"
+        >
           {/* Column header */}
           <div className="grid grid-cols-3 shrink-0 px-3 py-1.5 text-[11px] text-[var(--t-text-3)]">
             <span>Price (USD)</span>
@@ -155,7 +204,17 @@ export function OrderBookDisplay() {
           <div className="flex-1 min-h-0 overflow-y-auto slim-scroll">
             {trades.length === 0 ? (
               <div className="h-full flex items-center justify-center text-[12px] text-[var(--t-text-2)]">
-                No trades yet
+                {/* Same three-way split as the book: the fill ring comes from the
+                    same account and the same read, so "No trades yet" was being
+                    printed for a market that is trading whenever that read was
+                    failing or had not landed yet. */}
+                {status === "loading"
+                  ? "Loading trades…"
+                  : status === "unavailable"
+                    ? "Can't reach the order book"
+                    : status === "stale"
+                      ? "Trade feed not updating"
+                      : "No trades yet"}
               </div>
             ) : (
               trades.map((t) => (
@@ -178,7 +237,7 @@ export function OrderBookDisplay() {
               ))
             )}
           </div>
-        </>
+        </div>
       )}
 
       {/* Buy / Sell pressure. Hidden when there is no book: with zero depth

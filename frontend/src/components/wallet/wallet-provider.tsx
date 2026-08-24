@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PhantomProvider, type PhantomTheme } from "@phantom/react-sdk";
 import { AddressType, type AuthProviderType } from "@phantom/browser-sdk";
 
@@ -27,7 +27,51 @@ const slipstreamTheme: Partial<PhantomTheme> = {
   overlay: "rgba(0, 0, 0, 0.8)",
 };
 
+/**
+ * The same theme with its surfaces and signals swapped for the app's light
+ * tokens. Phantom's modal renders with its own inline styles outside our CSS,
+ * so it cannot pick up `.dark` on <html> — without this it stayed a #0a0f0e
+ * panel under an 80%-black scrim over a white page, i.e. the sign-in step was
+ * the one surface in the app that never followed the theme.
+ *
+ * `brand` and `error` move too, because they are not decoration here: the SDK
+ * paints `brand` as the "Continue with Phantom" button fill under a hardcoded
+ * #FFFFFF label (emerald-500 under white is 2.1:1; --t-up's #047857 is 4.8:1),
+ * and `error` as the "Failed to disconnect" caption directly on `background`
+ * (rose-500 on white is 3.4:1; --t-down's #be123c is 6.4:1). `success` is
+ * declared by the type but the SDK never reads it, so it rides along unchanged.
+ *
+ * `secondary` must stay a "#" hex string: mergeTheme derives its aux colour
+ * with hexToRgba and throws "Secondary color must be a hex color..." otherwise,
+ * during PhantomProvider render at layout level — that takes the whole app
+ * down, not just the modal. The SDK's own exported `lightTheme` is not used
+ * because it carries Phantom's purple brand (#7C63E7) and would drop the
+ * emerald accent.
+ */
+const slipstreamThemeLight: Partial<PhantomTheme> = {
+  ...slipstreamTheme,
+  background: "#ffffff", // --t-bg
+  text: "#0e1417", // --t-text
+  secondary: "#5f6a74", // --t-text-3
+  brand: "#047857", // --t-up
+  error: "#be123c", // --t-down
+  overlay: "rgba(15, 23, 23, 0.5)",
+};
+
 export function WalletProvider({ children }: { children: ReactNode }) {
+  // Read the class the ThemeToggle flips, and re-read it on the event it
+  // dispatches. The first read MUST be inside the effect: there is no
+  // `document` during SSR, and layout.tsx's inline <head> script has already
+  // set the class before hydration, so mount is the correct moment. `true` as
+  // the initial value matches that script's dark fallback, so no mismatch.
+  const [dark, setDark] = useState(true);
+  useEffect(() => {
+    const read = () => setDark(document.documentElement.classList.contains("dark"));
+    read();
+    window.addEventListener("themechange", read);
+    return () => window.removeEventListener("themechange", read);
+  }, []);
+
   const config = useMemo(() => {
     const appId = process.env.NEXT_PUBLIC_PHANTOM_APP_ID;
     const redirectUrl =
@@ -57,7 +101,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   return (
     <PhantomProvider
       config={config}
-      theme={slipstreamTheme}
+      theme={dark ? slipstreamTheme : slipstreamThemeLight}
       appName="SlipStream"
     >
       {children}

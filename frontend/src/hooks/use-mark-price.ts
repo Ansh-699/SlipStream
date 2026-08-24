@@ -3,7 +3,11 @@
 import { useEffect, useState } from "react";
 import { useMarket } from "@/hooks/use-market";
 import { useLivePrice } from "@/hooks/use-live-price";
-import { isMarkPriceFresh, markPriceAgeMins, PRICE_SCALE } from "@/lib/slipstream";
+import {
+  markPriceAgeMins,
+  MARK_PRICE_MAX_STALENESS_MINS,
+  PRICE_SCALE,
+} from "@/lib/slipstream";
 
 /**
  * One answer to "what price should this surface use, and can it be trusted?"
@@ -19,9 +23,11 @@ import { isMarkPriceFresh, markPriceAgeMins, PRICE_SCALE } from "@/lib/slipstrea
  *
  *   - `stampStale` is the program's own gate (`Market::is_mark_price_fresh`),
  *     read from the `mark_price_minute` stamp that S6-01 restored to the
- *     decoders. It needs nothing but the market account, and it agrees with the
- *     chain exactly - if it says stale, `close_position` and `place_order` will
- *     refuse this mark.
+ *     decoders. It needs nothing but the market account: if it says stale,
+ *     `close_position` and `place_order` will refuse this mark. It matches the
+ *     chain everywhere except the far half of the minute ring, which it reads
+ *     as a client clock running behind rather than a 22-45 day old mark - see
+ *     the CEILING note at the computation.
  *   - `divergenceStale` compares the mark to the live oracle. It catches a mark
  *     that is being stamped but is wrong, which the stamp alone cannot see, but
  *     it says nothing at all when the oracle stream is down.
@@ -80,10 +86,12 @@ export function useMarkPrice(marketIndex: number = 0): MarkPriceInfo {
 
   const mark =
     market && market.lastMarkPrice > 0n ? Number(market.lastMarkPrice) / PRICE_SCALE : null;
-  // The oracle price is only usable while the socket is UP and the reading is
-  // recent. useLivePrice leaves `live` at its last value forever when the
-  // socket closes — it only flips `connected` — so consuming `live` alone made
-  // this whole staleness system trust a frozen price:
+  // The oracle price is usable only while the socket is UP and the reading is
+  // recent. The first half of that now holds at the source: useLivePrice gates
+  // `live` on `connected` in its own getSnapshot, so a dead stream yields null
+  // here (and in market-bar, price-chart and status-panel, which never checked).
+  // It used to hand out the last frame forever, which is what made this whole
+  // staleness system trust a frozen price:
   //   - `reference` fell back to a spot that stopped updating minutes ago, and
   //     that reference is what prices health, the Mark column, and the IOC
   //     cross-price and 1% slippage bound on Close. The bound the tooltip
@@ -94,14 +102,47 @@ export function useMarkPrice(marketIndex: number = 0): MarkPriceInfo {
   // This file's own contract says "Null means 'do not quote a price' — not
   // 'fall back to the frozen one'." It applied that to the mark and not to the
   // oracle it was checking the mark against.
+  //
+  // The second half is what the store CANNOT do: a socket that stays open and
+  // stops delivering leaves `connected` true, and a snapshot read has nothing
+  // to notify it as time passes. That needs a clock, which is why the age gate
+  // and the `connected` term both stay here — this is the one consumer that
+  // owns a tick.
   const spotAgeSecs =
     live?.publishTime != null ? nowSec - Number(live.publishTime) : null;
   const spotUsable =
     connected && live != null && (spotAgeSecs === null || spotAgeSecs <= MAX_SPOT_AGE_SECS);
   const spot = spotUsable ? (live?.price ?? null) : null;
 
-  const stampStale = market ? !isMarkPriceFresh(market, nowSec) : false;
-  const ageMins = market ? markPriceAgeMins(market, nowSec) : null;
+  // `markPriceAgeMins` mirrors the program's wrapping u16 minute arithmetic
+  // (state/market.rs:154-161), but the program compares two reads of the SAME
+  // Clock, so its delta is never negative. Here `nowMin` comes from Date.now()
+  // sampled up to 5s ago while the stamp comes from the chain, so a stamp from
+  // a minute this client has not reached yet wraps to ~65535 — read as a mark
+  // 46 DAYS old. Two ways in, neither exotic: the crank stamps at 12:00:01 and
+  // the market poll delivers it while `nowSec` is still 11:59:59, or the
+  // laptop's clock is simply a minute slow (no NTP — VMs, corporate images, a
+  // phone back from airplane mode), which never leaves the state at all. It
+  // turned the Mark column amber with "the TWAP crank has stopped — mark is 46d
+  // old" one second after the crank ran, and with the oracle stream also down
+  // it left `reference` null, so both close paths refused outright: the user
+  // could not exit a position because their clock was a minute slow.
+  //
+  // The far half of the ring is a clock behind, not an ancient mark — the
+  // program's own comment scopes this arithmetic to "any real age < ~22 days".
+  // Age it as 0. This tolerates arbitrary client-behind-chain skew.
+  //
+  // CEILING: a mark genuinely 22-45 days old also lands in the far half and is
+  // reported fresh here while the chain would refuse it. Deliberate trade — a
+  // slow client clock is routine, a month-dead crank on a live market is not,
+  // and `divergenceStale` still catches that case whenever the oracle is up.
+  // The correction belongs in the shared helpers in lib/slipstream/accounts.ts
+  // (see the isMarkPriceFresh/markPriceAgeMins pair) so it exists once; that
+  // file is outside this change, and this hook is currently their only caller.
+  const rawAgeMins = market ? markPriceAgeMins(market, nowSec) : null;
+  const ageMins = rawAgeMins !== null && rawAgeMins > 32768 ? 0 : rawAgeMins;
+  // Unstamped (null) is fresh, exactly as the program treats it.
+  const stampStale = ageMins !== null && ageMins > MARK_PRICE_MAX_STALENESS_MINS;
 
   const divergence =
     mark !== null && spot !== null && spot > 0 ? Math.abs(mark - spot) / spot : null;

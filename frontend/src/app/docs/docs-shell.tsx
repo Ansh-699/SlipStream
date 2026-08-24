@@ -54,7 +54,12 @@ export function DocsShell({
         </div>
       </header>
 
-      <div className="max-w-[1100px] mx-auto px-4 flex gap-8 py-8">
+      {/* Stack on mobile, two columns from lg. The row layout must NOT apply
+          below lg: when the Menu button unhides the aside there, `flex-row`
+          gave the `w-full` aside the whole track and squeezed `flex-1 min-w-0`
+          main down to 0px — the article slid off the right edge and re-flowed
+          at min-content width (roughly one word per line, page height 4x). */}
+      <div className="max-w-[1100px] mx-auto px-4 flex flex-col lg:flex-row gap-8 py-8">
         {/* Sidebar */}
         <aside
           className={`${

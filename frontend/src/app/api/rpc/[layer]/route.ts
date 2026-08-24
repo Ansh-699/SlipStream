@@ -16,6 +16,10 @@
 // Override upstreams via BASE_RPC_UPSTREAM / ER_RPC_UPSTREAM (server env).
 
 import { NextRequest } from "next/server";
+import { gzip } from "node:zlib";
+import { promisify } from "node:util";
+
+const gz = promisify(gzip);
 
 export const runtime = "nodejs";
 // Always proxy live; never cache RPC responses.
@@ -48,7 +52,15 @@ function errorEnvelope(body: string, code: number, message: string): string {
   }
 }
 
-async function forward(upstream: string, body: string): Promise<Response> {
+// Next does NOT compress route-handler responses (its `compress: true` covers
+// pages, not these), so every RPC reply left this proxy as plaintext. Measured
+// on the prod build: one getAccountInfo on the order book is 835,887 B raw and
+// 40,726 B gzipped — a 95% saving on ~99% of the tab's traffic, since the book
+// is polled every 2s. Only bodies above this are worth the CPU; a getSlot reply
+// is ~100 B and would come out larger.
+const GZIP_MIN_BYTES = 1024;
+
+async function forward(upstream: string, body: string, accept: string): Promise<Response> {
   // A couple of quick retries smooth over the ER's occasional transient errors
   // (the same flakiness that surfaced as "Failed to fetch" in the browser).
   let lastErr: unknown = null;
@@ -90,6 +102,22 @@ async function forward(upstream: string, body: string): Promise<Response> {
           { status: 200, headers: { "Content-Type": "application/json" } }
         );
       }
+      // Async gzip, never gzipSync: at ~1.5 order-book responses per second per
+      // viewer, synchronously compressing 836 KB would block the event loop for
+      // ~15 ms each time and stall every other request on the server. undici has
+      // already decompressed the upstream reply, so `text` is plaintext here.
+      // Only the success path is compressed — the error envelope, 403, 413 and
+      // 404 below are a few hundred bytes each.
+      if (text.length >= GZIP_MIN_BYTES && /\bgzip\b/.test(accept)) {
+        return new Response(await gz(text), {
+          status: res.status,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Encoding": "gzip",
+            Vary: "Accept-Encoding",
+          },
+        });
+      }
       return new Response(text, {
         status: res.status,
         headers: { "Content-Type": "application/json" },
@@ -122,11 +150,16 @@ const MAX_BODY_BYTES = 100_000;
 const ALLOWED_METHODS = new Set([
   "getAccountInfo",
   "getMultipleAccounts",
-  // Required by use-positions.ts (memcmp-filtered scan for the user's Positions).
-  // This is the expensive one the comment above warns about, so it stays behind
-  // the body/batch caps; bounding it properly needs a rate limiter or an
-  // indexer-backed endpoint, not removal — dropping it breaks the positions table.
-  "getProgramAccounts",
+  // getProgramAccounts is deliberately NOT here. It used to be, for
+  // use-positions.ts, but that hook now derives the Position PDA and does a
+  // single getAccountInfo, so nothing in frontend/src calls it any more (the
+  // keepers reach their RPC directly — clientRpc only returns this proxy URL in
+  // the browser). Left in the allowlist it was an unfiltered, unauthenticated,
+  // retry-amplified full-program scan — 20 per request, >600 KB of upstream
+  // egress each — pointed at the deployer's paid RPC quota: exactly what the
+  // comment above says burned that quota once already. If a feature ever needs
+  // it back, re-add it gated on a required non-empty `filters` array plus a
+  // `dataSlice`, and cap batches containing it at 1 — not as a bare entry.
   "getBalance",
   "getLatestBlockhash",
   "getSignatureStatuses",
@@ -144,6 +177,36 @@ const ALLOWED_METHODS = new Set([
   "getBlockHeight",
   "getRecentPrioritizationFees",
 ]);
+
+/**
+ * Read the request body, refusing anything over `max` bytes. Returns null when
+ * the body is too large.
+ *
+ * WHY not `await req.text()` plus a length check: `text()` buffers the WHOLE
+ * body before any check can run, so the cap was decoration. An unauthenticated
+ * 500 MB POST is ~1 GB of heap here (Node holds the decoded string as UTF-16),
+ * and a few concurrent ones OOM the Next process — which takes the dashboard,
+ * both RPC proxies, the faucet and /api/status down together.
+ *
+ * Content-Length is used only to reject before reading a single byte; it is
+ * never trusted as the actual size, because it is absent on a chunked request
+ * and caller-supplied in any case. `return` out of the for-await cancels the
+ * underlying stream, so an oversized body stops arriving instead of being
+ * drained into memory.
+ */
+async function readCapped(req: NextRequest, max: number): Promise<string | null> {
+  const declared = req.headers.get("content-length");
+  if (declared !== null && Number(declared) > max) return null;
+  if (!req.body) return "";
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req.body as unknown as AsyncIterable<Uint8Array>) {
+    total += chunk.byteLength;
+    if (total > max) return null;
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
 
 function methodsAllowed(body: string): boolean {
   let parsed: unknown;
@@ -178,8 +241,8 @@ export async function POST(
       { status: 404, headers: { "Content-Type": "application/json" } }
     );
   }
-  const body = await req.text();
-  if (body.length > MAX_BODY_BYTES) {
+  const body = await readCapped(req, MAX_BODY_BYTES);
+  if (body === null) {
     return new Response(JSON.stringify({ error: "request body too large" }), {
       status: 413,
       headers: { "Content-Type": "application/json" },
@@ -195,7 +258,7 @@ export async function POST(
       { status: 403, headers: { "Content-Type": "application/json" } }
     );
   }
-  return forward(upstream, body);
+  return forward(upstream, body, req.headers.get("accept-encoding") ?? "");
 }
 
 // Some web3.js paths probe with GET (health). Return a simple OK.

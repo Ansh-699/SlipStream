@@ -31,19 +31,43 @@ export const RESOLUTIONS: Resolution[] = [
   { label: "1D", code: "D", seconds: 86400, lookback: 60 * 60 * 24 * 180 },
 ];
 
+/** Stable identity, so clearing on a resolution switch hands consumers the same
+ *  reference the hook started with instead of invalidating their memos. */
+const NO_CANDLES: Candle[] = [];
+
 /**
  * Load REAL historical OHLC candles for SOL/USD from Pyth Benchmarks (via the
  * same-origin /api/pyth/history proxy). These are genuine measured candles from
  * Pythnet — not client-accumulated samples.
  */
 export function usePythCandles(resolution: Resolution) {
-  const [candles, setCandles] = useState<Candle[]>([]);
+  const [candles, setCandles] = useState<Candle[]>(NO_CANDLES);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
+  /** The resolution `candles` was measured at. */
+  const loadedRes = useRef<Resolution | null>(null);
 
   const load = useCallback(async () => {
     const id = ++reqId.current;
+    // The ONLY place the series is cleared. A resolution switch must drop it —
+    // candles measured at the previous bucket width must not sit under the new
+    // interval's label and time axis, and if this request then fails they must
+    // not sit there indefinitely. A 60s REFRESH must not: nothing was lost, the
+    // history we hold is still the same measured history.
+    //
+    // Both failure paths below used to clear it, so one 15s Benchmarks blip
+    // blanked the chart, the OHLC legend, the market bar's 24h high/low and the
+    // header change% to "Couldn't load price history" for a full minute — while
+    // the data sat in the closure that had just wiped it. The live stream keeps
+    // driving the right edge in the meantime, so the worst case on screen is a
+    // series up to 60s stale at its left end. `error` is still set on failure;
+    // price-chart surfaces it only when it has fewer than 2 candles to draw,
+    // which is exactly the case where there is nothing worth keeping.
+    if (loadedRes.current !== resolution) {
+      loadedRes.current = resolution;
+      setCandles(NO_CANDLES); // same reference on mount, so React bails out
+    }
     setLoading(true);
     setError(null);
     try {
@@ -57,7 +81,6 @@ export function usePythCandles(resolution: Resolution) {
       if (id !== reqId.current) return; // a newer request superseded this one
       if (data.s !== "ok" || !Array.isArray(data.t)) {
         setError(data.errmsg || "no data");
-        setCandles([]);
         return;
       }
       const out: Candle[] = data.t.map((t: number, i: number) => ({
@@ -69,10 +92,7 @@ export function usePythCandles(resolution: Resolution) {
       }));
       setCandles(out);
     } catch (e) {
-      if (id === reqId.current) {
-        setError(e instanceof Error ? e.message : String(e));
-        setCandles([]);
-      }
+      if (id === reqId.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (id === reqId.current) setLoading(false);
     }

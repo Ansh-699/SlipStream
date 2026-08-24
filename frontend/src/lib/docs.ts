@@ -48,13 +48,20 @@ export function listDocs(): DocMeta[] {
     .sort((a, b) => a.order - b.order);
 }
 
+/** Inverse of fileToSlug, and the ONLY inverse — a file matches a slug when
+ *  fileToSlug(file) === slug, exactly. This used to compare `${slug}.md`
+ *  case-insensitively, which served one doc under several URLs (/docs/README
+ *  and /docs/readme both duplicated the docs index, /docs/08-GLOSSARY
+ *  duplicated the glossary). That split crawler ranking across the aliases and
+ *  broke the sidebar: docs-shell's isActive compares pathname to hrefFor(slug),
+ *  so on an aliased URL no entry highlighted. Aliases now 404. */
 function slugToFile(slug: string): string | null {
   if (!existsSync(DOCS_DIR)) return null;
-  const want = slug === "" ? "readme.md" : `${slug}.md`;
-  const found = readdirSync(DOCS_DIR).find(
-    (f) => f.toLowerCase() === want.toLowerCase()
+  return (
+    readdirSync(DOCS_DIR).find(
+      (f) => f.toLowerCase().endsWith(".md") && fileToSlug(f) === slug
+    ) ?? null
   );
-  return found ?? null;
 }
 
 /** Rewrite intra-doc markdown links (./04-foo.md, 04-foo.md, ./README.md) to

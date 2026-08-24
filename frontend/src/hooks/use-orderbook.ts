@@ -3,8 +3,8 @@
 import { baseConnection, erConnection } from "@/lib/connections";
 import { useSharedSource } from "@/lib/shared-source";
 import { useCallback, useMemo } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { PROGRAM_ID, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
+import { PublicKey } from "@solana/web3.js";
+import { PROGRAM_ID, ORDER_BOOK, MARKET_INDEX } from "@/lib/manifest";
 import {
   SEED_ORDERBOOK,
   PRICE_SCALE,
@@ -13,6 +13,8 @@ import {
   buildLadders,
   recentFills,
   type AggregatedLevel,
+  type OrderSlot,
+  type FillEvent,
 } from "@/lib/slipstream";
 
 export type OrderBookLevel = AggregatedLevel;
@@ -43,6 +45,19 @@ export interface OrderBookData {
   asks: OrderBookLevel[];
   spread: number | null;
   trades: RecentTrade[];
+  /**
+   * The raw decoded slot table and fill ring, exposed so that the OTHER
+   * consumers of this account do not have to re-fetch 626,736 bytes to read a
+   * slice of it. `decodeOrderBook` already produces both, so carrying them here
+   * costs one array reference and zero extra bytes on the wire.
+   *
+   * NOT the same thing as `trades`: `trades` is `recentFills(book, 40)`, a
+   * display-sized tail. `useErPosition` has to replay EVERY unsettled fill for
+   * the owner, so it needs the whole ring — truncating to 40 would silently
+   * drop part of a wallet's pending position.
+   */
+  orderSlots: OrderSlot[];
+  fillEvents: FillEvent[];
   /** Matching engine's next fill sequence (settlement-lag numerator). */
   nextFillSequence: number;
   status: OrderBookStatus;
@@ -55,18 +70,23 @@ const EMPTY: OrderBookData = {
   asks: [],
   spread: null,
   trades: [],
+  orderSlots: [],
+  fillEvents: [],
   nextFillSequence: 0,
   status: "loading",
   updatedAt: null,
 };
 
 export function useOrderBook(marketIndex: number = 0): OrderBookData {
-  // ONE poller for this market, however many components mount this hook. It is
+  // ONE poller for this market, however many components mount this hook, and
+  // now for every consumer of the account rather than just the ladder. It is
   // mounted three times on /trade (order-book-display, status-panel,
   // fill-toasts) and the account is 626,736 bytes, so the two redundant copies
   // every 2s were ~835 KB/s of pure duplication — and status-panel reads eight
-  // bytes of it. useErPosition and useOpenOrders pull the same account again on
-  // their own schedules; those are separate call sites, not separate data.
+  // bytes of it. useErPosition and useOpenOrders used to pull the same account
+  // again on their own 2s pollers, which measured 1.25 MB/s with a wallet
+  // connected; both now select from `orderSlots` / `fillEvents` below, so the
+  // whole page decodes this account once per tick instead of three times.
   const key = `orderbook:${marketIndex}`;
 
   const fetcher = useCallback(async (): Promise<OrderBookData> => {
@@ -116,6 +136,8 @@ export function useOrderBook(marketIndex: number = 0): OrderBookData {
       asks,
       spread,
       trades,
+      orderSlots: book.orderSlots,
+      fillEvents: book.fillEvents,
       nextFillSequence: Number(book.header.nextFillSequence),
       status: bids.length || asks.length ? "live" : "empty",
       updatedAt: Date.now(),

@@ -1,19 +1,10 @@
 "use client";
 
-import { baseConnection, erConnection } from "@/lib/connections";
-import { startPoll } from "@/lib/poll";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { PROGRAM_ID, MARKET, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
-import {
-  SEED_ORDERBOOK,
-  SEED_MARKET,
-  PRICE_SCALE,
-  SIDE_BID,
-  decodeOrderBook,
-  decodeMarket,
-  type FillEvent,
-} from "@/lib/slipstream";
+import { useMemo } from "react";
+import { PublicKey } from "@solana/web3.js";
+import { useMarket } from "@/hooks/use-market";
+import { useOrderBook } from "@/hooks/use-orderbook";
+import { PRICE_SCALE, SIDE_BID, type FillEvent } from "@/lib/slipstream";
 
 /**
  * A position reconstructed from the ER fill queue — the trades that have ALREADY
@@ -67,6 +58,9 @@ function reconstruct(
   // fabricated number that renders green or red by sign, next to a Mark column
   // that correctly shows "—". No price means no PnL, not a free one.
   markPrice: bigint | null,
+  // The L1 settlement cursor. NOT optional and NOT defaultable to 0n: see the
+  // note on `settledSeq` in the hook below. Callers that cannot read it must
+  // not call this function at all.
   lastSettledSequence: bigint
 ): ErPosition | null {
   // Sort by sequence ascending so VWAP / reductions apply in match order.
@@ -135,6 +129,15 @@ function reconstruct(
   if (count === 0 || size === 0n) return null;
 
   const up = markPrice === null ? null : pnl(size, entry, markPrice);
+  // KNOWN GAP, and the comment on `markPrice` above only tells half the truth:
+  // `up` is correctly null when there is no trustworthy price, and then
+  // `Number(null)` collapses it straight back to 0. The row therefore paints a
+  // green "+$0.00" in the one money cell while Mark, Liq. and Health beside it
+  // honestly render "—". Widening this field to `number | null` is the right
+  // fix but it does not compile on its own: positions-table.tsx reads
+  // `unrealizedPnl >= 0` (and use-positions.ts fabricates the same 0 for the
+  // settled row), and `null >= 0` is true, so the class must branch on null
+  // too or the dash comes out green. Both render sites are outside this file.
   return {
     isLong: size > 0n,
     size: Number(size) / 1e9,
@@ -151,90 +154,61 @@ export function useErPosition(
   markPrice: bigint | null,
   marketIndex: number = 0
 ) {
-  // Same split as usePositions: markPrice is used only to PRICE the fetched
-  // fills, never to fetch them, so it must not sit in the fetch's dependency
-  // array. With the live feed pushing ~20 prices/second it was rebuilding
-  // `fetch`, re-running the effect and re-pulling the 612 KiB order book ~20
-  // times a second, while clearing the startPoll timer before it could fire.
-  const [rawFills, setRawFills] = useState<{
-    fillEvents: Parameters<typeof reconstruct>[0];
-    lastSettledSequence: bigint;
-  } | null>(null);
+  // Both inputs come from the pollers this page already runs: the shared
+  // OrderBook source (useOrderBook, 2s) and the shared Market source
+  // (useMarket, 5s). This hook used to run TWO more pollers of its own — a
+  // second 626,736-byte getAccountInfo on the same order book every 2s, plus a
+  // 2s read of a Market account that useMarket already holds — which measured
+  // as roughly half of everything the tab moved. Subscribing costs nothing
+  // extra: useSharedSource only starts a loop for the FIRST subscriber, and
+  // both keys already have several.
+  //
+  // markPrice stays out of the data path entirely for the same reason it used
+  // to be kept out of the fetch's dependency array: the live feed pushes ~20
+  // prices/second, and it may only ever PRICE the fills, never re-read them.
+  const { market } = useMarket(marketIndex);
+  const { fillEvents } = useOrderBook(marketIndex);
 
-  const fetch = useCallback(async () => {
-    if (!owner) {
-      setRawFills(null);
-      return;
-    }
-    try {
-      let pda: PublicKey;
-      let marketPda: PublicKey;
-      if (marketIndex === MARKET_INDEX) {
-        pda = ORDER_BOOK;
-        marketPda = MARKET;
-      } else {
-        const buf = Buffer.alloc(2);
-        buf.writeUInt16LE(marketIndex);
-        [pda] = PublicKey.findProgramAddressSync([SEED_ORDERBOOK, buf], PROGRAM_ID);
-        [marketPda] = PublicKey.findProgramAddressSync([SEED_MARKET, buf], PROGRAM_ID);
-      }
+  // The settlement cursor, or null when we do not have one.
+  //
+  // This used to be best-effort — an unreachable Market meant a cursor of 0n,
+  // which reads as "nothing has ever settled". That is not a conservative
+  // default, it is the most destructive possible value: reconstruct() keeps
+  // every fill with `sequence > 0`, i.e. the ENTIRE 4096-entry ring including
+  // months of fills that L1 settled long ago, and replays them into a position
+  // that does not exist. Reproduced against live devnet: with the real cursor
+  // (44189) every wallet correctly reconstructs to null; with the cursor
+  // defaulted to 0 one wallet renders a pending LONG 5.600 SOL @ $73.09, and
+  // the "Close" button beside it is live — one click sends a real 5.6 SOL IOC
+  // and opens genuine opposite exposure.
+  //
+  // Without the cursor the client cannot tell a settled fill from a pending
+  // one, so the only honest output is nothing at all. `market` is null while
+  // the Market read is still in flight, when the account is genuinely absent,
+  // and when the base layer is unreachable; all three mean "no cursor", and
+  // all three must show no pending row rather than a fabricated one.
+  //
+  // The live [fillEventHead, +fillEventCount) window is NOT a substitute: that
+  // window is currently the whole ring and L1 settlement cannot advance the
+  // head, so it filters nothing.
+  //
+  // The shared cursor is up to 5s old rather than the 2s of the private poller
+  // this replaced, so a just-settled fill can linger as "pending" for a few
+  // seconds longer. That is the right trade: it is now the SAME cursor the
+  // status panel renders settlement lag from, so the two can no longer
+  // disagree, and erring towards "still pending" never invents exposure.
+  const settledSeq = market ? BigInt(market.lastSettledSequence) : null;
 
-      let info = null;
-      try {
-        const erConn = erConnection;
-        info = await erConn.getAccountInfo(pda);
-      } catch {
-        /* fall through to base */
-      }
-      if (!info) {
-        const baseConn = baseConnection;
-        info = await baseConn.getAccountInfo(pda);
-      }
-      if (!info) {
-        setRawFills(null);
-        return;
-      }
-
-      // Read the L1 settlement cursor so already-settled fills aren't replayed
-      // as still-pending. Best-effort: an unreachable/undecodable Market just
-      // means the cursor is treated as 0 (unfiltered), same as before this fix.
-      let lastSettledSequence = 0n;
-      try {
-        const baseConn = baseConnection;
-        const marketInfo = await baseConn.getAccountInfo(marketPda);
-        if (marketInfo) {
-          lastSettledSequence = BigInt(decodeMarket(marketInfo.data as Buffer).lastSettledSequence);
-        }
-      } catch {
-        /* best-effort */
-      }
-
-      const book = decodeOrderBook(info.data as Buffer);
-      setRawFills({ fillEvents: book.fillEvents, lastSettledSequence });
-    } catch {
-      // Transient — keep last good state.
-    }
-  }, [owner, marketIndex]);
-
-  // Re-price on every oracle tick; re-fetch only on the poll. Reconstructing
-  // from fills already in memory is pure CPU over a bounded ring.
-  const position: ErPosition | null = useMemo(
+  // Re-price on every oracle tick; the fills themselves only change when the
+  // shared poller ticks. Reconstructing from a bounded ring already in memory
+  // is pure CPU.
+  const position = useMemo<ErPosition | null>(
     () =>
-      owner && rawFills
-        ? reconstruct(
-            rawFills.fillEvents,
-            owner.toBase58(),
-            markPrice,
-            rawFills.lastSettledSequence
-          )
+      owner && settledSeq !== null
+        ? reconstruct(fillEvents, owner.toBase58(), markPrice, settledSeq)
         : null,
-    [owner, rawFills, markPrice]
+    [owner, fillEvents, markPrice, settledSeq]
   );
 
-  useEffect(() => {
-    fetch();
-    return startPoll(fetch, 2_000);
-  }, [fetch]);
-
-  return { position, refresh: fetch };
+  return { position };
 }

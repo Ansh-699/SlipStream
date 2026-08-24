@@ -86,6 +86,11 @@ function decodeFeed(b64: string): LivePrice | null {
  * geometrically to a ceiling.
  */
 interface FeedState {
+  /**
+   * The last reading the CURRENT connection delivered. Cleared when a new
+   * socket is opened, and never handed to a consumer while `connected` is
+   * false — see `getLive`.
+   */
   live: LivePrice | null;
   connected: boolean;
 }
@@ -102,6 +107,14 @@ function publish() {
 
 function openFeed() {
   if (feedSocket) return;
+  // A socket that has not connected yet has delivered nothing, so the previous
+  // connection's last frame is not this connection's price. Clearing it HERE
+  // rather than at close is what closes the reconnect window: `onopen` flips
+  // `connected` true the instant the WS handshake completes, which on a slow ER
+  // is seconds before the first accountNotification arrives — long enough for
+  // the pre-outage number to read as live again. Same window on remount, since
+  // closeFeedIfIdle leaves the last frame behind when the last subscriber goes.
+  feed.live = null;
   const wsUrl = ER_RPC_DIRECT.replace(/^http/, "ws");
   const ws = new WebSocket(wsUrl);
   feedSocket = ws;
@@ -200,7 +213,34 @@ function subscribeFeed(cb: () => void): () => void {
   };
 }
 
-const getLive = () => feed.live;
+/**
+ * A price is handed out only while the socket is UP.
+ *
+ * Nothing clears `feed.live` on its own when the stream dies — a laptop
+ * sleep/wake, a network change, an ER blip — so every consumer that read `live`
+ * without ALSO reading `connected` rendered a frozen number as the live price:
+ * market-bar's 22px headline, price-chart's header price and forming candle,
+ * and status-panel's "Mark freshness" row, which scored a green "0.05% off
+ * oracle" directly beneath its own "Oracle stream: disconnected". Only
+ * useMarkPrice remembered the guard.
+ *
+ * Worse than the frozen number itself: every divergence check on the page is
+ * mark-vs-spot, so it went blind at exactly the moment it mattered. A mark
+ * drifting away from a dead spot reads as agreement (false negative), and if
+ * the TWAP crank kept running while the stream was down, the amber banner
+ * eventually fired blaming "the TWAP crank has stopped" for an oracle outage.
+ *
+ * Gating at the store rather than at the four call sites is the point: a
+ * consumer cannot get an unguarded stale price by forgetting the guard. Both
+ * branches return an existing reference (the object, or null), so
+ * useSyncExternalStore's Object.is bail-out still holds, and `publish()`
+ * already fires from onerror/onclose so consumers re-render on the transition.
+ *
+ * NOT covered here: a socket that stays OPEN and stops delivering. `connected`
+ * is true for that, and a getSnapshot read has nothing to notify it as time
+ * passes, so an age gate needs a timer — see MAX_SPOT_AGE_SECS in useMarkPrice.
+ */
+const getLive = () => (feed.connected ? feed.live : null);
 const getConnected = () => feed.connected;
 const serverLive = () => null;
 const serverConnected = () => false;

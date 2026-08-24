@@ -31,22 +31,52 @@ const usd = (atoms: bigint) =>
   })}`;
 
 export function SessionPanel() {
-  const { state, busy, step, error, notice, autoStart, withdraw, requestFaucet, rotate, closeLegacyCredit } =
-    useSession(0);
+  const {
+    state,
+    status: read,
+    busy,
+    step,
+    error,
+    notice,
+    autoStart,
+    withdraw,
+    requestFaucet,
+    rotate,
+    closeLegacyCredit,
+  } = useSession(0);
   const { publicKey, connected } = useWallet();
   const { open } = useModal();
 
   const address = publicKey?.toBase58() ?? null;
   const inProtocol = state.freeCollateral + state.credit;
-  const lowSol = state.solBalance < BigInt(MIN_SOL_LAMPORTS);
+
+  /**
+   * Whether the numbers in `state` are this wallet's, as the chain reported
+   * them. See SessionStatus in use-session.ts: under "loading" no read has
+   * completed for this owner yet and under "unavailable" every read failed, so
+   * in BOTH cases every field is either a placeholder zero or the PREVIOUSLY
+   * connected wallet's — rendering them as money says "$0.00, you have
+   * nothing" about a wallet we have simply not managed to read. "stale" IS
+   * trustworthy, just possibly a few seconds behind, so it keeps its numbers
+   * and gets a line saying so.
+   */
+  const trusted = read === "live" || read === "stale";
+  /** Money, or an em dash when we have no right to claim a figure. */
+  const money = (atoms: bigint) => (trusted ? usd(atoms) : "—");
+
+  const lowSol = trusted && state.solBalance < BigInt(MIN_SOL_LAMPORTS);
 
   const status = !connected
     ? "disconnected"
-    : !state.initialized
-      ? "ready"
-      : state.delegated
-        ? "trading"
-        : "setup";
+    : read === "loading"
+      ? "checking"
+      : read === "unavailable"
+        ? "unknown"
+        : !state.initialized
+          ? "ready"
+          : state.delegated
+            ? "trading"
+            : "setup";
 
   // Clock tick (30s) so the session countdown re-renders without impurity.
   const [nowSec, setNowSec] = useState(0);
@@ -66,7 +96,13 @@ export function SessionPanel() {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
   })();
 
-  const startDisabled = busy || (state.usdcBalance === 0n && inProtocol === 0n);
+  // Disable ONLY on zeros we are currently certain of. This used to read the
+  // placeholder zeros of a read that had not happened (or had failed) as "this
+  // wallet is empty" and greyed the primary button out on a funded wallet with
+  // nothing on screen to explain it. Leaving it enabled while the RPC is down
+  // is safe: autoStart re-reads the ATA itself and surfaces the real failure
+  // through humanizeError instead of silently depositing nothing.
+  const startDisabled = busy || (read === "live" && state.usdcBalance === 0n && inProtocol === 0n);
 
   return (
     <div>
@@ -78,7 +114,7 @@ export function SessionPanel() {
           className={`rounded-[4px] px-1.5 py-0.5 text-[10px] ${
             status === "trading"
               ? "bg-[rgba(34,197,94,0.12)] text-[var(--t-up)]"
-              : status === "setup"
+              : status === "setup" || status === "unknown"
                 ? "bg-[rgba(245,158,11,0.12)] text-[var(--t-warn)]"
                 : "bg-[var(--t-surface)] text-[var(--t-text-2)]"
           }`}
@@ -103,14 +139,26 @@ export function SessionPanel() {
             <WalletIdentity address={address} />
 
             <div className="grid grid-cols-2 gap-2">
-              <Stat label="USDC" value={usd(state.usdcBalance)} hint="In your wallet" />
+              <Stat label="USDC" value={money(state.usdcBalance)} hint="In your wallet" />
               <Stat
                 label="SOL"
-                value={(Number(state.solBalance) / LAMPORTS_PER_SOL).toFixed(4)}
+                value={trusted ? (Number(state.solBalance) / LAMPORTS_PER_SOL).toFixed(4) : "—"}
                 hint="For network fees"
                 amber={lowSol}
               />
             </div>
+
+            {/* A failed read is not an empty wallet, and the panel has to say
+             *  which one it is looking at. "stale" still has real numbers on
+             *  screen — the last ones we got — so it says they may be behind;
+             *  "unavailable" has em dashes, so it says why. */}
+            {(read === "stale" || read === "unavailable") && (
+              <p role="status" className="text-[10px] leading-tight text-[var(--t-warn)]">
+                {read === "stale"
+                  ? "Can’t reach Solana — these are the last balances we read, retrying."
+                  : "Can’t reach Solana — balances unknown, retrying."}
+              </p>
+            )}
 
             <button
               type="button"
@@ -128,8 +176,12 @@ export function SessionPanel() {
               </p>
             )}
 
-            {/* Money that has left the wallet and is inside the protocol. */}
-            {(inProtocol > 0n || state.initialized) && (
+            {/* Money that has left the wallet and is inside the protocol.
+             *  Shown whenever we cannot vouch for the read too: hiding the
+             *  whole block on an unreadable chain is indistinguishable from
+             *  "you have nothing in the market", which is the one thing we do
+             *  not know at that moment. */}
+            {(inProtocol > 0n || state.initialized || read === "unavailable") && (
               <div className="space-y-2 pt-0.5">
                 <div className="flex items-center gap-2">
                   <div className="h-px flex-1 bg-[var(--t-border)]" />
@@ -138,14 +190,29 @@ export function SessionPanel() {
                   </span>
                   <div className="h-px flex-1 bg-[var(--t-border)]" />
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Stat label="Committed" value={usd(state.committed)} hint="Locked in orders" amber />
-                  <Stat label="Available" value={usd(state.available)} hint="Free to trade" emerald />
+                {/* Three columns, not two. `freeCollateral` — the UserAccount
+                 *  balance — was decoded on every poll and rendered nowhere,
+                 *  and it is where close_position pays back your margin AND
+                 *  your realized PnL (close_position.rs:228), where settlement
+                 *  pays maker rebates (settle_from_log.rs:302) and where
+                 *  funding lands (claim_funding.rs:100). So closing a winning
+                 *  trade made money disappear from the panel: every figure on
+                 *  screen dropped by the margin that was just released, and
+                 *  the profit never showed up anywhere. It only reappeared on
+                 *  "Withdraw all to wallet", which withdraws exactly this. */}
+                <div className="grid grid-cols-3 gap-2">
+                  <Stat label="Committed" value={money(state.committed)} hint="In open orders" amber />
+                  <Stat label="Available" value={money(state.available)} hint="Free to trade" emerald />
+                  <Stat label="Settled" value={money(state.freeCollateral)} hint="Closed trades" />
                 </div>
               </div>
             )}
 
-            {state.legacyCredit && <LegacyNotice {...{ state, busy, closeLegacyCredit }} />}
+            {/* `trusted &&` because this offers a transaction: right after a
+             *  wallet switch `state` is still the PREVIOUS wallet's until the
+             *  first read lands, and "Close legacy credit" would send against
+             *  the new one on a diagnosis made about the old one. */}
+            {trusted && state.legacyCredit && <LegacyNotice {...{ state, busy, closeLegacyCredit }} />}
 
             {step && (
               <div className="flex items-center gap-2 text-[11.5px] text-[var(--t-text-2)]">
@@ -165,7 +232,7 @@ export function SessionPanel() {
               <div className="break-words text-[11.5px] leading-tight text-[var(--t-text-2)]">{notice}</div>
             )}
 
-            {!state.delegated ? (
+            {!(trusted && state.delegated) ? (
               <div className="space-y-1.5">
                 <button
                   type="button"
@@ -176,9 +243,11 @@ export function SessionPanel() {
                   {busy ? "…" : "Start trading"}
                 </button>
                 <p className={HINT}>
-                  {state.usdcBalance > 0n
-                    ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups.`
-                    : "Get test USDC first — then this moves it into the market and opens your trading session."}
+                  {!trusted
+                    ? "Moves your USDC into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups."
+                    : state.usdcBalance > 0n
+                      ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups.`
+                      : "Get test USDC first — then this moves it into the market and opens your trading session."}
                 </p>
               </div>
             ) : (

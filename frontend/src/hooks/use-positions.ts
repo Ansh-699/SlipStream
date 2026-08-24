@@ -2,9 +2,8 @@
 
 import { startPoll } from "@/lib/poll";
 import { useConnection, useWallet } from "@/hooks/use-wallet-compat";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
-import bs58 from "bs58";
 import { findPositionPda } from "@/lib/slipstream";
 import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
 import {
@@ -37,7 +36,14 @@ export function useUserAccount() {
   const [user, setUser] = useState<UserData | null>(null);
 
   const fetch = useCallback(async () => {
-    if (!publicKey) return;
+    if (!publicKey) {
+      // No wallet is not "keep showing the last one's balances". Same defect as
+      // usePositions below: without this, a disconnect (or a switch to a wallet
+      // that has never deposited) leaves the previous wallet's free collateral
+      // and credit on screen, attributed to nobody.
+      setUser(null);
+      return;
+    }
     try {
       const [pda] = PublicKey.findProgramAddressSync(
         [SEED_USER, publicKey.toBuffer()],
@@ -51,6 +57,11 @@ export function useUserAccount() {
           creditOutstanding: u.creditOutstanding,
           pendingFills: u.pendingFills,
         });
+      } else {
+        // A definitive answer, not a transient failure: this wallet has no
+        // UserAccount. Holding the previous wallet's numbers here would be a
+        // lie the chain contradicts.
+        setUser(null);
       }
     } catch {
       // Will retry
@@ -78,9 +89,34 @@ export function usePositions(markPrice: bigint | null) {
   // introduced when this hook was switched from the 5s market mark to the live
   // reference price. The request never needed the price at all.
   const [raw, setRaw] = useState<Omit<PositionData, "unrealizedPnl">[]>([]);
+  // A read that FAILED and a read that came back empty are different answers.
+  // Both used to leave `raw` at [], which the panel renders as "No open
+  // positions" — so a trader reloading during a devnet rate-limit (the proxy
+  // answers every getAccountInfo with -32005 for 10-30s) was told they were
+  // flat while their leveraged position was live and moving. The poll still
+  // swallows the throw (cadence is startPoll's job); it just stops pretending
+  // the failure was an answer.
+  const [err, setErr] = useState(false);
+
+  // Base58 of the wallet `raw` describes. A fetch is a network round trip: the
+  // one launched for wallet A can resolve AFTER the user switched to B or
+  // disconnected, and writing its result then puts A's position in B's table.
+  // Compared after the await instead of trusting that the closure is current.
+  const owner = publicKey ? publicKey.toBase58() : null;
+  const ownerRef = useRef<string | null>(null);
 
   const fetch = useCallback(async () => {
-    if (!publicKey) return;
+    if (!owner) {
+      // Disconnected is neither "no positions" nor "the read failed" — it is
+      // "this row belongs to a wallet we are no longer connected to". Leaving
+      // it up left the previous wallet's LONG on screen with enabled Close, ½
+      // and SL/TP buttons whose handlers all bail on `!publicKey` before they
+      // even set an error, so the click did nothing at all: no spinner, no
+      // message. Clearing the rows is what makes those buttons unreachable.
+      setRaw([]);
+      setErr(false);
+      return;
+    }
     try {
       // The Position address is DERIVABLE, so scanning the program for it was
       // never necessary. getProgramAccounts reads every account the program
@@ -90,7 +126,11 @@ export function usePositions(markPrice: bigint | null) {
       // returns 429/502 first under load, and the proxy comment at
       // api/rpc/[layer]/route.ts:69-70 names it as how the project burned its
       // RPC quota once already.
-      const [positionPda] = findPositionPda(publicKey, MARKET_INDEX, PROGRAM_ID);
+      const [positionPda] = findPositionPda(
+        new PublicKey(owner),
+        MARKET_INDEX,
+        PROGRAM_ID
+      );
       const info = await connection.getAccountInfo(positionPda);
       const accounts = info ? [{ account: info }] : [];
 
@@ -109,11 +149,18 @@ export function usePositions(markPrice: bigint | null) {
           isLong: pos.size > 0n,
         });
       }
+      if (ownerRef.current !== owner) return; // wallet changed mid-flight
       setRaw(result);
+      setErr(false);
     } catch {
-      // Will retry
+      // Keep the last good rows — a blip should not blank a live position —
+      // but say so, so the panel can render "can't reach Solana" instead of
+      // "no open positions". Not rethrown: startPoll's backoff is driven by
+      // its own catch and this hook has always swallowed here.
+      if (ownerRef.current !== owner) return;
+      setErr(true);
     }
-  }, [connection, publicKey]);
+  }, [connection, owner]);
 
   // Price them here instead. Recomputing this on every oracle tick is a cheap
   // pure map over a handful of positions; refetching on every oracle tick was
@@ -136,9 +183,15 @@ export function usePositions(markPrice: bigint | null) {
   );
 
   useEffect(() => {
+    // Drop the rows the moment the wallet changes, not when the new wallet's
+    // fetch finally resolves — otherwise wallet B stares at wallet A's LONG
+    // for a network round trip, and on disconnect the row never goes at all.
+    ownerRef.current = owner;
+    setRaw([]);
+    setErr(false);
     fetch();
     return startPoll(fetch, 5_000);
-  }, [fetch]);
+  }, [fetch, owner]);
 
-  return { positions, refresh: fetch };
+  return { positions, error: err, refresh: fetch };
 }

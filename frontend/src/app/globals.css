@@ -350,9 +350,18 @@ textarea,
 }
 
 /* The default focus ring is invisible against the dark canvas. Keyboard users
-   get an emerald ring; pointer users are unaffected. */
+   get an emerald ring; pointer users are unaffected.
+
+   --t-up, not the old literal rgba(16, 185, 129, 0.75). That literal had no
+   light-mode value: at 75% alpha it composited to rgb(76, 203, 161) over the
+   light `.app-bg`, measuring 1.70:1 against that gradient's darkest stop
+   (#ebebeb) and 2.03:1 on plain white — under the 3:1 WCAG 2.2 SC 2.4.11 asks
+   of a focus indicator, so a keyboard user in light mode could not tell which
+   control was focused. --t-up is opaque #047857 in light (5.16:1 at the top of
+   the gradient, 4.60:1 at the bottom) and #22c55e in dark, so one token clears
+   the bar in both themes. */
 :focus-visible {
-  outline: 2px solid rgba(16, 185, 129, 0.75);
+  outline: 2px solid var(--t-up);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -642,6 +651,17 @@ input[type="number"] {
 :root:not(.dark) .hover\:bg-white\/\[0\.04\]:hover { background-color: rgba(15, 23, 23, 0.05) !important; }
 :root:not(.dark) .hover\:bg-white\/\[0\.02\]:hover { background-color: rgba(15, 23, 23, 0.035) !important; }
 
+/* `hover:text-white` had no light entry, so it did the WRONG thing in two
+   different ways. Where the element inherits its resting colour from a parent
+   (the landing header "Docs" link, the three footer links), hovering set the
+   label to literal #fff on the light ground — 1.12:1, the text vanished under
+   the cursor at the moment the user was deciding whether to click. Where the
+   element carries its own `text-white/N` (theme-toggle, the docs sidebar), the
+   !important remaps above outranked the plain `.hover\:text-white:hover`
+   (0,2,0) and the hover step never happened at all. This selector is (0,4,0)
+   + !important, so it beats both. */
+:root:not(.dark) .hover\:text-white:hover { color: rgba(15, 23, 23, 0.95) !important; }
+
 /* The glass-surface in light mode (order form / landing cards). */
 :root:not(.dark) .glass-surface {
   background: rgba(255, 255, 255, 0.75) !important;
@@ -684,6 +704,14 @@ input[type="number"] {
 :root:not(.dark) .doc-prose th,
 :root:not(.dark) .doc-prose td { border-color: rgba(15, 23, 23, 0.12); }
 :root:not(.dark) .doc-prose hr { border-color: rgba(15, 23, 23, 0.1); }
+/* The other two rgba-white PAINTS in .doc-prose. Both were 1.02:1 on the light
+   ground: the H2 section rule disappeared entirely (so each heading's 1.25rem
+   of top padding read as an unexplained gap and the page lost its top-level
+   structure), and the table header tint disappeared with it (so <th> and <td>
+   shaded identically). Only `border-top-color` is overridden here — the width
+   and style from the `border-top` shorthand on `.doc-prose h2` still apply. */
+:root:not(.dark) .doc-prose h2 { border-top-color: rgba(15, 23, 23, 0.12); }
+:root:not(.dark) .doc-prose th { background: rgba(15, 23, 23, 0.05); }
 
 /* The emerald accent tints used for badges read fine on both themes; only the
    neutral whites needed remapping above. */

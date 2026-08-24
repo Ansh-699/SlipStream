@@ -1,16 +1,9 @@
 "use client";
 
-import { baseConnection, erConnection } from "@/lib/connections";
-import { startPoll } from "@/lib/poll";
-import { useCallback, useEffect, useState } from "react";
-import { Connection, PublicKey } from "@solana/web3.js";
-import { PROGRAM_ID, ORDER_BOOK, MARKET_INDEX, ER_RPC, RPC_URL } from "@/lib/manifest";
-import {
-  SEED_ORDERBOOK,
-  PRICE_SCALE,
-  SIDE_BID,
-  decodeOrderBook,
-} from "@/lib/slipstream";
+import { useMemo } from "react";
+import { PublicKey } from "@solana/web3.js";
+import { useOrderBook } from "@/hooks/use-orderbook";
+import { PRICE_SCALE, SIDE_BID } from "@/lib/slipstream";
 
 export interface OpenOrder {
   /** On-chain order id (needed to cancel). */
@@ -28,71 +21,48 @@ export interface OpenOrder {
  * lives on the Ephemeral Rollup). These are OPEN orders that haven't fully
  * filled yet — distinct from settled L1 Positions. Each order slot carries its
  * owner, so we filter the active slots to the connected wallet.
+ *
+ * This used to be a THIRD independent 2s poller on the 626,736-byte OrderBook
+ * account, on top of useOrderBook's shared one and useErPosition's — a second
+ * 836 KB every 2s to display at most twenty rows, of which it read the first
+ * 29% and threw the rest away. It now selects from the one shared decode.
+ * The ER-then-base fallback and the keep-last-good-on-error semantics it used
+ * to implement itself are identical in useOrderBook + useSharedSource, so
+ * nothing was lost with the poller.
  */
 export function useOpenOrders(owner: PublicKey | null, marketIndex: number = 0) {
-  const [orders, setOrders] = useState<OpenOrder[]>([]);
+  const { orderSlots } = useOrderBook(marketIndex);
 
-  const fetch = useCallback(async () => {
-    if (!owner) {
-      setOrders([]);
-      return;
-    }
-    try {
-      let pda: PublicKey;
-      if (marketIndex === MARKET_INDEX) {
-        pda = ORDER_BOOK;
-      } else {
-        const buf = Buffer.alloc(2);
-        buf.writeUInt16LE(marketIndex);
-        [pda] = PublicKey.findProgramAddressSync([SEED_ORDERBOOK, buf], PROGRAM_ID);
-      }
-
-      // Live book is on the ER; fall back to base if the ER is unreachable.
-      let info = null;
-      try {
-        const erConn = erConnection;
-        info = await erConn.getAccountInfo(pda);
-      } catch {
-        /* fall through to base */
-      }
-      if (!info) {
-        const baseConn = baseConnection;
-        info = await baseConn.getAccountInfo(pda);
-      }
-      if (!info) {
-        setOrders([]);
-        return;
-      }
-
-      const book = decodeOrderBook(info.data as Buffer);
-      const ownerB58 = owner.toBase58();
-      const mine: OpenOrder[] = [];
-      for (const slot of book.orderSlots) {
-        if (!slot.active) continue;
-        if (slot.remainingSize === 0n) continue;
-        if (slot.owner.toBase58() !== ownerB58) continue;
-        mine.push({
-          orderId: slot.orderId,
-          isLong: slot.side === SIDE_BID,
-          price: Number(slot.price) / PRICE_SCALE,
-          size: Number(slot.remainingSize) / 1e9,
-        });
-      }
-      // Best price first within each side; longs above shorts.
-      mine.sort((a, b) => {
-        if (a.isLong !== b.isLong) return a.isLong ? -1 : 1;
-        return a.isLong ? b.price - a.price : a.price - b.price;
+  const orders = useMemo<OpenOrder[]>(() => {
+    if (!owner) return [];
+    const ownerB58 = owner.toBase58();
+    const mine: OpenOrder[] = [];
+    for (const slot of orderSlots) {
+      if (!slot.active) continue;
+      if (slot.remainingSize === 0n) continue;
+      if (slot.owner.toBase58() !== ownerB58) continue;
+      mine.push({
+        orderId: slot.orderId,
+        isLong: slot.side === SIDE_BID,
+        price: Number(slot.price) / PRICE_SCALE,
+        size: Number(slot.remainingSize) / 1e9,
       });
-      setOrders(mine);
-    } catch {
-      // Transient RPC/decode error — keep last good state and retry.
     }
-  }, [owner, marketIndex]);
+    // Best price first within each side; longs above shorts.
+    mine.sort((a, b) => {
+      if (a.isLong !== b.isLong) return a.isLong ? -1 : 1;
+      return a.isLong ? b.price - a.price : a.price - b.price;
+    });
+    return mine;
+  }, [owner, orderSlots]);
 
-  useEffect(() => {
-    fetch();
-    return startPoll(fetch, 2_000);
-  }, [fetch]);
+  // Deliberately a no-op, not a forgotten stub. open-orders.tsx calls this
+  // after a confirmed cancel to make the row disappear at once; the book is now
+  // the shared 2s poller's and a single subscriber cannot make it tick early,
+  // so the cancelled row clears on the next shared poll instead — within 2s of
+  // a confirmation that itself took seconds. Delete this together with the
+  // `refresh()` call at open-orders.tsx:60, which is the only caller.
+  const refresh = () => {};
 
-  return { orders, refresh: fetch };
+  return { orders, refresh };
 }

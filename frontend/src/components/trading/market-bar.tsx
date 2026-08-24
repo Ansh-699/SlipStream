@@ -2,16 +2,11 @@
 
 import { useMemo } from "react";
 import { useMarket } from "@/hooks/use-market";
-import { useLivePrice } from "@/hooks/use-live-price";
+import { useMarkPrice } from "@/hooks/use-mark-price";
 import { usePythCandles, RESOLUTIONS } from "@/hooks/use-pyth-candles";
-
-const PRICE_SCALE = 1_000_000;
 
 /** 1H candles, so the last 24 buckets are exactly a rolling day. */
 const DAY_RESOLUTION = RESOLUTIONS.find((r) => r.code === "60") ?? RESOLUTIONS[3];
-
-/** Mark is allowed to drift from the oracle; past this it is a fault, not noise. */
-const MARK_DIVERGENCE_WARN = 0.01;
 
 function Stat({
   label,
@@ -34,11 +29,10 @@ function Stat({
 
 export function MarketBar() {
   const { market, status } = useMarket(0);
-  const { live } = useLivePrice();
+  // useMarkPrice mounts useMarket(0) itself; both go through useSharedSource on
+  // the same `market:0` key, so this is the same poller, not a second one.
+  const { mark, reference, stale, reason } = useMarkPrice(0);
   const { candles } = usePythCandles(DAY_RESOLUTION);
-
-  const markPrice = market ? Number(market.lastMarkPrice) / PRICE_SCALE : null;
-  const spot = live?.price ?? null;
 
   const day = useMemo(() => {
     if (candles.length < 2) return null;
@@ -50,17 +44,25 @@ export function MarketBar() {
     return { high, low, change: last - open, changePct: open > 0 ? ((last - open) / open) * 100 : 0 };
   }, [candles]);
 
-  // The headline is the oracle price, not the on-chain mark. Mark only moves when
-  // the TWAP crank runs; if the keepers stop, mark freezes while the market does
-  // not, and showing the frozen number as "the price" would be a lie.
-  const headline = spot ?? markPrice;
+  // The headline is `reference`: the oracle while its stream is actually
+  // delivering, else a mark the program itself would still accept, else
+  // nothing. Mark only moves when the TWAP crank runs; if the keepers stop,
+  // mark freezes while the market does not, and showing a frozen number as
+  // "the price" is a lie — so when neither price can be trusted this renders an
+  // em dash rather than substituting one that can't.
+  //
+  // This used to be `spot ?? markPrice` off a raw useLivePrice read, and both
+  // halves were wrong. `live` was handed out whether or not the socket was up,
+  // so a dropped feed left the 22px headline printing its last frame while the
+  // 24h change beside it kept refreshing from the Pyth history poll — the
+  // header read "97.55 +2.30 +2.42%" over a price that stopped minutes ago. And
+  // when the socket never connected at all it fell through to the raw on-chain
+  // mark with no freshness test, headlining a 23%-wrong mark with `markStale`
+  // false, because the divergence check needed the very oracle that was down.
+  // Both gates (socket up, reading recent, stamp fresh) now live in
+  // useMarkPrice, which is the one place that owns them.
+  const headline = reference;
   const up = (day?.change ?? 0) >= 0;
-
-  const divergence =
-    markPrice !== null && spot !== null && spot > 0
-      ? Math.abs(markPrice - spot) / spot
-      : null;
-  const markStale = divergence !== null && divergence > MARK_DIVERGENCE_WARN;
 
   return (
     <div className="flex h-[56px] shrink-0 items-center gap-5 overflow-x-auto border-b border-[var(--t-border)] px-4">
@@ -98,9 +100,9 @@ export function MarketBar() {
 
       <div className="flex items-center gap-6">
         <Stat
-          label={markStale ? "Mark (stale)" : "Mark"}
-          value={markPrice !== null && markPrice > 0 ? markPrice.toFixed(3) : "—"}
-          tone={markStale ? "down" : undefined}
+          label={stale ? "Mark (stale)" : "Mark"}
+          value={mark !== null ? mark.toFixed(3) : "—"}
+          tone={stale ? "down" : undefined}
         />
         <Stat label="24h High" value={day ? day.high.toFixed(2) : "—"} />
         <Stat label="24h Low" value={day ? day.low.toFixed(2) : "—"} />
@@ -114,20 +116,29 @@ export function MarketBar() {
         />
       </div>
 
-      {markStale && (
+      {/* One banner, `reason` straight from useMarkPrice. The old text asserted
+          "the TWAP crank has stopped" for ANY mark/oracle gap, which is only one
+          of the causes and was false whenever the mark was drifting for some
+          other reason. `reason` also covers the case that had no banner at all:
+          the oracle stream being down, which is why the headline above may be
+          showing the on-chain mark. That case is not a fault, so it is stated
+          plainly rather than in the amber warning box. */}
+      {reason ? (
         <div
           role="status"
-          className="ml-auto shrink-0 rounded border border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--t-warn)]"
+          className={`ml-auto shrink-0 rounded px-2.5 py-1 text-[11px] font-medium ${
+            stale
+              ? "border border-[var(--t-warn)]/40 bg-[var(--t-warn)]/10 text-[var(--t-warn)]"
+              : "text-[var(--t-text-2)]"
+          }`}
         >
-          Mark is {(divergence! * 100).toFixed(1)}% off the oracle — the TWAP crank has stopped.
+          {reason.charAt(0).toUpperCase() + reason.slice(1)}
         </div>
-      )}
-
-      {status === "unavailable" && !markStale && (
+      ) : status === "unavailable" ? (
         <span className="ml-auto shrink-0 text-[11px] text-[var(--t-text-2)]">
           Can&apos;t reach Solana — retrying.
         </span>
-      )}
+      ) : null}
     </div>
   );
 }

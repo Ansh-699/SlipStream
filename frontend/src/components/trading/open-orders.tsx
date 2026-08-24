@@ -3,10 +3,10 @@
 import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
-import { Connection, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { useOpenOrders } from "@/hooks/use-open-orders";
 import { useSession } from "@/hooks/use-session";
-import { PROGRAM_ID, MARKET_INDEX, ER_RPC } from "@/lib/manifest";
+import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
 import { createCancelOrderInstruction,
   humanizeError,
 } from "@/lib/slipstream";

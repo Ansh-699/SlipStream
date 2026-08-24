@@ -3,7 +3,13 @@
 // fixed amount of test USDC so a brand-new wallet can actually deposit.
 //
 //   POST /api/faucet  { "wallet": "<base58 pubkey>" }
-//   -> { ok, signature, ata, amount } | { ok:false, error }
+//   -> { ok, signature, ata, amount, solSignature, sol, solError }
+//    | { ok:false, error }
+//
+// `sol` is the amount topped up (0 when the wallet already had enough) and
+// `solError` is true when the top-up was attempted and threw — the USDC mint
+// still succeeded, but the wallet cannot pay fees yet, which is a different
+// message from either of the other two.
 //
 // WHY: deposit_collateral transfers from the user's USDC token account. A fresh
 // wallet has neither test USDC nor an ATA, so the deposit fails preflight with
@@ -74,10 +80,29 @@ function sweepCooldowns(now: number): void {
   for (const [k, t] of lastDripByIp) if (now - t > IP_COOLDOWN_MS) lastDripByIp.delete(k);
 }
 
+/**
+ * The client address, as far as it can be established.
+ *
+ * Caddy is the only hop in front of this origin (`via: 1.1 Caddy`, and the
+ * hostname resolves straight to the droplet — there is no Cloudflare, so
+ * cf-connecting-ip would just be one more forgeable key). Caddy APPENDS the
+ * peer address to whatever X-Forwarded-For arrived, so the LEFTMOST entry is
+ * whatever the caller typed and the RIGHTMOST is the one our own proxy wrote.
+ * Reading the leftmost let `curl -H "X-Forwarded-For: 10.0.0.$i"` mint a fresh
+ * cooldown bucket per request and loop the faucet dry. If a second trusted
+ * proxy is ever put in front, this has to become "Nth from the right".
+ *
+ * No x-real-ip fallback: nothing in this deployment sets it, so it was only
+ * ever reachable by a caller who bypassed Caddy — i.e. one who could also pick
+ * its value. Such a caller now lands in the single "unknown" bucket instead,
+ * which the cooldown below treats as rate-limited rather than exempt.
+ */
 function clientIp(req: NextRequest): string {
-  const fwd = req.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]!.trim();
-  return req.headers.get("x-real-ip") || "unknown";
+  const hops = (req.headers.get("x-forwarded-for") || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return hops[hops.length - 1] || "unknown";
 }
 
 /** Drop timestamps older than an hour, then report whether we are at the cap. */
@@ -85,6 +110,33 @@ function globalCapReached(now: number): boolean {
   const cutoff = now - 3_600_000;
   while (dripTimes.length > 0 && dripTimes[0]! < cutoff) dripTimes.shift();
   return dripTimes.length >= GLOBAL_MAX_PER_HOUR;
+}
+
+/** The only legal body is `{"wallet":"<44 chars>"}`. */
+const MAX_BODY_BYTES = 1_000;
+
+/**
+ * Read the request body, refusing anything over `max` bytes. Returns null when
+ * the body is too large. Same reasoning as the copy in api/rpc/[layer]:
+ * `req.json()` buffers the WHOLE body first, so an unauthenticated 500 MB POST
+ * to this route is ~1 GB of heap and a few concurrent ones OOM the Next process
+ * — which takes the whole site down, faucet and dashboard alike. Content-Length
+ * only lets us reject before reading a byte; it is absent on a chunked request
+ * and caller-supplied either way, so the stream is counted for real. (Copied
+ * rather than shared because Next rejects non-route exports from a route file.)
+ */
+async function readCapped(req: NextRequest, max: number): Promise<string | null> {
+  const declared = req.headers.get("content-length");
+  if (declared !== null && Number(declared) > max) return null;
+  if (!req.body) return "";
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req.body as unknown as AsyncIterable<Uint8Array>) {
+    total += chunk.byteLength;
+    if (total > max) return null;
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function json(body: unknown, status = 200): Response {
@@ -142,10 +194,13 @@ function loadUsdcMint(): PublicKey | null {
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
+  const raw = await readCapped(req, MAX_BODY_BYTES);
+  if (raw === null) {
+    return json({ ok: false, error: "Request body too large." }, 413);
+  }
   let wallet: PublicKey;
   try {
-    const body = await req.json();
-    wallet = new PublicKey(String(body.wallet));
+    wallet = new PublicKey(String(JSON.parse(raw).wallet));
   } catch {
     return json({ ok: false, error: "Provide a valid base58 wallet pubkey." }, 400);
   }
@@ -164,7 +219,11 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const ip = clientIp(req);
   const prevIp = lastDripByIp.get(ip) ?? 0;
-  if (ip !== "unknown" && now - prevIp < IP_COOLDOWN_MS) {
+  // No `ip !== "unknown"` escape hatch: a caller who reaches this origin without
+  // an X-Forwarded-For has bypassed our only proxy, and exempting exactly that
+  // caller from the cooldown handed the loop to whoever wanted it most. They now
+  // share one strict bucket instead.
+  if (now - prevIp < IP_COOLDOWN_MS) {
     const wait = Math.ceil((IP_COOLDOWN_MS - (now - prevIp)) / 1000);
     return json({ ok: false, error: `Please wait ${wait}s before requesting again.` }, 429);
   }
@@ -174,12 +233,6 @@ export async function POST(req: NextRequest): Promise<Response> {
       429
     );
   }
-  // Reserve the slot BEFORE the awaited mint. Recording only on success makes the
-  // window between check and mint a free-for-all for concurrent requests.
-  lastDrip.set(key, now);
-  lastDripByIp.set(ip, now);
-  dripTimes.push(now);
-
   const operator = loadOperator();
   if (!operator) {
     return json(
@@ -191,6 +244,19 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!mint) {
     return json({ ok: false, error: "USDC mint not found in deploy manifest." }, 503);
   }
+
+  // Reserve the slot BEFORE the awaited mint: recording only on success makes the
+  // window between check and mint a free-for-all for concurrent requests. It sits
+  // BELOW the two config guards rather than above them because loadOperator() and
+  // loadUsdcMint() are fully synchronous — nothing is awaited between the checks
+  // above and this line, so the race window stays closed — and because reserving
+  // above them meant a server with no OPERATOR_KEYPAIR burned a global slot per
+  // request: after 60 accurate "not configured" replies, everyone (the operator
+  // debugging it included) got "Faucet is rate limited right now" for an hour,
+  // pointing the diagnosis at the wrong thing entirely.
+  lastDrip.set(key, now);
+  lastDripByIp.set(ip, now);
+  dripTimes.push(now);
 
   try {
     const conn = new Connection(BASE_RPC, "confirmed");
@@ -208,6 +274,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     // Best-effort: the tokens are already minted, so a failure here should not
     // fail the whole request -- it just means the user tops up by hand.
     let solSignature: string | null = null;
+    // Three states, not two: topped up, not needed, and TRIED AND FAILED. `sol`
+    // alone collapsed the last two, so an operator out of devnet SOL produced
+    // "Received 10000 test USDC. You can start trading now." printed directly
+    // above the amber "this wallet needs a little devnet SOL" warning it
+    // contradicts — and Start trading then failed at the preflight gate.
+    let solError = false;
     if (FAUCET_SOL > 0) {
       try {
         const bal = await conn.getBalance(wallet);
@@ -225,6 +297,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           );
         }
       } catch (e) {
+        solError = true;
         console.error("[faucet] SOL top-up failed:", e instanceof Error ? e.message : String(e));
       }
     }
@@ -237,8 +310,20 @@ export async function POST(req: NextRequest): Promise<Response> {
       amount: FAUCET_USDC,
       solSignature,
       sol: solSignature ? FAUCET_SOL : 0,
+      solError,
     });
   } catch (e) {
+    // Nothing was minted on any branch that reaches here, so the reservation
+    // above bought nothing and must be handed back. Without this the route told
+    // the user "Wait a few seconds and try again" and then refused the retry it
+    // had just asked for with "Please wait 55s" — on a wallet that received
+    // nothing, at the one step (`Get test USDC`) that gates all of onboarding.
+    // `lastIndexOf`, not `pop()`: a concurrent request may have pushed after us.
+    lastDrip.delete(key);
+    lastDripByIp.delete(ip);
+    const slot = dripTimes.lastIndexOf(now);
+    if (slot >= 0) dripTimes.splice(slot, 1);
+
     const msg = e instanceof Error ? e.message : String(e);
     // Log the detail server-side only: RPC errors can embed the upstream URL, and
     // BASE_RPC_UPSTREAM may carry a private API key (the RPC proxy hides this for

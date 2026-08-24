@@ -3,13 +3,15 @@
 import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
-import { Connection, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { usePositions } from "@/hooks/use-positions";
 import { useErPosition } from "@/hooks/use-er-position";
+import { useOrderBook } from "@/hooks/use-orderbook";
+import { useOpenOrders } from "@/hooks/use-open-orders";
 import { useSession } from "@/hooks/use-session";
 import { useTriggers } from "@/hooks/use-triggers";
 import { useMarkPrice } from "@/hooks/use-mark-price";
-import { PROGRAM_ID, MARKET_INDEX, ER_RPC, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
+import { PROGRAM_ID, MARKET_INDEX, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
   createClosePositionInstruction,
@@ -26,34 +28,79 @@ const PRICE_SCALE = 1_000_000;
 // Slippage bound on close-at-market: reject settling >1% through the current mark.
 const CLOSE_SLIPPAGE_BPS = 100n;
 
+// --t-border-strong, not --t-border: an empty SL/TP input has no label inside it
+// and no fill distinct from the page, so its border IS the whole affordance, and
+// --t-border measures 1.40:1 in light / 1.21:1 in dark — an invisible rectangle
+// in both themes. --t-border-strong is 3.23:1 / 3.01:1, the WCAG 1.4.11 minimum
+// for a control edge. Only the BASE border moves: the muted disabled: border is
+// deliberate (ead59e1 set it when it dropped disabled:opacity-50, and disabled
+// controls are exempt from 1.4.11), as is the decorative TriggerBadge edge below.
 const BTN_UTIL =
-  "h-6 px-2 rounded-[4px] text-[12px] border border-[var(--t-border)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:text-[var(--t-text-3)] disabled:border-[var(--t-border)] disabled:pointer-events-none disabled:cursor-not-allowed";
+  "h-6 px-2 rounded-[4px] text-[12px] border border-[var(--t-border-strong)] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)] disabled:text-[var(--t-text-3)] disabled:border-[var(--t-border)] disabled:pointer-events-none disabled:cursor-not-allowed";
 const INPUT =
-  "h-8 w-24 px-[10px] rounded-[4px] bg-[var(--t-surface)] border border-[var(--t-border)] text-[13px] tnum text-[var(--t-text)] placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
+  "h-8 w-24 px-[10px] rounded-[4px] bg-[var(--t-surface)] border border-[var(--t-border-strong)] text-[13px] tnum text-[var(--t-text)] placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 
 interface PositionsTableProps {
+  /**
+   * DEAD, and kept only so the parent compiles unchanged. Every figure in this
+   * table is priced off `useMarkPrice(...).reference` below - the staleness-
+   * gated value - precisely because the raw on-chain mark this prop carries is
+   * the number S13-02 caught rendering green health on liquidatable positions.
+   * Reading it here again would reintroduce that. Delete the prop and the
+   * parent's argument together.
+   */
   markPrice: bigint | null;
 }
 
-export function PositionsTable({ markPrice }: PositionsTableProps) {
+export function PositionsTable({}: PositionsTableProps) {
   const { publicKey, sendTransaction } = useWallet();
   const { connection } = useConnection();
   // S13-02: every per-position figure below - Mark, Liq., health, uPnL - used
   // to derive from `markPrice` with none of the staleness treatment the market
   // bar applies to the identical value 400px above. A frozen mark renders a
   // green health score on a position the program computes as liquidatable.
-  const { reference, stale: markStale, reason: markReason } = useMarkPrice(MARKET_INDEX);
+  // `mark` and `stampStale` are the RAW on-chain values, kept separate from
+  // `reference` on purpose: `reference` is what this client should compute and
+  // display with (oracle first), but close_position settles at `mark` and
+  // refuses outright once the stamp ages out, so the pre-flight checks in
+  // handleClose have to reason about the number the PROGRAM will use, not ours.
+  const {
+    reference,
+    mark,
+    stale: markStale,
+    stampStale,
+    reason: markReason,
+  } = useMarkPrice(MARKET_INDEX);
   const referenceAtoms =
     reference !== null ? BigInt(Math.round(reference * PRICE_SCALE)) : null;
   // uPnL is priced off the reference too - S13-02 names it as one of the
   // figures derived from the frozen mark. Passing `markPrice` here would leave
   // the Mark column honest while the PnL beside it stayed wrong.
-  const { positions, refresh } = usePositions(referenceAtoms);
+  const { positions, error: positionsError, refresh } = usePositions(referenceAtoms);
   const { position: erPosition } = useErPosition(publicKey ?? null, referenceAtoms);
-  const { state: session, getSessionKeypair } = useSession(0);
+  // Both of these select from the ONE shared order-book source (useSharedSource,
+  // one 2s poller per market however many components mount it) that
+  // order-book-display, status-panel, fill-toasts and useErPosition already
+  // subscribe to on this page. Mounting them here costs zero extra RPC — no new
+  // request, no second decode — and buys the two pre-flight checks in
+  // handleFlatten that turn a silent no-op and an opaque revert into a sentence.
+  const book = useOrderBook(MARKET_INDEX);
+  const { orders: openOrders } = useOpenOrders(publicKey ?? null, MARKET_INDEX);
+  const { state: session, status: sessionStatus, getSessionKeypair } = useSession(0);
   const { triggers, refresh: refreshTriggers } = useTriggers();
+  // Market::mark_price_for_close (market.rs:173-183) only consults the freshness
+  // stamp when last_mark_price > 0; at 0 it falls through to the TWAP and the
+  // stamp decides nothing. `mark` is null in exactly that case (and while the
+  // market read is in flight), so both terms are required - a stale stamp alone
+  // is not proof the program will refuse, and blocking an exit on a guess is
+  // the worse failure of the two.
+  const closeRefusedByMark = stampStale && mark !== null;
+  const closeRefusedTitle = `Can't close: ${markReason ?? "the on-chain mark is stale"} - close_position settles at that mark and will refuse`;
   const [flattening, setFlattening] = useState(false);
   const [flattenErr, setFlattenErr] = useState<string | null>(null);
+  // An advisory is not an error. A flatten that will only partially fill is
+  // still worth sending, so it must not be painted in the red the refusals use.
+  const [flattenNote, setFlattenNote] = useState<string | null>(null);
   const [closeErr, setCloseErr] = useState<string | null>(null);
   const [closing, setClosing] = useState<number | null>(null);
   const [triggerOpen, setTriggerOpen] = useState(false);
@@ -74,6 +121,7 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
     }
     setFlattening(true);
     setFlattenErr(null);
+    setFlattenNote(null);
     try {
       // Opposite side: if currently LONG, sell (ASK); if SHORT, buy (BID).
       const closeSideVal = erPosition.isLong ? 1 : 0;
@@ -113,6 +161,106 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
       }
       const crossPrice = erPosition.isLong ? reference * 0.95 : reference * 1.05;
       const priceVal = BigInt(Math.round((crossPrice / 0.001)) ) * 1000n; // tick = $0.001
+      // The limit actually sent, tick-rounded. Every check below compares the
+      // book against THIS, not against the pre-rounding float.
+      const limitUsd = Number(priceVal) / PRICE_SCALE;
+      const wantSol = Number(sizeVal) / 1e9;
+
+      // --- Three pre-flight refusals, in the order the program hits them. ---
+      //
+      // FLAT-1/ORD-8. `reduceOnly` below does NOT skip the margin gate. The byte
+      // is parsed and thrown away (place_order.rs:36-47, :90): it used to skip
+      // the gate and the taker debit on the caller's unverifiable word that the
+      // order reduced a position — the ER cannot read the L1 Position, so any
+      // wallet with zero credit could drain a maker's margin into a free
+      // position. Every order is now gated and debited identically. That means
+      // this IOC is margined like a brand-new position: place_order.rs:220
+      // charges compute_initial_margin(compute_notional(size, price), leverage)
+      // against credit.available() BEFORE it matches anything, so a position
+      // opened at or near max leverage cannot be flattened on the rollup at all
+      // — and the revert surfaces as "Not enough trading credit ... reduce the
+      // size", advice that is actively wrong for someone trying to exit.
+      //
+      // Priced at `priceVal`, not at `reference`: for a non-MARKET order
+      // place_order.rs:173-183 takes the order's OWN limit as the reference
+      // price, and this limit sits 5% either side of the reference. Same
+      // divisors as compute_notional/compute_initial_margin (fixed_point.rs:53,
+      // :65), so this matches the chain's gate exactly.
+      //
+      // Gated on sessionStatus === "live": when the credit read failed we hold
+      // the last known-good (or a placeholder) `available`, and refusing an exit
+      // on a number we do not trust is the worse failure. The chain still gates.
+      const needAtoms = (sizeVal * priceVal) / 1_000_000_000n / BigInt(MAX_LEVERAGE);
+      if (sessionStatus === "live" && session.available < needAtoms) {
+        setFlattenErr(
+          `Closing on the rollup re-posts margin - it needs $${(Number(needAtoms) / PRICE_SCALE).toFixed(2)} of free credit and you have $${(Number(session.available) / PRICE_SCALE).toFixed(2)}. ` +
+            `Add credit in the Session panel, or wait for this fill to settle and use Close on the settled row - that path posts no new margin.`
+        );
+        setFlattening(false);
+        return;
+      }
+
+      // Only a "live" or "empty" ladder is a CURRENT answer about the book;
+      // "loading"/"stale"/"unavailable" mean absent or frozen, and neither of
+      // the two book-derived refusals below may fire on those - refusing an exit
+      // on a book we cannot currently see is worse than letting the program
+      // decide. Both are fail-open by construction.
+      const bookKnown = book.status === "live" || book.status === "empty";
+
+      // FLAT-3. place_order.rs:431 rejects the WHOLE order with SelfTrade the
+      // instant the matcher reaches a maker slot the taker owns. Closing a long
+      // sends an ASK that walks the bids, so the user's own resting BID at or
+      // above this limit stops the close dead - a routine state after a partial
+      // limit fill, and it is sitting in the Open Orders panel above with
+      // nothing connecting it to the failure. humanizeError's "That order would
+      // have traded against your own resting order." is accurate and gives no
+      // instruction. We do NOT prepend a cancel_order: killing a user's maker
+      // order on a "Close" click is a money decision they did not make.
+      const blocking = bookKnown
+        ? openOrders.find(
+            (o) =>
+              o.isLong === erPosition.isLong &&
+              (erPosition.isLong ? o.price >= limitUsd : o.price <= limitUsd)
+          )
+        : undefined;
+      if (blocking) {
+        setFlattenErr(
+          `Cancel your resting ${blocking.isLong ? "bid" : "ask"} at $${blocking.price.toFixed(2)} in Open Orders first - this close crosses it, and the program rejects the whole order as a self-trade rather than filling around it.`
+        );
+        setFlattening(false);
+        return;
+      }
+
+      // ORD-5/FLAT-2. An IOC that crosses nothing CONFIRMS. The transaction
+      // succeeds, the Pending row re-renders identical, and there is no error,
+      // no confirmation and no way to tell "it did nothing" from "it has not
+      // updated yet" - so the user clicks again, and by the block above each
+      // click is a fresh fully-margined order that is likelier to bounce on
+      // InsufficientCredit than to do anything.
+      //
+      // The depth-20 truncation is safe in both directions: whether anything
+      // crosses AT ALL is decided by index 0 (buildLadders sorts bids
+      // descending, asks ascending, then slices), and truncation can only make
+      // `crossable` an UNDER-estimate - which is why a short book downgrades to
+      // an advisory rather than a refusal.
+      const crossable = (erPosition.isLong ? book.bids : book.asks)
+        .filter((l) => (erPosition.isLong ? l.price >= limitUsd : l.price <= limitUsd))
+        .reduce((sum, l) => sum + l.size, 0);
+      if (bookKnown && crossable <= 0) {
+        setFlattenErr(
+          `Nothing to cross - there are no ${erPosition.isLong ? "bids" : "asks"} within 5% of $${reference.toFixed(2)}. This order would confirm and fill nothing at all. Try again once the book refills.`
+        );
+        setFlattening(false);
+        return;
+      }
+      // A partial exit beats no exit, so this sends - but it says so up front
+      // instead of letting the row quietly settle at a smaller size two seconds
+      // later with no explanation.
+      if (bookKnown && crossable < wantSol) {
+        setFlattenNote(
+          `Only ${crossable.toFixed(3)} SOL of the book is within 5% of $${reference.toFixed(2)}, so this closes part of your ${wantSol.toFixed(3)} SOL and leaves the rest open.`
+        );
+      }
 
       const ix = createPlaceOrderInstruction(
         publicKey,
@@ -124,7 +272,12 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
           size: sizeVal,
           expiryTs: 0n,
           maxSlippageBps: 0,
-          reduceOnly: true, // closing a position — skip margin gate, no new credit
+          // Wire-compatibility only. place_order parses this byte and ignores it
+          // (place_order.rs:90 `let _reduce_only = ...`), so it changes nothing
+          // about margin, the taker debit or resting behaviour - see the long
+          // note above the margin pre-flight. It stays on the wire because a
+          // future on-chain reduce-only path will read it.
+          reduceOnly: true,
         },
         PROGRAM_ID,
         signerPk
@@ -145,9 +298,14 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
         sig = await sendTransaction(tx, erConn, { skipPreflight: false });
       }
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
+      // Draining the position to zero leaves any SL/TP PDA armed against
+      // nothing, which the leftover-trigger banner below has to be able to see
+      // at once rather than up to 5s later on the trigger poll. See TRIG-1.
       refresh();
+      refreshTriggers();
     } catch (err) {
       setFlattenErr(humanizeError(err));
+      setFlattenNote(null);
       console.error("flatten failed:", err);
     } finally {
       setFlattening(false);
@@ -202,13 +360,51 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
         ? (referenceAtoms * (10_000n - CLOSE_SLIPPAGE_BPS)) / 10_000n
         : (referenceAtoms * (10_000n + CLOSE_SLIPPAGE_BPS)) / 10_000n;
 
+      // CLOSE-1: run the program's own two gates here, before a wallet prompt
+      // and a 30s confirm wait, because in both states close_position is
+      // GUARANTEED to revert and neither revert says anything useful.
+      //
+      // First gate: close_position.rs:120-125 resolves the settlement price
+      // through Market::mark_price_for_close, which returns None once the
+      // refresh stamp ages out (market.rs:173-183) and the close fails with
+      // OracleStale - which humanizeError has nothing specific to say about, so
+      // every retry looks like an unexplained failure. The Mark cell is already
+      // amber with this exact reason; the buttons were still fully live.
+      if (closeRefusedByMark) {
+        setCloseErr(
+          `The on-chain mark is stale${markReason ? ` - ${markReason}` : ""}. close_position settles at that mark, so the program refuses this close until the crank catches up. Nothing was sent.`
+        );
+        return;
+      }
+      // Second gate, and the one that matters: close_position.rs:129-137
+      // compares that same ON-CHAIN mark against the bound above - not the
+      // oracle the bound was built from. Once the two diverge past 1% in the
+      // wrong direction the mark sits outside the band and every attempt
+      // reverts with SlippageExceeded, which humanizeError reports as "The book
+      // moved past your slippage bound. Retry or widen it." That is a wrong
+      // diagnosis (the book is not involved in close_position at all) attached
+      // to advice for a control this UI does not have - and should not: settling
+      // ~19% away from the oracle is precisely what the bound exists to refuse.
+      const markAtoms = mark !== null ? BigInt(Math.round(mark * PRICE_SCALE)) : null;
+      if (markAtoms !== null && (isLong ? markAtoms < limitPrice : markAtoms > limitPrice)) {
+        setCloseErr(
+          `The on-chain mark ($${mark!.toFixed(2)}) is outside the 1% bound this close sets around the oracle ($${(Number(referenceAtoms) / PRICE_SCALE).toFixed(2)}), so the program would reject it. This close settles at the mark, not on the book - wait for the crank to bring the two back in line. Nothing was sent.`
+        );
+        return;
+      }
+
       const ix = createClosePositionInstruction(publicKey, marketIndex, PROGRAM_ID, {
         closeSize,
         limitPrice,
       });
       const sig = await sendTransaction(new Transaction().add(ix), connection);
       await confirmSignature(connection, sig, { timeoutMs: 30_000 });
+      // A full close leaves any SL/TP PDA armed with no position under it, and
+      // the row that carried the only Clear SL/TP control has just vanished.
+      // Refresh the triggers with the positions so the leftover-trigger banner
+      // appears on this click rather than up to 5s later. See TRIG-1.
       refresh();
+      refreshTriggers();
     } catch (err) {
       setCloseErr(humanizeError(err));
       console.error("Close position failed:", err);
@@ -287,13 +483,26 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
           Positions
         </span>
         <span className="text-[11px] text-[var(--t-text-3)] tnum">
-          {positions.length + (erPosition ? 1 : 0)} open
+          {/* "0 open" is a claim about the chain. When the position read threw
+              and we have nothing cached we do not know the count, so say so
+              with a dash rather than asserting flat. */}
+          {positionsError && positions.length === 0 && !erPosition
+            ? "—"
+            : `${positions.length + (erPosition ? 1 : 0)} open`}
         </span>
       </div>
       <div className="p-3">
         {positions.length === 0 && !erPosition ? (
           <div className="text-center text-xs text-[var(--t-text-2)] py-6">
-            {publicKey ? "No open positions" : "Sign in to see your positions"}
+            {/* usePositions now separates a failed read from an empty one. They
+                used to render identically, so a trader reloading through a
+                devnet rate-limit was told they were flat while a leveraged
+                position was live and moving. */}
+            {!publicKey
+              ? "Sign in to see your positions"
+              : positionsError
+                ? "Can't reach Solana — positions unknown, retrying"
+                : "No open positions"}
           </div>
         ) : (
           <table className="w-full border-collapse">
@@ -442,19 +651,37 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
                         >
                           SL/TP
                         </button>
+                        {/* Disabled on a stale stamp because close_position
+                            settles at the on-chain mark and refuses outright
+                            when Market::mark_price_for_close returns None - the
+                            click could only ever cost a signature and a 30s
+                            wait for an OracleStale nobody can act on. The
+                            divergence gate is NOT wired into `disabled`: it is
+                            side-dependent (it blocks a long and a short at
+                            opposite ends of the same divergence), so it stays a
+                            pre-flight refusal in handleClose that names which
+                            way the mark has moved. */}
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 0.5)}
-                          disabled={closing !== null}
+                          disabled={closing !== null || closeRefusedByMark}
                           className={`${BTN_UTIL} bg-[var(--t-surface)]`}
-                          title="Close half the position (lot-rounded, 1% slippage bound)"
+                          title={
+                            closeRefusedByMark
+                              ? closeRefusedTitle
+                              : "Close half the position (lot-rounded, 1% slippage bound)"
+                          }
                         >
                           {closing === pos.marketIndex ? "…" : "½"}
                         </button>
                         <button
                           onClick={() => handleClose(pos.marketIndex, pos.isLong, sizeAtoms, 1)}
-                          disabled={closing !== null}
+                          disabled={closing !== null || closeRefusedByMark}
                           className={`${BTN_UTIL} bg-[var(--t-surface)]`}
-                          title="Close at mark (1% slippage bound)"
+                          title={
+                            closeRefusedByMark
+                              ? closeRefusedTitle
+                              : "Close at mark (1% slippage bound)"
+                          }
                         >
                           {closing === pos.marketIndex ? "…" : "Close"}
                         </button>
@@ -527,8 +754,60 @@ export function PositionsTable({ markPrice }: PositionsTableProps) {
             </tbody>
           </table>
         )}
+        {/* TRIG-1: the ONLY Clear SL / Clear TP controls live inside the SL/TP
+            expander, and that expander is gated on `positions.length > 0`. A
+            full close (or a flatten that drains the ER position to zero) makes
+            the row vanish and takes the controls with it - while the TriggerOrder
+            PDA stays armed. execute_trigger.rs:63-72 never checks that the
+            trigger's guarded side matches the position it closes, so the next
+            position the user opens, on EITHER side, gets force-closed by a stop
+            they set for a position that no longer exists and could not cancel.
+            This block deliberately lives OUTSIDE the table/empty-state ternary
+            so it renders in both branches; the expander's own gate is left
+            alone because widening it drags in the `positions[0].isLong` read.
+            Suppressed while `positionsError` is set: "no position open" is a
+            claim about the chain, and a read that threw is not that answer. */}
+        {positions.length === 0 && !positionsError && (triggers.stopLoss || triggers.takeProfit) && (
+          <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--t-warn)]">
+            <span>
+              {erPosition
+                ? "Trigger armed with no settled position yet — it will fire against this position once it settles."
+                : "Leftover trigger — with no position open it will close whichever position you open next, on either side."}
+            </span>
+            {triggers.stopLoss && (
+              <button
+                onClick={() => handleCancelTrigger(TRIGGER_KIND_STOP_LOSS)}
+                disabled={triggerBusy}
+                className={`${BTN_UTIL} bg-[var(--t-surface)]`}
+              >
+                Clear SL
+              </button>
+            )}
+            {triggers.takeProfit && (
+              <button
+                onClick={() => handleCancelTrigger(TRIGGER_KIND_TAKE_PROFIT)}
+                disabled={triggerBusy}
+                className={`${BTN_UTIL} bg-[var(--t-surface)]`}
+              >
+                Clear TP
+              </button>
+            )}
+            {triggerErr && (
+              <span className="text-[var(--t-down)] break-all">{triggerErr}</span>
+            )}
+          </div>
+        )}
+        {/* Last-good rows kept through a failed read are not current rows. */}
+        {positionsError && positions.length > 0 && (
+          <div className="pt-2 text-[11px] text-[var(--t-warn)]">
+            Can&apos;t reach Solana — these rows may be out of date, retrying.
+          </div>
+        )}
         {flattenErr && (
           <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{flattenErr}</div>
+        )}
+        {flattenNote && !flattenErr && (
+          <div className="pt-2 text-[11px] text-[var(--t-warn)] break-all">{flattenNote}</div>
         )}
         {closeErr && (
           <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{closeErr}</div>
@@ -558,22 +837,46 @@ function SideBadge({ isLong }: { isLong: boolean }) {
 }
 
 /**
- * Liquidation price + health factor.
+ * Liquidation price + health factor, mirroring what the liquidator actually
+ * computes (liquidate_position.rs:133-158):
  *
- * IMPORTANT: we do NOT use the position's stored collateral for this estimate.
- * On the ER, a position's collateral is the sum of each fill's `filled_margin`,
- * which for older fills was stamped under the pre-fix (1000x) margin scale — that
- * made health read in the hundreds and pushed the liq price negative. Instead we
- * derive the posted margin from the position's OWN notional at the current 20x
- * convention (margin = size*entry/leverage), which is what a correctly-scaled
- * position holds. This yields a realistic, self-consistent health + liq price.
+ *   notional    = size * MARK            (compute_notional - the mark, not entry)
+ *   initial     = notional / leverage    (compute_initial_margin)
+ *   maintenance = initial / 2            (compute_maintenance_margin)
+ *   health      = (collateral + uPnL - funding) / maintenance
  *
- *   maintenance_margin = (notional / leverage) / 2
- *   health = (margin + uPnL) / maintenance_margin
- *   long  liq = entry − (margin − maint) / size
- *   short liq = entry + (margin − maint) / size
+ * This used to discard the position's collateral entirely and put the DERIVED
+ * initial margin in the numerator instead, i.e. it computed
+ * (notional/leverage) / (notional/leverage/2), which is 2.00 for any position
+ * with zero uPnL no matter what collateral it actually holds. A long whose
+ * collateral had been drained from $7.50 to $3.50 by a stretch of positive
+ * funding therefore rendered 2.00 in full green - a full bar and "$3.75 of
+ * room" - while the chain computed 3.50/3.75 = 0.93 and the keeper's next pass
+ * liquidated it. The user was liquidated off a screen showing maximum health.
  *
- * Inputs are human units: sizeSol (SOL), entry/mark (USD).
+ * The collateral is still not trusted OUTRIGHT, which is what the discarded
+ * comment was protecting: both rows' collateral accumulates from the same
+ * `filled_margin`, and fills stamped under the pre-fix (1000x) margin scale
+ * make it read in the hundreds, pushing health into the hundreds and the liq
+ * price negative. So it is used as a conservative FLOOR - min(collateral,
+ * derived). A legacy-inflated value falls back to the derived estimate exactly
+ * as before, while a funding-drained value (always smaller) is honoured, and
+ * neither can overstate health.
+ *
+ * KNOWN GAP, and it is the other half of the same failure: accrued funding is
+ * not subtracted. Position.funding_index_snapshot is decoded (accounts.ts) but
+ * usePositions drops it, and the cumulative index is only exposed as
+ * `fundingRate` in use-market.ts - both files are outside this change. So a
+ * position whose collateral is intact but whose UNCLAIMED funding debt is large
+ * still reads healthier here than on chain. The collateral floor covers the
+ * case where claim_funding has already moved that debt out of collateral, which
+ * is what the keeper does; this covers the rest.
+ *
+ * `mark` is the reference price (oracle first), not Market::last_mark_price, so
+ * these figures track the market rather than the crank - deliberate, and the
+ * same choice the Mark column beside them makes.
+ *
+ * Inputs are human units: sizeSol (SOL), entry/mark (USD), collateral (USD).
  */
 /**
  * `mark` is nullable ON PURPOSE. It used to be called with `reference ?? 0`,
@@ -589,22 +892,35 @@ function liqAndHealth(
   sizeSol: number,
   entry: number,
   mark: number | null,
-  _collateral: number
+  collateral: number
 ): { liq: number | null; health: number | null } {
   if (sizeSol <= 0 || entry <= 0) return { liq: null, health: null };
-  if (mark === null) return { liq: null, health: null };
-  const notional = sizeSol * entry;
-  const initialMargin = notional / MAX_LEVERAGE; // posted margin (1/leverage of notional)
-  const maintMargin = initialMargin / 2;
-  if (maintMargin <= 0) return { liq: null, health: null };
+  if (mark === null || mark <= 0) return { liq: null, health: null };
 
-  const buffer = (initialMargin - maintMargin) / sizeSol; // USD move to liquidation
-  const liq = isLong ? entry - buffer : entry + buffer;
+  const notional = sizeSol * mark;
+  const derivedMargin = notional / MAX_LEVERAGE;
+  const maintMargin = derivedMargin / 2;
+  if (maintMargin <= 0) return { liq: null, health: null };
+  const margin = collateral > 0 ? Math.min(collateral, derivedMargin) : derivedMargin;
 
   const uPnl = (isLong ? mark - entry : entry - mark) * sizeSol;
-  const health = (initialMargin + uPnl) / maintMargin;
+  const health = (margin + uPnl) / maintMargin;
 
-  return { liq: liq > 0 ? liq : null, health };
+  // Liquidation price: solve health(P) = 1 for P. Because maintenance margin is
+  // itself a function of the mark, the old fixed "buffer" form no longer
+  // matches this health number - and a liq price that disagrees with the health
+  // factor printed next to it is the defect this whole function is fixing.
+  //   margin + (isLong ? P - entry : entry - P) * size = size * P / (2*leverage)
+  // With k = size / (2*leverage):
+  //   long   P = (size*entry - margin) / (size - k)
+  //   short  P = (size*entry + margin) / (size + k)
+  // (size - k) is size * (1 - 1/(2*leverage)), positive for any leverage >= 1.
+  const k = sizeSol / (2 * MAX_LEVERAGE);
+  const liq = isLong
+    ? (sizeSol * entry - margin) / (sizeSol - k)
+    : (sizeSol * entry + margin) / (sizeSol + k);
+
+  return { liq: Number.isFinite(liq) && liq > 0 ? liq : null, health };
 }
 
 function HealthCell({ health }: { health: number | null }) {

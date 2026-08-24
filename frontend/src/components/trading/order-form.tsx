@@ -3,13 +3,14 @@
 import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
-import { Connection, Transaction } from "@solana/web3.js";
+import { Transaction } from "@solana/web3.js";
 import { useSession } from "@/hooks/use-session";
 import { useMarket } from "@/hooks/use-market";
+import { useMarkPrice } from "@/hooks/use-mark-price";
+import { useOrderBook } from "@/hooks/use-orderbook";
 import {
   PROGRAM_ID,
   MARKET_INDEX,
-  ER_RPC,
   explorerTx,
   TICK_SIZE,
   LOT_SIZE,
@@ -35,8 +36,13 @@ const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: ORDER_TYPE_LIMIT, 
 // the Deploy_Manifest via @/lib/manifest — single source of truth with the
 // on-chain market, so re-initializing at different params can't drift the UI.
 
-// Required initial margin in 6-dp credit terms, mirroring the (now FIXED)
-// on-chain math: notional = size_atoms * price_6dp / 1e9 ; margin = notional / lev.
+// Required initial margin in 6-dp credit terms, mirroring the on-chain math
+// exactly: notional = size_atoms * price_6dp / 1e9 (compute_notional), then
+// margin = notional / market.max_leverage (compute_initial_margin). The divisor
+// is the MARKET's fixed max_leverage — never the form's slider, which the wire
+// format has no field for (createPlaceOrderInstruction packs 30 bytes: disc,
+// side, type, price, size, expiry, slippage, reduce_only) and which
+// place_order.rs:181-183 therefore never sees.
 function requiredMarginAtoms(sizeAtoms: bigint, price6dp: bigint): bigint {
   if (sizeAtoms <= 0n || price6dp <= 0n) return 0n;
   const notional = (sizeAtoms * price6dp) / 1_000_000_000n; // BASE_SCALE
@@ -47,8 +53,25 @@ function requiredMarginAtoms(sizeAtoms: bigint, price6dp: bigint): bigint {
 export function OrderForm() {
   const { publicKey, sendTransaction } = useWallet();
   const { state: session, getSessionKeypair } = useSession(0);
-  const { market } = useMarket(0);
-  const markPrice = market && market.lastMarkPrice > 0n ? Number(market.lastMarkPrice) / PRICE_SCALE : null;
+  // This used to read `market.lastMarkPrice` raw, which is the exact field
+  // useMarkPrice exists to gate. With the crank stopped it sized and quoted
+  // market orders off a frozen price (the documented 74.11-against-95.81 case)
+  // while the Mark column two panels away, reading the SAME field through this
+  // hook, correctly rendered an em dash. `reference` is null precisely when no
+  // price can be honestly quoted; `stampStale` is the program's own gate, and a
+  // MARKET order whose stamp is stale reverts with OracleStale after the
+  // signature (place_order.rs:173-177 via Market::mark_price_for_close).
+  const { reference: markPrice, mark, stampStale, reason: markReason } = useMarkPrice(0);
+  // "We have not read the market yet" is not "there is no trustworthy price" —
+  // useMarkPrice cannot tell them apart because it only ever sees `market`, so
+  // the status comes from the same shared source it already polls (no extra RPC,
+  // one poller per key). Without this the button spends the first read telling
+  // the user the crank is down.
+  const { status: marketStatus } = useMarket(0);
+  // Free: shared-source already polls this account for the ladder, status panel
+  // and fill toasts, so this mount adds no RPC. Needed to answer "would a market
+  // order of this size actually fill?" BEFORE it is sent.
+  const { bids, asks, status: bookStatus } = useOrderBook(0);
 
   const [side, setSide] = useState<"long" | "short">("long");
   const [orderType, setOrderType] = useState<OrderType>("limit");
@@ -60,11 +83,39 @@ export function OrderForm() {
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [lastErr, setLastErr] = useState<string | null>(null);
 
-  // Effective entry price used for sizing: the limit price, or the live mark for market.
-  const entryPrice =
-    orderType === "limit" ? (price ? parseFloat(price) : null) : markPrice;
+  const isMarket = orderType === "market";
 
-  // Derive position size from margin × leverage ÷ price, rounded to whole lots.
+  const priceLoading = marketStatus === "loading" && markPrice === null;
+  // Why a MARKET order cannot be priced right now, or null when it can be.
+  // "We haven't read yet", "we can't reach the chain" and "the mark is stale"
+  // are three different answers; the old code gave all three the same one by
+  // silently dropping the ", around X" clause and letting the button read
+  // "Enter a margin amount" to a user who had already entered one.
+  const marketPriceBlock: string | null =
+    !isMarket || (markPrice !== null && !stampStale)
+      ? null
+      : priceLoading
+        ? "Loading the market price…"
+        : marketStatus === "unavailable" && markPrice === null
+          ? "Can't reach Solana right now — no price to size a market order"
+          : markReason ?? "No trustworthy price to size a market order";
+
+  // Effective entry price used for sizing: the limit price, or the best price we
+  // can honestly quote for market (oracle first, then a mark the program itself
+  // would still accept — never the frozen one).
+  const entryPrice = isMarket ? markPrice : price ? parseFloat(price) : null;
+
+  // An empty Max Slippage box is NOT "no bound": place_order.rs:35 documents
+  // `0 = disabled`, and place_order.rs:224 then takes the `(0, u64::MAX)` branch,
+  // so a cleared field — placeholder still reading "50" — used to send a market
+  // order that could sweep the entire ask ladder. Parse toward protection: any
+  // value that is not a positive number means the 50 bps the placeholder
+  // promises. The u16 clamp keeps a pasted 99999 out of writeU16LE.
+  const parsedBps = Number.parseInt(slippageBps, 10);
+  const effectiveBps =
+    Number.isFinite(parsedBps) && parsedBps > 0 ? Math.min(parsedBps, 65535) : 50;
+
+  // Derive position size from amount × multiplier ÷ price, rounded to whole lots.
   const derived = (() => {
     const m = parseFloat(margin);
     if (!Number.isFinite(m) || m <= 0 || !entryPrice || entryPrice <= 0) return null;
@@ -73,15 +124,52 @@ export function OrderForm() {
     const lots = Math.max(0, Math.round(rawSol / LOT_SOL));
     const sizeSol = lots * LOT_SOL;
     if (sizeSol <= 0) return { lots: 0, sizeSol: 0, notional, actualMargin: 0 };
-    // Actual margin after lot rounding = notional(rounded) / leverage.
     const actualNotional = sizeSol * entryPrice;
-    const actualMargin = actualNotional / leverage;
+    // The slider is a SIZING knob, not leverage. It never reaches the chain —
+    // the instruction has no leverage field — and place_order.rs:181-183 always
+    // computes compute_initial_margin(notional, market.max_leverage). Dividing
+    // by `leverage` here claimed up to 20x more money was committed than the
+    // program actually reserves (type $50 at 1x, the chain takes $2.50), and the
+    // same wrong number gated the button, blocking orders the chain would have
+    // accepted. requiredMarginAtoms above always had this right; only the
+    // display path disagreed with it.
+    const actualMargin = actualNotional / MAX_LEVERAGE;
     return { lots, sizeSol, notional: actualNotional, actualMargin };
   })();
 
   const availUsd = session.initialized ? Number(session.available) / PRICE_SCALE : 0;
   const insufficient = derived != null && derived.actualMargin > availUsd + 1e-6;
   const belowOneLot = derived != null && derived.lots === 0;
+
+  // Would a MARKET order of this size actually fill? A market remainder is not
+  // rested and not rejected — place_order.rs:279-282 simply drops it — so an
+  // order against an empty or thin book lands, fills nothing, and used to be
+  // reported as an unqualified success with an explorer link.
+  //
+  // The chain walks the opposite ladder best-price-first and REVERTS the whole
+  // order at the first level outside the slippage band (place_order.rs:409-412)
+  // rather than skipping it, so reachable depth is a PREFIX of the ladder, not a
+  // filter over it. The band is centred on the price the CHAIN uses — the mark —
+  // not on `reference`, which prefers the oracle.
+  // null = the order is fine (or we cannot honestly judge); a number = the SOL
+  // actually reachable, which is less than the order asks for.
+  const thinFillable: number | null = (() => {
+    if (!isMarket || derived == null || derived.sizeSol <= 0) return null;
+    // "loading", "stale" and "unavailable" are not evidence of a thin book —
+    // never block a market order because the RPC hiccuped.
+    if (bookStatus !== "live" && bookStatus !== "empty") return null;
+    const ladder = side === "long" ? asks : bids;
+    // buildLadders caps at depth 20, so a full 20 levels may be truncated and we
+    // cannot claim to know the real depth.
+    if (ladder.length >= 20) return null;
+    const window = mark !== null && !stampStale ? (mark * effectiveBps) / 10_000 : null;
+    let fillable = 0;
+    for (const level of ladder) {
+      if (window !== null && Math.abs(level.price - mark!) > window) break;
+      fillable += level.size;
+    }
+    return fillable + 1e-9 < derived.sizeSol ? fillable : null;
+  })();
 
   const handleSubmit = async () => {
     if (!publicKey) return;
@@ -90,7 +178,7 @@ export function OrderForm() {
       return;
     }
     if (!derived || derived.sizeSol <= 0) {
-      setLastErr("Enter margin, leverage, and a price to size the order");
+      setLastErr("Enter an amount, a multiplier and a price to size the order");
       return;
     }
 
@@ -103,10 +191,10 @@ export function OrderForm() {
       const sizeVal = BigInt(Math.round(derived.sizeSol * 1e9));
       const priceVal =
         typeVal === ORDER_TYPE_MARKET ? 0n : BigInt(Math.round(parseFloat(price) * PRICE_SCALE));
-      const slippageVal = typeVal === ORDER_TYPE_MARKET ? parseInt(slippageBps || "0", 10) : 0;
+      const slippageVal = typeVal === ORDER_TYPE_MARKET ? effectiveBps : 0;
 
       if (sizeVal <= 0n || sizeVal % LOT_SIZE !== 0n) {
-        setLastErr("Size must round to at least one 0.1 SOL lot — increase margin or leverage.");
+        setLastErr("Size must round to at least one 0.1 SOL lot — increase the amount or the multiplier.");
         setSubmitting(false);
         return;
       }
@@ -120,7 +208,7 @@ export function OrderForm() {
         if (session.initialized && required > session.available) {
           setLastErr(
             `Insufficient credit: needs $${(Number(required) / PRICE_SCALE).toFixed(2)} margin, ` +
-              `you have $${availUsd.toFixed(2)}. Lower margin/leverage or fund more credit.`
+              `you have $${availUsd.toFixed(2)}. Lower the amount/multiplier or fund more credit.`
           );
           setSubmitting(false);
           return;
@@ -168,31 +256,46 @@ export function OrderForm() {
       } catch (confErr) {
         const confMsg = confErr instanceof Error ? confErr.message : String(confErr);
         let logs: string[] = [];
+        let landed = false;
         try {
           const t = await erConn.getTransaction(sig, {
             commitment: "confirmed",
             maxSupportedTransactionVersion: 0,
           });
           logs = t?.meta?.logMessages ?? [];
+          // The poll timing out says nothing about whether the order landed.
+          // We are already fetching the transaction for its logs — if it is
+          // there and carries no error, this WAS a success, and reporting it as
+          // a failure is what made traders place the order a second time.
+          landed = t?.meta != null && t.meta.err == null;
         } catch {
-          /* ignore */
+          /* ignore — treated as "could not verify" below */
         }
-        const name = decodeProgramError({ message: confMsg, logs });
-        setLastErr(name ? `Order rejected on-chain: ${name}` : confMsg || "Confirmation failed");
-        return;
+        if (!landed) {
+          const name = decodeProgramError({ message: confMsg, logs });
+          // The signature is the only way the user can check for themselves, so
+          // it must survive the failure path rather than being thrown away.
+          setLastSig(sig);
+          setLastErr(
+            // humanizeError only when we KNOW it was an on-chain rejection: its
+            // network branch says "nothing was sent", which is false once
+            // sendRawTransaction has handed back a signature.
+            name
+              ? humanizeError({ message: confMsg, logs })
+              : "Couldn't confirm in time — the order may still have landed. " +
+                "Check the transaction before retrying."
+          );
+          return;
+        }
       }
 
       setLastSig(sig);
       setMargin("");
     } catch (err) {
-      const name = decodeProgramError(err);
-      setLastErr(
-        name
-          ? `Order rejected: ${name}`
-          : err instanceof Error
-            ? err.message
-            : String(err)
-      );
+      // Everything reaching here failed BEFORE or DURING submission, which is
+      // exactly the case humanizeError's wording is written for — and it is the
+      // one decoder the other four submit paths in this app already share.
+      setLastErr(humanizeError(err));
       console.error("order failed:", err);
     } finally {
       setSubmitting(false);
@@ -200,13 +303,12 @@ export function OrderForm() {
   };
 
 
-  const showPriceInput = orderType !== "market";
+  const showPriceInput = !isMarket;
   // A market order takes whatever is resting at the best price, right now.
   // "Long - profits if price rises" describes a thesis, not that action; the
   // honest verb for crossing the book is buy/sell. A limit order really is
   // opening a directional position at a price you choose, so it keeps
   // long/short. Same instruction either way - only the label changes.
-  const isMarket = orderType === "market";
   const buyLabel = isMarket ? "Buy" : "Long";
   const sellLabel = isMarket ? "Sell" : "Short";
   const buyHint = isMarket ? "takes the best ask now" : "profits if price rises";
@@ -229,17 +331,25 @@ export function OrderForm() {
     ? "Connect a wallet to trade"
     : !session.delegated
       ? "Start a trading session first"
-      : orderType !== "market" && (!price || parseFloat(price) <= 0)
+      : !isMarket && (!price || parseFloat(price) <= 0)
         ? "Enter a limit price"
-        : !derived || derived.sizeSol <= 0
-          ? "Enter a margin amount"
-          : belowOneLot
-            ? "Below the 0.1 SOL minimum lot"
-            : noCreditAtAll
-              ? "Fund trading credit to trade"
-              : insufficient
-                ? "Margin exceeds available credit"
-                : null;
+        : // A limit order sizes off the price the user typed, so it keeps working
+          // with no usable mark. A market order cannot: the program prices it
+          // from mark_price_for_close and reverts with OracleStale when that is
+          // refused, so there is nothing honest to quote or size from.
+          marketPriceBlock !== null
+          ? marketPriceBlock
+          : !derived || derived.sizeSol <= 0
+            ? "Enter an amount"
+            : belowOneLot
+              ? "Below the 0.1 SOL minimum lot"
+              : noCreditAtAll
+                ? "Fund trading credit to trade"
+                : thinFillable !== null
+                  ? `Only ${thinFillable.toFixed(1)} SOL resting within slippage`
+                  : insufficient
+                    ? "Margin exceeds available credit"
+                    : null;
   const disabled = submitting || blocker !== null;
 
   return (
@@ -318,16 +428,36 @@ export function OrderForm() {
         ) : (
           <div className="flex flex-col gap-1.5">
             <span className={labelCls}>Execution</span>
-            <p className="text-[11.5px] text-[var(--t-text-3)]">
-            Fills at the best price resting on the book
-            {markPrice ? <span className="tnum">, around {markPrice.toFixed(3)}</span> : ""}.
-            </p>
+            {/* Loading, unreachable, stale and priced are four different states
+                and get four different sentences. Before, the last three all
+                rendered as the first: the ", around X" clause simply vanished,
+                so a dead crank looked like a slow page. */}
+            {marketPriceBlock !== null ? (
+              <p
+                className={`text-[11.5px] ${
+                  priceLoading ? "text-[var(--t-text-3)]" : "text-[var(--t-warn)]"
+                }`}
+              >
+                {marketPriceBlock}
+                {priceLoading
+                  ? ""
+                  : ". Market orders are refused until a trustworthy price returns — a limit order still works."}
+              </p>
+            ) : (
+              <p className="text-[11.5px] text-[var(--t-text-3)]">
+                Fills at the best price resting on the book
+                {markPrice !== null ? <span className="tnum">, around {markPrice.toFixed(3)}</span> : ""}.
+              </p>
+            )}
           </div>
         )}
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
-            <label htmlFor="order-margin" className={labelCls}>Margin</label>
+            {/* Not "Margin": what the chain commits is notional ÷ max_leverage,
+                which this box does not name at any multiplier below 20×. It is
+                one half of the notional the form builds. */}
+            <label htmlFor="order-margin" className={labelCls}>Amount</label>
             <span className="text-[11.5px] text-[var(--t-text-3)] tnum">{availLine}</span>
           </div>
           <div className="relative">
@@ -366,7 +496,11 @@ export function OrderForm() {
 
         <div className="flex flex-col gap-1.5">
           <div className="flex items-baseline justify-between">
-            <label htmlFor="order-lev" className={labelCls}>Leverage</label>
+            {/* NOT leverage. The instruction has no leverage field and
+                place_order.rs:181-183 always margins at market.max_leverage, so
+                calling this "Leverage" promised a 1x position the program will
+                never open. All it does is scale notional = amount × multiplier. */}
+            <label htmlFor="order-lev" className={labelCls}>Size multiplier</label>
             <span className="text-[12px] font-semibold text-[var(--t-up)] tnum">{leverage}×</span>
           </div>
           <input
@@ -382,6 +516,11 @@ export function OrderForm() {
           <div className="flex justify-between text-[11px] text-[var(--t-text-3)] tnum">
             <span>1×</span><span>5×</span><span>10×</span><span>{MAX_LEVERAGE}×</span>
           </div>
+          <p className="text-[11px] text-[var(--t-text-3)]">
+            Notional = amount × multiplier. This market margins every position at{" "}
+            {MAX_LEVERAGE}×, so the credit committed is notional ÷ {MAX_LEVERAGE} whatever the
+            multiplier says.
+          </p>
         </div>
 
         {orderType === "market" && (
@@ -395,6 +534,8 @@ export function OrderForm() {
                 id="order-slippage"
                 type="number"
                 step="1"
+                min={1}
+                max={65535}
                 inputMode="numeric"
                 placeholder="50"
                 value={slippageBps}
@@ -424,7 +565,11 @@ export function OrderForm() {
             </span>
           </div>
           <div className={rowCls}>
-            <span className={labelCls}>Margin at risk</span>
+            {/* Was "Margin at risk" showing notional ÷ slider. The market
+                margins EVERY position at max_leverage, so this is notional ÷ 20
+                and nothing else — naming the divisor is the only way the row
+                stops contradicting the "Available" tile in the Session panel. */}
+            <span className={labelCls}>Margin required ({MAX_LEVERAGE}× market)</span>
             <span className="text-[12px] text-[var(--t-text)] tnum">
               {derived && derived.sizeSol > 0 ? `$${derived.actualMargin.toFixed(2)}` : "—"}
             </span>
@@ -436,11 +581,19 @@ export function OrderForm() {
         </div>
 
         {!(derived && derived.sizeSol > 0) && (
-          <p className="text-[11.5px] text-[var(--t-text-3)]">Enter a margin amount to size the order.</p>
+          <p className="text-[11.5px] text-[var(--t-text-3)]">Enter an amount to size the order.</p>
         )}
 
         {belowOneLot && (
-          <p className="text-[11.5px] text-[var(--t-warn)]">Too small — minimum is one 0.1 SOL lot. Increase margin or leverage.</p>
+          <p className="text-[11.5px] text-[var(--t-warn)]">Too small — minimum is one 0.1 SOL lot. Increase the amount or the multiplier.</p>
+        )}
+        {thinFillable !== null && (
+          <p className="text-[11.5px] text-[var(--t-warn)]">
+            Only {thinFillable.toFixed(1)} SOL is resting within your {effectiveBps} bps slippage
+            band. A market order does not rest its remainder — the program drops it — so the rest
+            of this order would silently vanish. Reduce the size, widen the slippage, or use a
+            limit order.
+          </p>
         )}
         {noCreditAtAll && !belowOneLot && (
           <p className="text-[11.5px] text-[var(--t-warn)]">
@@ -451,8 +604,9 @@ export function OrderForm() {
         )}
         {insufficient && !noCreditAtAll && !belowOneLot && (
           <p className="text-[11.5px] text-[var(--t-down)]">
-            Needs ${derived!.actualMargin.toFixed(2)} margin, you have ${availUsd.toFixed(2)}. Lower the
-            margin or leverage, or add credit in the Session panel.
+            Needs ${derived!.actualMargin.toFixed(2)} margin (notional ÷ {MAX_LEVERAGE}), you have $
+            {availUsd.toFixed(2)}. Lower the amount or the multiplier, or add credit in the Session
+            panel.
           </p>
         )}
 

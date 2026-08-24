@@ -1,6 +1,5 @@
 "use client";
 
-import { startPoll } from "@/lib/poll";
 import { useCallback } from "react";
 import { useSharedSource } from "@/lib/shared-source";
 import { baseConnection } from "@/lib/connections";

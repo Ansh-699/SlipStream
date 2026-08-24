@@ -5,14 +5,15 @@ import { startPoll } from "@/lib/poll";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import {
+  type AccountInfo,
   Connection,
   Keypair,
   PublicKey,
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
-import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
-import { PROGRAM_ID, USDC_MINT, USDC_VAULT, ER_RPC } from "@/lib/manifest";
+import { getAssociatedTokenAddress, getAccount, unpackAccount } from "@solana/spl-token";
+import { PROGRAM_ID, USDC_MINT, USDC_VAULT } from "@/lib/manifest";
 import {
   DELEGATION_PROGRAM_ID,
   DISC_TRADING_CREDIT,
@@ -71,14 +72,28 @@ const SESSION_FUND_SOL = Number(
 function slog(step: string, msg: string, extra?: unknown): void {
   const ts = new Date().toISOString().split("T")[1].replace("Z", "");
   if (extra !== undefined) {
-    // eslint-disable-next-line no-console
     console.log(`%c[session ${ts}] ${step}: ${msg}`, "color:#34d399", extra);
   } else {
-    // eslint-disable-next-line no-console
     console.log(`%c[session ${ts}] ${step}: ${msg}`, "color:#34d399");
   }
 }
 
+/**
+ * The ONLY token-read failures that honestly mean "this wallet holds zero
+ * USDC": the associated account has never been created, or something else
+ * lives at that address. Every other throw is the RPC being unreachable, and
+ * swallowing it turns a devnet blip into "you have no test USDC" — which is
+ * what disabled the primary button for funded wallets and, in autoStart, once
+ * turned "deposit everything" into "deposit nothing" while the run carried on
+ * and delegated an EMPTY credit. Rethrow so the caller can say what happened.
+ */
+function zeroIfTokenAccountAbsent(err: unknown): bigint {
+  const name = (err as { name?: string })?.name ?? "";
+  if (name === "TokenAccountNotFoundError" || name === "TokenInvalidAccountOwnerError") {
+    return 0n;
+  }
+  throw err;
+}
 
 export interface SessionState {
   initialized: boolean;
@@ -109,6 +124,33 @@ export interface SessionState {
    *  the user must migrate via a fresh wallet) vs program-owned (closable). */
   legacyDelegated: boolean;
 }
+
+/**
+ * Why this exists: an all-zero `SessionState` has three completely different
+ * causes — we have not read the chain yet, we read it and this wallet
+ * genuinely holds nothing, or we could not reach the chain at all — and
+ * `refresh` used to render all three identically. Four reads each wrapped in
+ * `.catch(() => null)` / `.catch(() => 0n)`, and the whole body in a bare
+ * `catch` that only said "Will retry", meant one rate-limited devnet poll
+ * redrew a funded, fully delegated wallet as brand new: USDC $0.00, SOL 0.0000,
+ * the amber "this wallet needs a little devnet SOL" warning, and "Start
+ * trading" disabled — with nothing logged and no error anywhere on the page.
+ * Same shape as `MarketStatus` in use-market.ts, for the same reason.
+ *
+ *   loading      no read has completed for THIS owner yet; every number in
+ *                `state` is a placeholder or the previously connected wallet's.
+ *   live         the last read succeeded; `state` is what the chain says.
+ *   stale        the last read FAILED but an earlier one for this owner
+ *                succeeded; `state` is the last known-good snapshot for this
+ *                wallet and may be out of date.
+ *   unavailable  no read for this owner has ever succeeded; `state` cannot be
+ *                trusted at all. Do not render it as money, and above all do
+ *                not read it as "this wallet is empty".
+ *
+ * Only meaningful while a wallet is connected — `refresh` is a no-op without
+ * one, so the status stays "loading" until an owner appears.
+ */
+export type SessionStatus = "loading" | "live" | "stale" | "unavailable";
 
 // ---------------------------------------------------------------------------
 // Ephemeral session-key storage (localStorage, per owner+market).
@@ -154,6 +196,140 @@ function storeSession(
     sessionStorageKey(owner, marketIndex),
     JSON.stringify(payload)
   );
+}
+
+/**
+ * Read everything the wallet panel and the order form need, in TWO round trips.
+ *
+ * Throws on any transport failure, and that is the whole point. Every read in
+ * here used to carry its own `.catch(() => null)` / `.catch(() => 0n)`, so a
+ * rate-limited RPC came back as "no accounts, no USDC, no SOL". A genuinely
+ * missing account already resolves to null (or, for a missing ATA, to the
+ * narrowly-caught TokenAccountNotFoundError) WITHOUT throwing — so those
+ * catches never distinguished anything real, they only hid the failures that
+ * matter. The caller decides what a throw means for what is already on screen.
+ */
+async function readSessionState(
+  connection: Connection,
+  publicKey: PublicKey,
+  marketIndex: number
+): Promise<SessionState> {
+  const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
+  const [pda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
+  // ONE base-layer request for all four accounts, not four. They were four
+  // independent promises in a Promise.all: four JSON-RPC envelopes through the
+  // proxy, four separate chances of drawing the 429 — and, because they failed
+  // independently, a rate-limited getBalance could report 0 SOL next to a
+  // perfectly good USDC balance, which is what the panel uses to decide whether
+  // to tell the user they cannot afford setup.
+  const ata = USDC_MINT ? await getAssociatedTokenAddress(USDC_MINT, publicKey) : null;
+  const [uInfo, info, walletInfo, ataInfo] = await connection.getMultipleAccountsInfo(
+    ata ? [userPda, pda, publicKey, ata] : [userPda, pda, publicKey]
+  );
+
+  const solBalance = BigInt(walletInfo?.lamports ?? 0);
+  let usdcBalance = 0n;
+  if (ata) {
+    try {
+      usdcBalance = unpackAccount(ata, ataInfo ?? null).amount;
+    } catch (err) {
+      usdcBalance = zeroIfTokenAccountAbsent(err);
+    }
+  }
+
+  let freeCollateral = 0n;
+  let userInitialized = false;
+  if (uInfo && uInfo.data[0] === DISC_USER_ACCOUNT) {
+    userInitialized = true;
+    freeCollateral = decodeUserAccount(uInfo.data as Buffer).freeCollateral;
+  }
+
+  const stored = loadStoredSession(publicKey, marketIndex);
+  const sessionPublicKey = stored ? stored.keypair.publicKey.toBase58() : null;
+
+  // COMPLETE state objects, every branch. The two "this wallet has no usable
+  // credit" exits used to be `setState(s => ({ ...s, … }))` partial spreads
+  // that left delegated/credit/committed/available/activeOrders untouched — so
+  // switching from a delegated wallet holding $1,000 to a fresh one showed the
+  // fresh wallet "Available $1,000.00", the trading-session card and "Withdraw
+  // all to wallet", and NO "Start trading" button, because `delegated` was
+  // still the previous wallet's. It never self-corrected; only a reload did.
+  const noCredit: SessionState = {
+    initialized: false,
+    delegated: false,
+    credit: 0n,
+    committed: 0n,
+    available: 0n,
+    activeOrders: 0,
+    freeCollateral,
+    usdcBalance,
+    solBalance,
+    userInitialized,
+    sessionPublicKey,
+    sessionActive: false,
+    sessionExpiry: 0n,
+    legacyCredit: false,
+    legacyDelegated: false,
+  };
+  if (!info || info.data[0] !== DISC_TRADING_CREDIT) return noCredit;
+
+  const isDelegated = info.owner.toBase58() === DELEGATION_PROGRAM;
+  const data = info.data;
+
+  // When delegated, the authoritative credit — with the live session fields and
+  // balances the orders actually execute against — lives on the ER; the base
+  // layer holds the snapshot taken at delegation time. Read the ER copy ONCE.
+  // This used to be two sequential getAccountInfo calls on the SAME account:
+  // the first purely to measure `data.length` for the legacy probe below and
+  // then thrown away, the second to decode. Same bytes, twice, every 5s.
+  let erInfo: AccountInfo<Buffer> | null = null;
+  if (isDelegated) {
+    try {
+      erInfo = await erConnection.getAccountInfo(pda);
+    } catch {
+      // An unreachable ER is NOT an unreachable chain: the base-layer snapshot
+      // is still a real credit, just possibly behind. Fall back to it rather
+      // than failing the whole read and blanking the panel.
+    }
+  }
+
+  // Detect a pre-upgrade credit (e.g. legacy 56-byte) that the current 96-byte
+  // decoder cannot read. It must be migrated before the new flow works:
+  //   - program-owned (not delegated): the user can close + re-init in place.
+  //   - delegated: cannot be closed/re-init'd at this PDA (undelegate is a
+  //     dead-end) — migration requires a fresh wallet.
+  const liveLen = erInfo ? erInfo.data.length : data.length;
+  if (liveLen < TRADING_CREDIT_SIZE) {
+    return {
+      ...noCredit,
+      initialized: true,
+      delegated: isDelegated,
+      legacyCredit: true,
+      legacyDelegated: isDelegated,
+    };
+  }
+
+  const authoritative =
+    erInfo && erInfo.data[0] === DISC_TRADING_CREDIT ? erInfo.data : data;
+  const credit = decodeTradingCredit(authoritative as Buffer);
+
+  // The on-chain session matches our local key only if the authority equals
+  // the stored session pubkey AND it is not expired.
+  const localMatches =
+    sessionPublicKey !== null &&
+    credit.sessionAuthority.toBase58() === sessionPublicKey;
+
+  return {
+    ...noCredit,
+    initialized: true,
+    delegated: isDelegated,
+    credit: credit.credit,
+    committed: credit.committed,
+    available: credit.available,
+    activeOrders: credit.activeOrders,
+    sessionActive: localMatches && isSessionActive(credit),
+    sessionExpiry: credit.sessionExpiry,
+  };
 }
 
 /**
@@ -203,6 +379,18 @@ export function useSession(marketIndex: number = 0) {
     legacyCredit: false,
     legacyDelegated: false,
   });
+  // Whether the numbers in `state` above can be believed — see SessionStatus.
+  // Stored WITH the owner whose read produced it, and compared on every render:
+  // a wallet switch has to invalidate `state` immediately, and deriving that
+  // here catches the very first render after the switch, which a reset inside
+  // the poll effect would miss by one render (and would be a cascading
+  // setState-in-effect besides).
+  const owner = publicKey?.toBase58() ?? null;
+  const [read, setRead] = useState<{ owner: string | null; status: SessionStatus }>({
+    owner: null,
+    status: "loading",
+  });
+  const status: SessionStatus = read.owner === owner ? read.status : "loading";
   const [busy, setBusy] = useState(false);
   // autoStart used to set no busy state of its own: `busy` was raised inside
   // initialize(), TWO RPC round trips later. For those two round trips the
@@ -240,148 +428,26 @@ export function useSession(marketIndex: number = 0) {
 
   const refresh = useCallback(async () => {
     if (!publicKey) return;
+    const who = publicKey.toBase58();
     try {
-      // FOUR independent reads, one round trip. These ran in series, and
-      // refresh() is called after EVERY leg of autoStart as well as on a 5s
-      // poll — so the serial version charged ~4 round trips to each of the
-      // three setup steps, on top of the transactions themselves. Nothing here
-      // depends on anything else here.
-      const [userPda] = findUserAccountPda(publicKey, PROGRAM_ID);
-      const [pda] = findTradingCreditPda(publicKey, marketIndex, PROGRAM_ID);
-      const [uInfo, usdcBalance, solBalance, info] = await Promise.all([
-        connection.getAccountInfo(userPda).catch(() => null),
-        USDC_MINT
-          ? getAssociatedTokenAddress(USDC_MINT, publicKey)
-              .then((ata) => getAccount(connection, ata))
-              .then((a) => a.amount)
-              .catch(() => 0n) // no ATA / no balance yet
-          : Promise.resolve(0n),
-        connection.getBalance(publicKey).then((l) => BigInt(l)).catch(() => 0n),
-        connection.getAccountInfo(pda).catch(() => null),
-      ]);
-
-      let freeCollateral = 0n;
-      let userInitialized = false;
-      if (uInfo && uInfo.data[0] === DISC_USER_ACCOUNT) {
-        userInitialized = true;
-        freeCollateral = decodeUserAccount(uInfo.data as Buffer).freeCollateral;
-      }
-
-      const stored = loadStoredSession(publicKey, marketIndex);
-      const sessionPublicKey = stored ? stored.keypair.publicKey.toBase58() : null;
-      if (!info) {
-        setState((s) => ({
-          ...s,
-          initialized: false,
-          freeCollateral,
-          usdcBalance,
-          solBalance,
-          userInitialized,
-          sessionPublicKey,
-          sessionActive: false,
-          sessionExpiry: 0n,
-          legacyCredit: false,
-          legacyDelegated: false,
-        }));
-        return;
-      }
-      const isDelegated = info.owner.toBase58() === DELEGATION_PROGRAM;
-      const data = info.data;
-      if (data[0] !== DISC_TRADING_CREDIT) {
-        setState((s) => ({
-          ...s,
-          initialized: false,
-          freeCollateral,
-          usdcBalance,
-          solBalance,
-          userInitialized,
-          sessionPublicKey,
-          sessionActive: false,
-          sessionExpiry: 0n,
-          legacyCredit: false,
-          legacyDelegated: false,
-        }));
-        return;
-      }
-      // Detect a pre-upgrade credit (e.g. legacy 56-byte) that the current 96-byte
-      // decoder cannot read. It must be migrated before the new flow works:
-      //   - program-owned (not delegated): the user can close + re-init in place.
-      //   - delegated: cannot be closed/re-init'd at this PDA (undelegate is a
-      //     dead-end) — migration requires a fresh wallet.
-      const liveLen = isDelegated
-        ? (await (async () => {
-            try {
-              const erConn = erConnection;
-              const erInfo = await erConn.getAccountInfo(pda);
-              return erInfo ? erInfo.data.length : data.length;
-            } catch {
-              return data.length;
-            }
-          })())
-        : data.length;
-      if (liveLen < TRADING_CREDIT_SIZE) {
-        setState((s) => ({
-          ...s,
-          initialized: true,
-          delegated: isDelegated,
-          credit: 0n,
-          committed: 0n,
-          available: 0n,
-          activeOrders: 0,
-          freeCollateral,
-          usdcBalance,
-          solBalance,
-          userInitialized,
-          sessionPublicKey,
-          sessionActive: false,
-          sessionExpiry: 0n,
-          legacyCredit: true,
-          legacyDelegated: isDelegated,
-        }));
-        return;
-      }
-      // When delegated, the authoritative credit (with the live session fields)
-      // lives on the ER. Read it there so the session expiry/authority reflect
-      // the rollup state the orders actually execute against.
-      let credit = decodeTradingCredit(data as Buffer);
-      if (isDelegated) {
-        try {
-          const erConn = erConnection;
-          const erInfo = await erConn.getAccountInfo(pda);
-          if (erInfo && erInfo.data[0] === DISC_TRADING_CREDIT) {
-            credit = decodeTradingCredit(erInfo.data as Buffer);
-          }
-        } catch {
-          /* fall back to base-layer copy */
-        }
-      }
-
-      // The on-chain session matches our local key only if the authority equals
-      // the stored session pubkey AND it is not expired.
-      const localMatches =
-        sessionPublicKey !== null &&
-        credit.sessionAuthority.toBase58() === sessionPublicKey;
-      const sessionActive = localMatches && isSessionActive(credit);
-
-      setState({
-        initialized: true,
-        delegated: isDelegated,
-        credit: credit.credit,
-        committed: credit.committed,
-        available: credit.available,
-        activeOrders: credit.activeOrders,
-        freeCollateral,
-        usdcBalance,
-        solBalance,
-        userInitialized,
-        sessionPublicKey,
-        sessionActive,
-        sessionExpiry: credit.sessionExpiry,
-        legacyCredit: false,
-        legacyDelegated: false,
-      });
-    } catch {
-      // Will retry
+      setState(await readSessionState(connection, publicKey, marketIndex));
+      setRead({ owner: who, status: "live" });
+    } catch (err) {
+      // A throw here is the chain being unreachable, NOT an empty wallet — the
+      // read distinguishes the two now (see readSessionState). Leave `state`
+      // exactly as it was and SAY that it is unverified, instead of the old
+      // silent `// Will retry`, which let four swallowed reads redraw a funded,
+      // delegated wallet as brand new and logged nothing at all.
+      //
+      // Deliberately NOT setError: this polls every 5s, so it would need a
+      // clear-on-success, and that would wipe an autoStart or withdraw error
+      // off the panel within one tick of the user causing it.
+      setRead((r) =>
+        r.owner === who && (r.status === "live" || r.status === "stale")
+          ? { owner: who, status: "stale" }
+          : { owner: who, status: "unavailable" }
+      );
+      slog("refresh", `read failed, keeping last known state: ${humanizeError(err)}`, err);
     }
   }, [connection, publicKey, marketIndex]);
 
@@ -422,7 +488,12 @@ export function useSession(marketIndex: number = 0) {
         // it is why the button felt dead long enough to be clicked repeatedly.
         const [bal, lamports, uInfo, cInfo, pInfo] = await Promise.all([
           depositAmount > 0n
-            ? getAccount(connection, ata).then((a) => a.amount).catch(() => 0n)
+            ? getAccount(connection, ata)
+                .then((a) => a.amount)
+                // An unreachable RPC used to read as `bal = 0n` here, which the
+                // check below reports as "You have no test USDC" to a wallet
+                // that is holding plenty. Only a genuinely absent ATA is zero.
+                .catch(zeroIfTokenAccountAbsent)
             : Promise.resolve(0n),
           connection.getBalance(publicKey).catch(() => null),
           connection.getAccountInfo(userPda),
@@ -510,7 +581,6 @@ export function useSession(marketIndex: number = 0) {
         const msg = humanizeError(err);
         setError(msg);
         slog("init", `FAILED: ${msg}`, err);
-        // eslint-disable-next-line no-console
         console.error("[session] initialize failed:", err);
         return false;
       } finally {
@@ -717,10 +787,13 @@ export function useSession(marketIndex: number = 0) {
       const [positionPda] = findPositionPda(publicKey, marketIndex, PROGRAM_ID);
       const ata = await getAssociatedTokenAddress(USDC_MINT, publicKey);
 
-      const [uInfo, cInfo, pInfo] = await Promise.all([
+      const [uInfo, cInfo, pInfo, lamports] = await Promise.all([
         connection.getAccountInfo(userPda),
         connection.getAccountInfo(creditPda),
         connection.getAccountInfo(positionPda),
+        // Costs no extra round trip alongside the three above, and it is what
+        // the rent/fee refusal below needs.
+        connection.getBalance(publicKey).catch(() => null),
       ]);
 
       const ixs = [];
@@ -746,14 +819,31 @@ export function useSession(marketIndex: number = 0) {
           ? decodeUserAccount(uInfo.data as Buffer).freeCollateral
           : 0n;
       const fundAmount = existingFree + depositAmount;
-      if (fundAmount === 0n) {
+      // Money already sitting IN the trading credit counts as well. A withdraw
+      // whose first leg (undelegate) landed and whose second (release) did not
+      // leaves exactly this shape: credit > 0, free collateral 0, wallet USDC 0.
+      // The old refusal below then fired and told the user to "Get test USDC",
+      // which is both false and unreachable advice — their money was on-chain,
+      // visible in the panel, and the only path back to it (Withdraw) is behind
+      // the delegated state this run is what restores. There is nothing to fund
+      // in that case, so skip the fund leg and just re-delegate what is there.
+      const existingCredit =
+        cInfo &&
+        cInfo.data[0] === DISC_TRADING_CREDIT &&
+        cInfo.data.length >= TRADING_CREDIT_SIZE
+          ? decodeTradingCredit(cInfo.data as Buffer).credit
+          : 0n;
+      if (fundAmount === 0n && existingCredit === 0n) {
         setError(
           "There is nothing to move into the market. Use \u201CGet test USDC\u201D first, then press Start trading."
         );
         return false;
       }
-      // fund_trading_credit rejects amount == 0 outright (fund_trading_credit.rs:44).
-      ixs.push(createFundTradingCreditInstruction(publicKey, marketIndex, fundAmount, PROGRAM_ID));
+      // fund_trading_credit rejects amount == 0 outright (fund_trading_credit.rs:44),
+      // so this instruction is only added when there is something to move.
+      if (fundAmount > 0n) {
+        ixs.push(createFundTradingCreditInstruction(publicKey, marketIndex, fundAmount, PROGRAM_ID));
+      }
 
       const sessionKp = Keypair.generate();
       const expiry = Math.floor(Date.now() / 1000) + SESSION_TTL_SECS;
@@ -778,6 +868,22 @@ export function useSession(marketIndex: number = 0) {
 
       const tx = new Transaction().add(...ixs);
       slog("oneshot", `built ${ixs.length} instruction(s), fund $${Number(fundAmount) / PRICE_SCALE}`);
+
+      // The rent/fee preflight initialize() runs never ran on THIS path, which
+      // is the one the Start button actually uses — so a wallet with USDC and
+      // 0.004 SOL got a Phantom prompt for a six-instruction transaction that
+      // could not succeed, and only learned why after approving it. Same six
+      // accounts, so the same threshold and the same wording. A null lamports
+      // is an unreachable RPC, which stays non-fatal here exactly as it is in
+      // initialize().
+      if (lamports !== null && lamports < MIN_SOL_LAMPORTS) {
+        setError(
+          `Your wallet needs about ${(MIN_SOL_LAMPORTS / 1e9).toFixed(3)} devnet SOL for account rent and fees — ` +
+            `it has ${(lamports / 1e9).toFixed(4)}. Use "Get test USDC" (it tops up SOL too) or airdrop some, then retry.`
+        );
+        slog("oneshot", `BLOCKED: only ${(lamports / 1e9).toFixed(4)} SOL for rent and fees`);
+        return false;
+      }
 
       setStep("Awaiting wallet signature\u2026");
       const sig = await sendTransaction(tx, connection);
@@ -834,19 +940,10 @@ export function useSession(marketIndex: number = 0) {
             : getAssociatedTokenAddress(USDC_MINT, publicKey)
                 .then((ata) => getAccount(connection, ata))
                 .then((a) => a.amount)
-                // ONLY "the ATA does not exist" means zero. Every other failure
-                // is the RPC being unreachable, and swallowing it here turned
-                // "deposit everything" into "deposit nothing" while the run
-                // carried on and delegated an EMPTY credit — three approvals
-                // burned, USDC still in the wallet, and the Start button then
-                // replaced by the withdraw card so there was no way back.
-                .catch((e: unknown) => {
-                  const name = (e as { name?: string })?.name ?? "";
-                  if (name === "TokenAccountNotFoundError" || name === "TokenInvalidAccountOwnerError") {
-                    return 0n;
-                  }
-                  throw e;
-                }),
+                // ONLY "the ATA does not exist" means zero — see
+                // zeroIfTokenAccountAbsent, which is now the one place that
+                // decides this for all three reads in this file.
+                .catch(zeroIfTokenAccountAbsent),
         ]);
         if (creditInfo?.owner.toBase58() === DELEGATION_PROGRAM) {
           // Silent `return true` here read to the user as "the button does
@@ -903,7 +1000,13 @@ export function useSession(marketIndex: number = 0) {
         setStep(null);
       }
     },
-    [publicKey, connection, marketIndex, initialize, fund, delegate, refresh]
+    // oneShotSetup is the only leg autoStart still calls — the legacy
+    // initialize/fund/delegate trio was removed from the body, and leaving them
+    // here while omitting oneShotSetup pinned autoStart to the FIRST
+    // oneShotSetup closure. That one captured the wallet adapter's original
+    // `sendTransaction`, so a setup click after a wallet switch would sign
+    // through the previous adapter.
+    [publicKey, connection, marketIndex, oneShotSetup, refresh]
   );
 
   // withdraw — the full exit, in one click: pull the credit back off the
@@ -1159,6 +1262,7 @@ export function useSession(marketIndex: number = 0) {
 
   return {
     state,
+    status,
     busy: busy || autoRunning,
     step,
     error,
