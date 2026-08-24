@@ -66,5 +66,8 @@ export function useOpenOrders(owner: PublicKey | null, marketIndex: number = 0) 
   // shared 2s poller's and one subscriber cannot make it tick early — so it was
   // deleted along with its only call site in open-orders.tsx. A cancelled row
   // still clears on the next shared poll, within 2s.)
-  return { orders, error: status === "unavailable" };
+  // "loading" is the third one: the shared book read has not resolved, so an
+  // empty list is not an answer either. Forwarded rather than folded into
+  // `error`, so the panel can say "checking" instead of "none" or "broken".
+  return { orders, error: status === "unavailable", loading: status === "loading" };
 }

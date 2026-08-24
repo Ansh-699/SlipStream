@@ -217,6 +217,11 @@ export function useErPosition(
   // still carries a last-good answer and "loading"/"missing" are answers of
   // their own.
   const error = marketStatus === "unavailable" || bookStatus === "unavailable";
+  // The third cause of `position === null`: neither source has answered yet.
+  // `settledSeq` is null for the whole of the Market read, so this hook returns
+  // null-and-no-error while it knows nothing at all, which the panel renders as
+  // "No open positions". Same word both shared sources already use.
+  const loading = marketStatus === "loading" || bookStatus === "loading";
 
-  return { position, error };
+  return { position, error, loading };
 }

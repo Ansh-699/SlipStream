@@ -20,7 +20,10 @@ import { confirmSignature } from "@/lib/confirm";
 export function OpenOrders() {
   const { publicKey, sendTransaction } = useWallet();
   const { state: session, getSessionKeypair } = useSession(0);
-  const { orders, error: ordersError } = useOpenOrders(publicKey ?? null, 0);
+  const { orders, error: ordersError, loading: ordersLoading } = useOpenOrders(
+    publicKey ?? null,
+    0
+  );
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [cancelErr, setCancelErr] = useState<string | null>(null);
 
@@ -77,9 +80,12 @@ export function OpenOrders() {
           Open Orders
         </span>
         <span className="text-[11px] text-[var(--t-text-3)] tnum">
-          {/* "0 resting" is a claim about the book. With the book unreadable we
-              do not know the count, so say so with a dash rather than assert. */}
-          {ordersError && orders.length === 0 ? "—" : `${orders.length} resting`}
+          {/* "0 resting" is a claim about the book. With the book unreadable —
+              or simply not read yet — we do not know the count, so say so with
+              a dash rather than assert. */}
+          {(ordersError || ordersLoading) && orders.length === 0
+            ? "—"
+            : `${orders.length} resting`}
         </span>
       </div>
       <div className="p-3">
@@ -91,9 +97,11 @@ export function OpenOrders() {
                 Same wording as market-bar's banner for the same condition. */}
             {!publicKey
               ? "Sign in to see your open orders"
-              : ordersError
-                ? "Can't reach Solana — retrying."
-                : "No open orders"}
+              : ordersLoading
+                ? "Loading your orders…"
+                : ordersError
+                  ? "Can't reach Solana — retrying."
+                  : "No open orders"}
           </div>
         ) : (
           <table className="w-full border-collapse">

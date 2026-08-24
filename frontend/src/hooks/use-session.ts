@@ -432,11 +432,29 @@ export function useSession(marketIndex: number = 0) {
     return stored.keypair;
   }, [publicKey, marketIndex]);
 
+  // Request sequence. `refresh` is the only writer of `state`/`read`, but it has
+  // twelve call sites and no ordering guarantee between them: startPoll only
+  // serialises its OWN loop, so a stalled 5s tick (this file documents 10-30s
+  // devnet 429 windows) and a hand-triggered refresh run concurrently and can
+  // resolve out of order. The damaging run: the tick stalls, the user clicks
+  // Start trading, autoStart's refresh returns first with the post-setup state
+  // and flips the panel to "trading" — then the OLDER read lands and overwrites
+  // it with the pre-setup snapshot, still marked "live", so a wallet that IS set
+  // up renders as not set up (and $0.00 as a real figure) until the next tick.
+  // Every run tags itself here and drops its result unless it is still newest.
+  // Bumped BEFORE the publicKey guard on purpose: a disconnect re-runs the poll
+  // effect, and that no-op call has to invalidate the previous wallet's in-flight
+  // read too, or it lands afterwards and rewrites read.owner.
+  const seq = useRef(0);
+
   const refresh = useCallback(async () => {
+    const my = ++seq.current;
     if (!publicKey) return;
     const who = publicKey.toBase58();
     try {
-      setState(await readSessionState(connection, publicKey, marketIndex));
+      const next = await readSessionState(connection, publicKey, marketIndex);
+      if (my !== seq.current) return;
+      setState(next);
       setRead({ owner: who, status: "live" });
     } catch (err) {
       // A throw here is the chain being unreachable, NOT an empty wallet — the
@@ -448,12 +466,15 @@ export function useSession(marketIndex: number = 0) {
       // Deliberately NOT setError: this polls every 5s, so it would need a
       // clear-on-success, and that would wipe an autoStart or withdraw error
       // off the panel within one tick of the user causing it.
+      slog("refresh", `read failed, keeping last known state: ${humanizeError(err)}`, err);
+      // Same supersede rule as the success path: a superseded failure must not
+      // downgrade a newer read's "live" to "stale", nor claim read.owner.
+      if (my !== seq.current) return;
       setRead((r) =>
         r.owner === who && (r.status === "live" || r.status === "stale")
           ? { owner: who, status: "stale" }
           : { owner: who, status: "unavailable" }
       );
-      slog("refresh", `read failed, keeping last known state: ${humanizeError(err)}`, err);
     }
   }, [connection, publicKey, marketIndex]);
 

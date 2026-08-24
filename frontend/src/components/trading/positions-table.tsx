@@ -78,11 +78,20 @@ export function PositionsTable({}: PositionsTableProps) {
   // uPnL is priced off the reference too - S13-02 names it as one of the
   // figures derived from the frozen mark. Passing `markPrice` here would leave
   // the Mark column honest while the PnL beside it stayed wrong.
-  const { positions, error: positionsError, refresh } = usePositions(referenceAtoms);
-  const { position: erPosition, error: erError } = useErPosition(
-    publicKey ?? null,
-    referenceAtoms
-  );
+  const {
+    positions,
+    error: positionsError,
+    loading: positionsLoading,
+    refresh,
+  } = usePositions(referenceAtoms);
+  const {
+    position: erPosition,
+    error: erError,
+    loading: erLoading,
+  } = useErPosition(publicKey ?? null, referenceAtoms);
+  // "not read yet" is neither "flat" nor "failed". Both halves have to have
+  // answered before an empty table may be called empty.
+  const positionsUnknown = positionsLoading || erLoading;
   // HEALTH-1 (funding half). Position.collateral is only debited when something
   // REALIZES the accrual - settle_trades.rs:355-384 on the next fill, or
   // claim_funding - so between those the chain carries a funding debt against
@@ -143,6 +152,10 @@ export function PositionsTable({}: PositionsTableProps) {
     setFlattening(true);
     setFlattenErr(null);
     setFlattenNote(null);
+    // Declared OUTSIDE the try because the catch reads it. Hints explain a
+    // revert that may never happen, so they belong with the error, not on
+    // screen ahead of it.
+    const hints: string[] = [];
     try {
       // Opposite side: if currently LONG, sell (ASK); if SHORT, buy (BID).
       const closeSideVal = erPosition.isLong ? 1 : 0;
@@ -187,7 +200,24 @@ export function PositionsTable({}: PositionsTableProps) {
       const limitUsd = Number(priceVal) / PRICE_SCALE;
       const wantSol = Number(sizeVal) / 1e9;
 
-      // --- Three pre-flight refusals, in the order the program hits them. ---
+      // --- Pre-flight checks, in the order the program hits them. ---
+      //
+      // Only ONE of them refuses to send (the empty-book check), because only
+      // it is certain: an IOC that crosses nothing CONFIRMS, so there is no
+      // revert for the user to read and no way to tell it apart from "not
+      // updated yet". The other two describe conditions the PROGRAM decides,
+      // and this client cannot reproduce its decision from here - so they warn
+      // and send. A recoverable revert with a decoded message (humanizeError
+      // handles every program error) beats a refusal on the exit path with no
+      // override, which is the rule stated at the top of this file.
+      // TWO buckets, because they have different lifetimes. `notes` describes
+      // what this order WILL do and stays true after it lands (the partial-fill
+      // warning). `hints` explains a revert that may not happen, so it is
+      // false the moment the close succeeds - it is attached to the error in
+      // the catch instead of standing on screen. They used to share one state,
+      // which left "this may bounce" sitting under a position that had just
+      // closed cleanly.
+      const notes: string[] = [];
       //
       // FLAT-1/ORD-8. `reduceOnly` below does NOT skip the margin gate. The byte
       // is parsed and thrown away (place_order.rs:36-47, :90): it used to skip
@@ -208,35 +238,54 @@ export function PositionsTable({}: PositionsTableProps) {
       // divisors as compute_notional/compute_initial_margin (fixed_point.rs:53,
       // :65), so this matches the chain's gate exactly.
       //
-      // Gated on sessionStatus === "live": when the credit read failed we hold
-      // the last known-good (or a placeholder) `available`, and refusing an exit
-      // on a number we do not trust is the worse failure. The chain still gates.
+      // A WARNING, not a refusal, and gated on sessionStatus === "live" on top
+      // of that. `useSession` is a plain per-instance hook with its own 5s
+      // poller - it is mounted four times on this page and only the instance
+      // that ran an action refreshes eagerly - so this copy of `available` can
+      // be up to 5s behind the chain even when the read succeeded. Refusing on
+      // it told a user who had just cancelled an order (releasing committed
+      // margin) or just funded credit that they had "$0.00" of credit they
+      // demonstrably held, with nothing to click. The chain gates this for
+      // real; all this text has to do is explain the revert in advance,
+      // because InsufficientCredit's own message ("reduce the size") is
+      // actively wrong advice for someone trying to exit.
       const needAtoms = (sizeVal * priceVal) / 1_000_000_000n / BigInt(MAX_LEVERAGE);
       if (sessionStatus === "live" && session.available < needAtoms) {
-        setFlattenErr(
-          `Closing on the rollup re-posts margin - it needs $${(Number(needAtoms) / PRICE_SCALE).toFixed(2)} of free credit and you have $${(Number(session.available) / PRICE_SCALE).toFixed(2)}. ` +
-            `Add credit in the Session panel, or wait for this fill to settle and use Close on the settled row - that path posts no new margin.`
+        hints.push(
+          `Closing on the rollup re-posts margin - it needs $${(Number(needAtoms) / PRICE_SCALE).toFixed(2)} of free credit and your last read showed $${(Number(session.available) / PRICE_SCALE).toFixed(2)}, so this may bounce. ` +
+            `If it does: add credit in the Session panel, or wait for this fill to settle and use Close on the settled row - that path posts no new margin.`
         );
-        setFlattening(false);
-        return;
       }
 
       // Only a "live" or "empty" ladder is a CURRENT answer about the book;
       // "loading"/"stale"/"unavailable" mean absent or frozen, and neither of
-      // the two book-derived refusals below may fire on those - refusing an exit
-      // on a book we cannot currently see is worse than letting the program
-      // decide. Both are fail-open by construction.
+      // the two book-derived checks below may fire on those - refusing an exit
+      // (or crying wolf about one) on a book we cannot currently see is worse
+      // than letting the program decide. Both are fail-open by construction.
       const bookKnown = book.status === "live" || book.status === "empty";
 
-      // FLAT-3. place_order.rs:431 rejects the WHOLE order with SelfTrade the
-      // instant the matcher reaches a maker slot the taker owns. Closing a long
-      // sends an ASK that walks the bids, so the user's own resting BID at or
-      // above this limit stops the close dead - a routine state after a partial
-      // limit fill, and it is sitting in the Open Orders panel above with
-      // nothing connecting it to the failure. humanizeError's "That order would
-      // have traded against your own resting order." is accurate and gives no
-      // instruction. We do NOT prepend a cancel_order: killing a user's maker
-      // order on a "Close" click is a money decision they did not make.
+      // FLAT-3. place_order.rs:431 rejects the WHOLE order with SelfTrade if
+      // the matcher REACHES a maker slot the taker owns. Closing a long sends
+      // an ASK that walks the bids, so the user's own resting BID inside this
+      // limit can stop the close dead - a routine state after a partial limit
+      // fill, sitting in the Open Orders panel above with nothing connecting it
+      // to the failure. humanizeError's "That order would have traded against
+      // your own resting order." is accurate and gives no instruction. We do
+      // NOT prepend a cancel_order: killing a user's maker order on a "Close"
+      // click is a money decision they did not make.
+      //
+      // WARN AND SEND - it may not fire at all. match_order (place_order.rs:
+      // 376-431) tests the owner of the HEAD SLOT OF THE CURRENT BEST LEVEL
+      // inside `while remaining > 0`, and only descends to a worse level once
+      // the better ones are drained; the loop exits the moment `remaining`
+      // hits 0. So a 1 SOL close that fills entirely against other makers at a
+      // better price never touches the user's own order at a worse one and
+      // never trips the check. And because `limitUsd` sits a full 5% off the
+      // reference, essentially any resting order of theirs matched this test -
+      // which bricked "Close" outright for anyone who is also a maker. A
+      // cumulative-depth reachability check would be closer, but the book can
+      // move between the check and execution, so it could never be a guarantee
+      // either: not a thing to block an exit on.
       const blocking = bookKnown
         ? openOrders.find(
             (o) =>
@@ -245,11 +294,9 @@ export function PositionsTable({}: PositionsTableProps) {
           )
         : undefined;
       if (blocking) {
-        setFlattenErr(
-          `Cancel your resting ${blocking.isLong ? "bid" : "ask"} at $${blocking.price.toFixed(2)} in Open Orders first - this close crosses it, and the program rejects the whole order as a self-trade rather than filling around it.`
+        hints.push(
+          `You have a resting ${blocking.isLong ? "bid" : "ask"} at $${blocking.price.toFixed(2)} inside this close's price range. If the close reaches it, the program rejects the whole order as a self-trade rather than filling around it - cancel that order in Open Orders and retry.`
         );
-        setFlattening(false);
-        return;
       }
 
       // ORD-5/FLAT-2. An IOC that crosses nothing CONFIRMS. The transaction
@@ -278,10 +325,11 @@ export function PositionsTable({}: PositionsTableProps) {
       // instead of letting the row quietly settle at a smaller size two seconds
       // later with no explanation.
       if (bookKnown && crossable < wantSol) {
-        setFlattenNote(
+        notes.push(
           `Only ${crossable.toFixed(3)} SOL of the book is within 5% of $${reference.toFixed(2)}, so this closes part of your ${wantSol.toFixed(3)} SOL and leaves the rest open.`
         );
       }
+      if (notes.length > 0) setFlattenNote(notes.join(" "));
 
       const ix = createPlaceOrderInstruction(
         publicKey,
@@ -325,8 +373,11 @@ export function PositionsTable({}: PositionsTableProps) {
       refresh();
       refreshTriggers();
     } catch (err) {
-      setFlattenErr(humanizeError(err));
-      setFlattenNote(null);
+      // The pre-flight hints are attached HERE rather than left standing on
+      // screen: they describe a revert that may never happen, so they stop
+      // being true the moment the close lands. When the revert IS one of them,
+      // this is the only text saying what to do about it.
+      setFlattenErr([humanizeError(err), ...hints].join(" "));
       console.error("flatten failed:", err);
     } finally {
       setFlattening(false);
@@ -504,11 +555,14 @@ export function PositionsTable({}: PositionsTableProps) {
           Positions
         </span>
         <span className="text-[11px] text-[var(--t-text-3)] tnum">
-          {/* "0 open" is a claim about the chain. When either read threw and we
-              have nothing cached we do not know the count, so say so with a
-              dash rather than asserting flat. The ER read counts too: it is the
-              half that would be carrying an unsettled, fully-levered fill. */}
-          {(positionsError || erError) && positions.length === 0 && !erPosition
+          {/* "0 open" is a claim about the chain. When either read threw, or
+              simply has not come back yet, we do not know the count, so say so
+              with a dash rather than asserting flat. The ER read counts too: it
+              is the half that would be carrying an unsettled, fully-levered
+              fill. */}
+          {(positionsError || erError || positionsUnknown) &&
+          positions.length === 0 &&
+          !erPosition
             ? "—"
             : `${positions.length + (erPosition ? 1 : 0)} open`}
         </span>
@@ -521,12 +575,17 @@ export function PositionsTable({}: PositionsTableProps) {
                 devnet rate-limit was told they were flat while a leveraged
                 position was live and moving. `erError` is the same claim about
                 the pending half - with the book or the settlement cursor
-                unreadable, "no pending position" is a guess, not an answer. */}
+                unreadable, "no pending position" is a guess, not an answer.
+                A read still IN FLIGHT is the third state: on every page load
+                and every drawer re-expand this branch used to announce "No
+                open positions" for the length of the round trip. */}
             {!publicKey
               ? "Sign in to see your positions"
-              : positionsError || erError
-                ? "Can't reach Solana — positions unknown, retrying"
-                : "No open positions"}
+              : positionsUnknown
+                ? "Checking your positions…"
+                : positionsError || erError
+                  ? "Can't reach Solana — positions unknown, retrying"
+                  : "No open positions"}
           </div>
         ) : (
           <table className="w-full border-collapse">
@@ -832,9 +891,11 @@ export function PositionsTable({}: PositionsTableProps) {
             This block deliberately lives OUTSIDE the table/empty-state ternary
             so it renders in both branches; the expander's own gate is left
             alone because widening it drags in the `positions[0].isLong` read.
-            Suppressed while `positionsError` is set: "no position open" is a
-            claim about the chain, and a read that threw is not that answer. */}
-        {positions.length === 0 && !positionsError && (triggers.stopLoss || triggers.takeProfit) && (
+            Suppressed while `positionsError` is set, and while either read is
+            still in flight: "no position open" is a claim about the chain, and
+            neither a read that threw nor one that has not answered is that
+            answer. */}
+        {positions.length === 0 && !positionsError && !positionsUnknown && (triggers.stopLoss || triggers.takeProfit) && (
           <div className="pt-2 flex flex-wrap items-center gap-2 text-[11px] text-[var(--t-warn)]">
             <span>
               {erPosition
@@ -873,7 +934,13 @@ export function PositionsTable({}: PositionsTableProps) {
         {flattenErr && (
           <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{flattenErr}</div>
         )}
-        {flattenNote && !flattenErr && (
+        {/* Shown ALONGSIDE an error, not instead of it: the two pre-flights
+            that used to refuse now warn and send, so when the revert is one of
+            them this line is the only text saying what to do - the decoded
+            InsufficientCredit ("reduce the size") is wrong advice on an exit.
+            handleFlatten clears both at the top of every attempt, so a note is
+            never left over from a previous one. */}
+        {flattenNote && (
           <div className="pt-2 text-[11px] text-[var(--t-warn)] break-all">{flattenNote}</div>
         )}
         {closeErr && (
@@ -976,7 +1043,15 @@ function liqAndHealth(
   const derivedMargin = notional / MAX_LEVERAGE;
   const maintMargin = derivedMargin / 2;
   if (maintMargin <= 0) return { liq: null, health: null };
-  const margin = collateral > 0 ? Math.min(collateral, derivedMargin) : derivedMargin;
+  // No `collateral > 0 ?` guard in front of this. Zero is a DECODED value, not
+  // a missing one: claim_funding.rs:90-97 and settle_trades.rs:370-376 both
+  // saturating_sub a funding shortfall out of Position.collateral, flooring it
+  // at 0 while size stays open. Treating that 0 as "no figure" and falling back
+  // to the derived margin prints health 2.00 in green on a position the keeper
+  // computes at 0 (compute_health_factor returns 0 for net_margin <= 0) and
+  // liquidates on its next pass - the exact failure the block above describes,
+  // one dollar short of the worst state.
+  const margin = Math.min(collateral, derivedMargin);
 
   const uPnl = (isLong ? mark - entry : entry - mark) * sizeSol;
   // Positive = the position PAYS, so it comes OFF the numerator. Signed

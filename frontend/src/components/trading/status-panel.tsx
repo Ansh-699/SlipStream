@@ -52,7 +52,7 @@ export function StatusPanel() {
   const { market, status: marketStatus } = useMarket(0);
   const { nextFillSequence, status: bookStatus } = useOrderBook(0);
   const { live, connected } = useLivePrice();
-  const { mark, divergence, divergenceStale, stampStale, ageMins } = useMarkPrice(0);
+  const { spot, mark, divergence, divergenceStale, stampStale, ageMins } = useMarkPrice(0);
   const [api, setApi] = useState<ApiStatus | null>(null);
   // "no payload yet" and "the probe itself failed" are different facts, and a
   // single `api === null` rendered them identically: a permanently 500ing
@@ -177,13 +177,28 @@ export function StatusPanel() {
       <div className="p-3">
         <Row label="Solana RPC" level={baseLevel} detail={baseDetail} />
         <Row label="Ephemeral Rollup" level={erLevel} detail={erDetail} />
-        {/* `live` is null whenever the socket is down — useLivePrice gates it in
-            its own getSnapshot — so a connected socket that has not delivered a
-            frame yet is its own state, not "disconnected" under a green dot. */}
+        {/* The price shown here is `spot` from useMarkPrice, not the raw `live`.
+            useLivePrice gates only on `connected`, and its own docstring names
+            what that misses: a socket that stays OPEN and stops delivering keeps
+            `connected` true and keeps serving its last frame. The age gate
+            (MAX_SPOT_AGE_SECS) lives in useMarkPrice — which this component
+            already mounts on the line above — so reading `spot` here is what
+            stops this row printing a green "$97.55" while "Mark freshness" two
+            rows down, fed by the same hook, says "no oracle to compare".
+            `live` still distinguishes the two warn cases: a socket that has
+            delivered nothing yet is not the same fact as one that stalled. */}
         <Row
           label="Oracle stream"
-          level={connected ? (live ? "ok" : "warn") : "down"}
-          detail={live ? `$${live.price.toFixed(2)}` : connected ? "waiting for data" : "disconnected"}
+          level={connected ? (spot !== null ? "ok" : "warn") : "down"}
+          detail={
+            spot !== null
+              ? `$${spot.toFixed(2)}`
+              : !connected
+                ? "disconnected"
+                : live
+                  ? "stream stalled"
+                  : "waiting for data"
+          }
         />
         <Row label="Mark freshness" level={markLevel} detail={markDetail} />
         <Row label="Keepers" level={keeperLevel} detail={keeperDetail} />

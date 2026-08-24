@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLivePrice } from "@/hooks/use-live-price";
+import { useMarkPrice } from "@/hooks/use-mark-price";
 import { usePythCandles, RESOLUTIONS, type Resolution, type Candle } from "@/hooks/use-pyth-candles";
 
 type ChartType = "candles" | "line" | "area";
@@ -14,6 +15,15 @@ export function PriceChart() {
   const resolution = RESOLUTIONS[resIdx];
   const { candles: history, loading, error } = usePythCandles(resolution);
   const { live } = useLivePrice();
+  // The header price comes from useMarkPrice, not from `live`. useLivePrice
+  // gates only on `connected`, and a socket that stays OPEN and stops
+  // delivering keeps `connected` true while serving its last frame — so `live`
+  // alone printed a minutes-old reading as the current price, in plain
+  // --t-text, while market-bar 300px above rendered "—" for the same input.
+  // `reference` is the one gated answer (fresh oracle, else a mark the program
+  // itself would still accept, else null), and it is exactly what market-bar
+  // headlines, so the two prices on this screen cannot disagree.
+  const { reference } = useMarkPrice(0);
   const [chartType, setChartType] = useState<ChartType>("candles");
 
   // Merge the live streamed price into a "forming" candle for the current bucket,
@@ -37,14 +47,22 @@ export function PriceChart() {
     return out;
   }, [history, live, resolution.seconds]);
 
-  const lastPrice = live?.price ?? (candles.length ? candles[candles.length - 1].c : null);
+  // No candle fallback: `candles` has `live` merged into its right edge, so
+  // falling back to the last close would hand back the very frozen frame this
+  // is gating out.
+  const lastPrice = reference;
   const change = useMemo(() => {
     if (candles.length < 2) return null;
     const first = candles[0].o;
     const last = candles[candles.length - 1].c;
     return first > 0 ? ((last - first) / first) * 100 : 0;
   }, [candles]);
-  const up = (change ?? 0) >= 0;
+  // null, not a boolean: `(change ?? 0) >= 0` reads an ABSENT change as "up",
+  // which paints a green +0.00% next to a price that has not arrived. The
+  // header price is now gated on useMarkPrice (it used to fall back to the
+  // right-edge candle, which is almost never null), so "no price yet" is a
+  // routine render here rather than a rarity — same defect market-bar had.
+  const up = change != null ? change >= 0 : null;
 
   // Legend OHLC comes from the latest merged candle — no extra fetching.
   const latest = candles.length ? candles[candles.length - 1] : null;
@@ -79,7 +97,7 @@ export function PriceChart() {
           <span className="text-[13px] font-medium tnum text-[var(--t-text)]">
             {lastPrice != null ? `$${lastPrice.toFixed(3)}` : "—"}
           </span>
-          {change != null && (
+          {change != null && lastPrice != null && (
             <span className={`text-[11px] font-semibold tnum ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
               {up ? "+" : "−"}
               {Math.abs(change).toFixed(2)}%

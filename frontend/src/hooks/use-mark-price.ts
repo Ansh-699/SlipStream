@@ -42,6 +42,13 @@ export const MARK_DIVERGENCE_WARN = 0.01;
 const MAX_SPOT_AGE_SECS = 10;
 
 export interface MarkPriceInfo {
+  /**
+   * Wall clock in seconds, re-read every 5s. Exported so a consumer aging
+   * something out recomputes on the same tick that re-renders it, instead of
+   * calling Date.now() during render — impure, flagged by react-hooks/purity,
+   * and it lets two rows on one page disagree about what time it is.
+   */
+  nowSec: number;
   /** On-chain mark, in dollars. Null when unset or unavailable. */
   mark: number | null;
   /** Live oracle price, in dollars. Null when the stream is down. */
@@ -150,6 +157,15 @@ export function useMarkPrice(marketIndex: number = 0): MarkPriceInfo {
   const reference = spot ?? (stampStale ? null : mark);
 
   return {
+    /**
+     * The 5s-ticking wall clock this hook already keeps for its own staleness
+     * gates. Exported so a consumer that needs to age something out (the 24h
+     * bar, say) recomputes on the same tick that re-renders it, instead of
+     * calling Date.now() during render — which is impure, is what
+     * react-hooks/purity flags, and lets two rows on the same page disagree
+     * about what time it is.
+     */
+    nowSec,
     mark,
     spot,
     reference,

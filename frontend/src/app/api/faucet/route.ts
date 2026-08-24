@@ -105,6 +105,30 @@ function clientIp(req: NextRequest): string {
   return hops[hops.length - 1] || "unknown";
 }
 
+/**
+ * True when the error only says the transaction could not be CONFIRMED in time
+ * — it does NOT say the transaction failed.
+ *
+ * `mintTo` sends through web3.js `sendAndConfirmTransaction`, which throws
+ * TransactionExpiredBlockheightExceededError / TransactionExpiredTimeoutError
+ * when the blockhash expires (or the poll deadline passes) before a confirmation
+ * is observed. On a loaded devnet those transactions routinely land anyway. A
+ * send-side failure — build, sign, simulate, or the RPC refusing the submission
+ * — throws something else, and only that proves nothing was minted.
+ *
+ * Same principle as lib/confirm.ts and the delegate path in use-session.ts: a
+ * confirm timeout is UNKNOWN, not failed.
+ */
+function isConfirmUnknown(e: unknown): boolean {
+  const err = e instanceof Error ? e : null;
+  return (
+    /TransactionExpired/.test(err?.name ?? "") ||
+    /block height exceeded|blockhash.*expired|expired.*blockhash|not confirmed|unknown if it succeeded|timed out|timeout/i.test(
+      err?.message ?? String(e)
+    )
+  );
+}
+
 /** Drop timestamps older than an hour, then report whether we are at the cap. */
 function globalCapReached(now: number): boolean {
   const cutoff = now - 3_600_000;
@@ -258,6 +282,10 @@ export async function POST(req: NextRequest): Promise<Response> {
   lastDripByIp.set(ip, now);
   dripTimes.push(now);
 
+  // Whether the mint was actually submitted. Everything before it (ATA lookup /
+  // creation) provably mints nothing, so a failure there is always safe to hand
+  // the reservation back for; after it, a confirm timeout is not.
+  let minting = false;
   try {
     const conn = new Connection(BASE_RPC, "confirmed");
     // Create the requester's ATA if missing (operator pays), then mint to it.
@@ -268,6 +296,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       wallet
     );
     const atoms = BigInt(Math.round(FAUCET_USDC * 1_000_000));
+    minting = true;
     const sig = await mintTo(conn, operator, mint, ata.address, operator.publicKey, atoms);
 
     // Give the wallet enough SOL to actually use the USDC it just received.
@@ -313,16 +342,25 @@ export async function POST(req: NextRequest): Promise<Response> {
       solError,
     });
   } catch (e) {
-    // Nothing was minted on any branch that reaches here, so the reservation
-    // above bought nothing and must be handed back. Without this the route told
-    // the user "Wait a few seconds and try again" and then refused the retry it
-    // had just asked for with "Please wait 55s" — on a wallet that received
-    // nothing, at the one step (`Get test USDC`) that gates all of onboarding.
-    // `lastIndexOf`, not `pop()`: a concurrent request may have pushed after us.
-    lastDrip.delete(key);
-    lastDripByIp.delete(ip);
-    const slot = dripTimes.lastIndexOf(now);
-    if (slot >= 0) dripTimes.splice(slot, 1);
+    // A drip that PROVABLY minted nothing must hand the reservation back: without
+    // that the route told the user "Wait a few seconds and try again" and then
+    // refused the retry it had just asked for with "Please wait 55s" — on a wallet
+    // that received nothing, at the one step (`Get test USDC`) that gates all of
+    // onboarding.
+    //
+    // But a mint that could not be CONFIRMED in time is not that case: it may well
+    // have landed, and handing the cooldown back there drops the only thing
+    // stopping a second 10k USDC drip (plus the per-IP and global-hourly bounds)
+    // for a wallet that already has the first. Unknown is not failed — keep the
+    // reservation and say so.
+    const unconfirmed = minting && isConfirmUnknown(e);
+    if (!unconfirmed) {
+      // `lastIndexOf`, not `pop()`: a concurrent request may have pushed after us.
+      lastDrip.delete(key);
+      lastDripByIp.delete(ip);
+      const slot = dripTimes.lastIndexOf(now);
+      if (slot >= 0) dripTimes.splice(slot, 1);
+    }
 
     const msg = e instanceof Error ? e.message : String(e);
     // Log the detail server-side only: RPC errors can embed the upstream URL, and
@@ -330,7 +368,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     // the same reason). Classify into safe categories instead of echoing it --
     // "Faucet mint failed" alone sends people hunting for a bug in the faucet
     // when the actual cause is usually the public devnet RPC throttling us.
-    console.error("[faucet] mint failed:", msg);
+    console.error(unconfirmed ? "[faucet] mint not confirmed:" : "[faucet] mint failed:", msg);
+    if (unconfirmed) {
+      return json(
+        {
+          ok: false,
+          error:
+            "The mint was sent but we could not confirm it in time. It may still land — check your USDC balance in a few seconds before requesting again.",
+        },
+        504
+      );
+    }
     if (/\b429\b|too many requests|rate limit/i.test(msg)) {
       return json(
         {

@@ -504,7 +504,7 @@ export function OrderForm() {
                 key={m}
                 type="button"
                 onClick={() => setMargin(String(m))}
-                className="h-[26px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] tnum hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
+                className="h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] tnum hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
               >
                 ${m}
               </button>
@@ -512,7 +512,7 @@ export function OrderForm() {
             <button
               type="button"
               onClick={() => setMargin(availUsd > 0 ? String(Math.floor(availUsd)) : "")}
-              className="h-[26px] rounded-[4px] border border-[var(--t-border)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
+              className="h-[26px] rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] text-[11.5px] text-[var(--t-text-2)] hover:text-[var(--t-text)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]"
             >
               Max
             </button>

@@ -31,7 +31,7 @@ export function MarketBar() {
   const { market, status } = useMarket(0);
   // useMarkPrice mounts useMarket(0) itself; both go through useSharedSource on
   // the same `market:0` key, so this is the same poller, not a second one.
-  const { mark, reference, stale, reason } = useMarkPrice(0);
+  const { nowSec, mark, reference, stale, reason } = useMarkPrice(0);
   const { candles } = usePythCandles(DAY_RESOLUTION);
 
   const day = useMemo(() => {
@@ -40,9 +40,28 @@ export function MarketBar() {
     const high = Math.max(...window.map((c) => c.h));
     const low = Math.min(...window.map((c) => c.l));
     const open = window[0].o;
-    const last = window[window.length - 1].c;
-    return { high, low, change: last - open, changePct: open > 0 ? ((last - open) / open) * 100 : 0 };
+    const newest = window[window.length - 1];
+    const last = newest.c;
+    return {
+      high,
+      low,
+      t: newest.t,
+      change: last - open,
+      changePct: open > 0 ? ((last - open) / open) * 100 : 0,
+    };
   }, [candles]);
+
+  // usePythCandles deliberately KEEPS the last good series when a refresh fails
+  // (a 15s Benchmarks blip must not blank the bar), so nothing in `candles`
+  // announces an outage — during a multi-hour one this bar would keep printing
+  // 6-hour-old buckets as "24h High / Low / +2.42%". Age of the newest bucket,
+  // not the hook's `error`, is the right test: `error` is cleared at the start
+  // of every retry, so it flickers null once a minute throughout an outage,
+  // and it also fires for blips that cost nothing. Two full buckets missed
+  // means the poll has been failing for over an hour.
+  // CEILING: at 1H buckets that is a ~2h detection lag; the recompute rides the
+  // 5s tick useMarkPrice already re-renders this component with.
+  const dayStale = day !== null && nowSec - day.t > 2 * DAY_RESOLUTION.seconds;
 
   // The headline is `reference`: the oracle while its stream is actually
   // delivering, else a mark the program itself would still accept, else
@@ -62,7 +81,11 @@ export function MarketBar() {
   // Both gates (socket up, reading recent, stamp fresh) now live in
   // useMarkPrice, which is the one place that owns them.
   const headline = reference;
-  const up = (day?.change ?? 0) >= 0;
+  // Null means "the direction is unknown", and it has to stay null rather than
+  // collapse to a boolean: `(day?.change ?? 0) >= 0` read an absent 24h change
+  // as "up", which painted the 22px em dash --t-up green on every cold load and
+  // kept tinting the headline from a stale delta during a history outage.
+  const up = day && !dayStale ? day.change >= 0 : null;
 
   return (
     <div className="flex h-[56px] shrink-0 items-center gap-5 overflow-x-auto border-b border-[var(--t-border)] px-4">
@@ -80,14 +103,24 @@ export function MarketBar() {
       </div>
 
       <div className="flex shrink-0 items-baseline gap-2.5">
+        {/* Colour is a directional claim, so it branches on the value being
+            known before it branches on the sign — the shape positions-table
+            uses for uPnL. A green em dash asserts a rise on the one element
+            that is admitting it has no price. */}
         <span
           className={`tnum text-[22px] font-semibold leading-none tracking-tight ${
-            up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"
+            headline === null
+              ? "text-[var(--t-text-3)]"
+              : up === null
+                ? "text-[var(--t-text)]"
+                : up
+                  ? "text-[var(--t-up)]"
+                  : "text-[var(--t-down)]"
           }`}
         >
           {headline !== null ? headline.toFixed(2) : "—"}
         </span>
-        {day && (
+        {day && up !== null && (
           <span className={`tnum text-[12px] font-medium ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
             {up ? "+" : ""}
             {day.change.toFixed(2)} {up ? "+" : ""}
@@ -104,8 +137,10 @@ export function MarketBar() {
           value={mark !== null ? mark.toFixed(3) : "—"}
           tone={stale ? "down" : undefined}
         />
-        <Stat label="24h High" value={day ? day.high.toFixed(2) : "—"} />
-        <Stat label="24h Low" value={day ? day.low.toFixed(2) : "—"} />
+        {/* Kept and labelled rather than blanked, exactly as the Mark stat
+            beside them: these are real measured buckets, just old ones. */}
+        <Stat label={dayStale ? "24h High (stale)" : "24h High"} value={day ? day.high.toFixed(2) : "—"} />
+        <Stat label={dayStale ? "24h Low (stale)" : "24h Low"} value={day ? day.low.toFixed(2) : "—"} />
         <Stat
           label="OI Long"
           value={market ? (Number(market.openInterestLong) / 1e9).toFixed(2) : "—"}

@@ -113,6 +113,14 @@ export function usePositions(markPrice: bigint | null) {
   // swallows the throw (cadence is startPoll's job); it just stops pretending
   // the failure was an answer.
   const [err, setErr] = useState(false);
+  // ...and a read that has NOT HAPPENED YET is a third answer again. Without
+  // it `raw = []` on mount is indistinguishable from "flat", so the panel
+  // asserts "0 open" / "No open positions" for the whole first round trip —
+  // the same lie as above, just earlier. True only until the first resolve or
+  // throw for the current wallet. Starts TRUE: the effect below only runs
+  // after the first commit, so initialising it to false would paint one frame
+  // of "No open positions" before "checking" - the same claim, briefly.
+  const [loading, setLoading] = useState(true);
 
   // Base58 of the wallet `raw` describes. A fetch is a network round trip: the
   // one launched for wallet A can resolve AFTER the user switched to B or
@@ -120,8 +128,16 @@ export function usePositions(markPrice: bigint | null) {
   // Compared after the await instead of trusting that the closure is current.
   const owner = publicKey ? publicKey.toBase58() : null;
   const ownerRef = useRef<string | null>(null);
+  // The SAME wallet has the same race: `refresh` is called after a flatten and
+  // after a close, concurrently with the 5s poll, and the owner check cannot
+  // separate two reads of one wallet. Results were applied in completion
+  // order, so a poll issued before a close resolved after it and put the
+  // closed row back — with live Close / ½ / SL-TP buttons on a zero position.
+  // Only the newest read may write.
+  const seqRef = useRef(0);
 
   const fetch = useCallback(async () => {
+    const seq = ++seqRef.current;
     if (!owner) {
       // Disconnected is neither "no positions" nor "the read failed" — it is
       // "this row belongs to a wallet we are no longer connected to". Leaving
@@ -131,6 +147,7 @@ export function usePositions(markPrice: bigint | null) {
       // message. Clearing the rows is what makes those buttons unreachable.
       setRaw([]);
       setErr(false);
+      setLoading(false);
       return;
     }
     try {
@@ -166,16 +183,18 @@ export function usePositions(markPrice: bigint | null) {
           isLong: pos.size > 0n,
         });
       }
-      if (ownerRef.current !== owner) return; // wallet changed mid-flight
+      if (ownerRef.current !== owner || seq !== seqRef.current) return; // superseded
       setRaw(result);
       setErr(false);
+      setLoading(false);
     } catch {
       // Keep the last good rows — a blip should not blank a live position —
       // but say so, so the panel can render "can't reach Solana" instead of
       // "no open positions". Not rethrown: startPoll's backoff is driven by
       // its own catch and this hook has always swallowed here.
-      if (ownerRef.current !== owner) return;
+      if (ownerRef.current !== owner || seq !== seqRef.current) return;
       setErr(true);
+      setLoading(false);
     }
   }, [connection, owner]);
 
@@ -206,9 +225,12 @@ export function usePositions(markPrice: bigint | null) {
     ownerRef.current = owner;
     setRaw([]);
     setErr(false);
+    // Back to "unknown" for the new wallet — clearing the rows without this
+    // renders the cleared table as a confident "No open positions".
+    setLoading(owner !== null);
     fetch();
     return startPoll(fetch, 5_000);
   }, [fetch, owner]);
 
-  return { positions, error: err, refresh: fetch };
+  return { positions, error: err, loading, refresh: fetch };
 }
