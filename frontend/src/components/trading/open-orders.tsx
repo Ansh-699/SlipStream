@@ -20,7 +20,7 @@ import { confirmSignature } from "@/lib/confirm";
 export function OpenOrders() {
   const { publicKey, sendTransaction } = useWallet();
   const { state: session, getSessionKeypair } = useSession(0);
-  const { orders, refresh } = useOpenOrders(publicKey ?? null, 0);
+  const { orders, error: ordersError } = useOpenOrders(publicKey ?? null, 0);
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [cancelErr, setCancelErr] = useState<string | null>(null);
 
@@ -57,7 +57,11 @@ export function OpenOrders() {
         sig = await sendTransaction(tx, erConn, { skipPreflight: false });
       }
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
-      refresh();
+      // Nothing to refresh here: the book is the ONE shared 2s poller's and a
+      // single subscriber cannot make it tick early, so the cancelled row
+      // clears on its next tick — within 2s of a confirmation that itself took
+      // seconds. The no-op `refresh()` that used to sit on this line, and the
+      // stub behind it in useOpenOrders, were deleted together.
     } catch (err) {
       setCancelErr(humanizeError(err));
       console.error("cancel failed:", err);
@@ -72,12 +76,24 @@ export function OpenOrders() {
         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--t-text-2)]">
           Open Orders
         </span>
-        <span className="text-[11px] text-[var(--t-text-3)] tnum">{orders.length} resting</span>
+        <span className="text-[11px] text-[var(--t-text-3)] tnum">
+          {/* "0 resting" is a claim about the book. With the book unreadable we
+              do not know the count, so say so with a dash rather than assert. */}
+          {ordersError && orders.length === 0 ? "—" : `${orders.length} resting`}
+        </span>
       </div>
       <div className="p-3">
         {orders.length === 0 ? (
           <div className="text-center text-xs text-[var(--t-text-2)] py-6">
-            {publicKey ? "No open orders" : "Sign in to see your open orders"}
+            {/* POS-1: a failed book read used to render as "No open orders" —
+                the same sentence as a genuinely empty book. A trader whose
+                limit order is resting (and fillable) was told they had none.
+                Same wording as market-bar's banner for the same condition. */}
+            {!publicKey
+              ? "Sign in to see your open orders"
+              : ordersError
+                ? "Can't reach Solana — retrying."
+                : "No open orders"}
           </div>
         ) : (
           <table className="w-full border-collapse">

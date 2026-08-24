@@ -30,8 +30,10 @@ export function DocsShell({
         <div className="max-w-[1100px] mx-auto px-4 h-14 flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
             <span className="relative h-7 w-7 rounded-lg overflow-hidden shadow-[0_0_18px_rgba(16,185,129,0.5)]">
+              {/* logo-32.png, not logo.png: the render box is 28px and the
+                  512px original is 160 KB for the same artwork. */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="Slipstream" className="h-full w-full object-cover" />
+              <img src="/logo-32.png" alt="Slipstream" className="h-full w-full object-cover" />
             </span>
             <span className="text-base font-bold tracking-tight">Slipstream</span>
             <span className="text-xs font-medium text-white/40 ml-1">docs</span>

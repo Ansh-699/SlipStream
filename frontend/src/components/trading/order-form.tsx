@@ -52,7 +52,12 @@ function requiredMarginAtoms(sizeAtoms: bigint, price6dp: bigint): bigint {
 
 export function OrderForm() {
   const { publicKey, sendTransaction } = useWallet();
-  const { state: session, getSessionKeypair } = useSession(0);
+  // `status`, not just `state`: an all-zero SessionState means "not read yet",
+  // "genuinely empty" or "the read failed", and this form used to render the
+  // third as the second — "$0.00 available", "no credit yet", "Start a trading
+  // session first" — to a trader whose credit was funded and delegated the
+  // whole time. See SessionStatus in use-session.ts.
+  const { state: session, status: sessionRead, getSessionKeypair } = useSession(0);
   // This used to read `market.lastMarkPrice` raw, which is the exact field
   // useMarkPrice exists to gate. With the crank stopped it sized and quoted
   // market orders off a frozen price (the documented 74.11-against-95.81 case)
@@ -137,8 +142,16 @@ export function OrderForm() {
     return { lots, sizeSol, notional: actualNotional, actualMargin };
   })();
 
-  const availUsd = session.initialized ? Number(session.available) / PRICE_SCALE : 0;
-  const insufficient = derived != null && derived.actualMargin > availUsd + 1e-6;
+  /** Whether `session` is this wallet's credit as the chain reported it.
+   *  "stale" counts — those numbers are real, just possibly a few seconds old.
+   *  "loading" and "unavailable" do not: every field is a placeholder zero or
+   *  the previously connected wallet's. */
+  const creditTrusted = sessionRead === "live" || sessionRead === "stale";
+  const availUsd = creditTrusted && session.initialized ? Number(session.available) / PRICE_SCALE : 0;
+  // Only claim the margin is too large when we know what the credit holds —
+  // otherwise `availUsd` is a placeholder 0 and EVERY order looks insufficient.
+  const insufficient =
+    creditTrusted && derived != null && derived.actualMargin > availUsd + 1e-6;
   const belowOneLot = derived != null && derived.lots === 0;
 
   // Would a MARKET order of this size actually fill? A market remainder is not
@@ -313,7 +326,11 @@ export function OrderForm() {
   const sellLabel = isMarket ? "Sell" : "Short";
   const buyHint = isMarket ? "takes the best ask now" : "profits if price rises";
   const sellHint = isMarket ? "hits the best bid now" : "profits if price falls";
-  const availLine = session.initialized ? `${availUsd.toFixed(2)} available` : "no credit yet";
+  const availLine = !creditTrusted
+    ? "credit unknown"
+    : session.initialized
+      ? `${availUsd.toFixed(2)} available`
+      : "no credit yet";
   const inputCls =
     "h-[34px] w-full rounded-[4px] border border-[var(--t-border-strong)] bg-[var(--t-surface)] px-[10px] pr-14 text-[13px] text-[var(--t-text)] tnum placeholder:text-[var(--t-text-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
   const suffixCls = "pointer-events-none absolute right-[10px] top-1/2 -translate-y-1/2 text-[11px] text-[var(--t-text-3)]";
@@ -325,31 +342,39 @@ export function OrderForm() {
   // user with USDC in their wallet and an un-funded credit was told to "lower
   // it or fund more credit" with no indication that funding happens in the
   // Session panel, or that wallet USDC is not collateral until it is moved in.
-  const noCreditAtAll = session.delegated && session.available === 0n;
+  const noCreditAtAll = creditTrusted && session.delegated && session.available === 0n;
 
   const blocker = !publicKey
     ? "Connect a wallet to trade"
-    : !session.delegated
-      ? "Start a trading session first"
-      : !isMarket && (!price || parseFloat(price) <= 0)
-        ? "Enter a limit price"
-        : // A limit order sizes off the price the user typed, so it keeps working
-          // with no usable mark. A market order cannot: the program prices it
-          // from mark_price_for_close and reverts with OracleStale when that is
-          // refused, so there is nothing honest to quote or size from.
-          marketPriceBlock !== null
-          ? marketPriceBlock
-          : !derived || derived.sizeSol <= 0
-            ? "Enter an amount"
-            : belowOneLot
-              ? "Below the 0.1 SOL minimum lot"
-              : noCreditAtAll
-                ? "Fund trading credit to trade"
-                : thinFillable !== null
-                  ? `Only ${thinFillable.toFixed(1)} SOL resting within slippage`
-                  : insufficient
-                    ? "Margin exceeds available credit"
-                    : null;
+    : // "You have no session" is a claim about the chain, and we have not read
+      // it. Both branches disable the button exactly as the old
+      // `!session.delegated` did on these states — they only stop asserting
+      // something false while doing it.
+      !creditTrusted
+      ? sessionRead === "loading"
+        ? "Checking your trading session…"
+        : "Can't reach Solana — trading session unknown"
+      : !session.delegated
+        ? "Start a trading session first"
+        : !isMarket && (!price || parseFloat(price) <= 0)
+            ? "Enter a limit price"
+            : // A limit order sizes off the price the user typed, so it keeps
+              // working with no usable mark. A market order cannot: the program
+              // prices it from mark_price_for_close and reverts with OracleStale
+              // when that is refused, so there is nothing honest to quote from.
+              marketPriceBlock !== null
+              ? marketPriceBlock
+              : !derived || derived.sizeSol <= 0
+                ? "Enter an amount"
+                : belowOneLot
+                  ? "Below the 0.1 SOL minimum lot"
+                  : noCreditAtAll
+                    ? "Fund trading credit to trade"
+                    : thinFillable !== null
+                      ? `Only ${thinFillable.toFixed(1)} SOL resting within slippage`
+                      : insufficient
+                        ? "Margin exceeds available credit"
+                        : null;
   const disabled = submitting || blocker !== null;
 
   return (
@@ -576,7 +601,12 @@ export function OrderForm() {
           </div>
           <div className={rowCls}>
             <span className={labelCls}>Available credit</span>
-            <span className="text-[12px] text-[var(--t-text)] tnum">${availUsd.toFixed(2)}</span>
+            {/* An em dash, not "$0.00", when no read of this wallet's credit
+                has landed — that zero is a placeholder, and the chain would
+                contradict it for any funded account. */}
+            <span className="text-[12px] text-[var(--t-text)] tnum">
+              {creditTrusted ? `$${availUsd.toFixed(2)}` : "—"}
+            </span>
           </div>
         </div>
 

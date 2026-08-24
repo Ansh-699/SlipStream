@@ -605,6 +605,29 @@ export function createAuthorizeSessionInstruction(
  * Accounts:
  *   [0] trading_credit (writable)
  *   [1] owner (signer, writable) — receives rent refund
+ *   [2] user_account (writable) — receives any stranded LEGACY balance in
+ *       `free_collateral`. See close_trading_credit.rs:46-49.
+ *
+ * Why [2] is passed UNCONDITIONALLY, even though the handler documents it as
+ * "required only when a legacy balance is being recovered":
+ *
+ * This builder omitted it, which made the legacy-recovery branch — the branch
+ * the instruction exists for — unreachable from every caller of this canonical
+ * SDK. A 56-byte non-delegated credit holding a non-zero balance destructures
+ * an EMPTY `remaining` at close_trading_credit.rs:98 and returns
+ * NotEnoughAccountKeys, so the tx reverts, the balance stays stranded, and
+ * `initialize_trading_credit` still refuses the non-empty account. The handler
+ * calls itself "the only way the money comes back"; with [2] missing it was no
+ * way at all. keepers/src/verify-close.ts exercises this builder, so the
+ * close-verification harness was passing on the zero-balance path while never
+ * covering the recovery branch at all.
+ *
+ * Passing it always, rather than asking the caller to predict which layout the
+ * on-chain account has, is both smaller and safer: the handler never touches
+ * `remaining` when `credit == 0`, so an ordinary zero-balance close is
+ * unaffected, and the account need not even exist — a missing PDA arrives
+ * system-owned and the handler's `owner() != program_id` guard rejects it
+ * before any write. This cannot turn a working close into a failing one.
  */
 export function createCloseTradingCreditInstruction(
   owner: PublicKey,
@@ -612,6 +635,7 @@ export function createCloseTradingCreditInstruction(
   programId: PublicKey = PROGRAM_ID
 ): TransactionInstruction {
   const [tradingCredit] = findTradingCreditPda(owner, marketIndex, programId);
+  const [userAccount] = findUserAccountPda(owner, programId);
   const data = Buffer.alloc(1);
   data[0] = IX_CLOSE_TRADING_CREDIT;
 
@@ -619,6 +643,7 @@ export function createCloseTradingCreditInstruction(
     keys: [
       { pubkey: tradingCredit, isSigner: false, isWritable: true },
       { pubkey: owner, isSigner: true, isWritable: true },
+      { pubkey: userAccount, isSigner: false, isWritable: true },
     ],
     programId,
     data,
@@ -682,12 +707,60 @@ export function createRecordPendingFillInstruction(
 
 // ---- Settle Trades (keeper) ----
 
+/**
+ * The most remaining accounts a settlement instruction can carry and still fit
+ * a transaction.
+ *
+ * Solana caps a serialized transaction at 1232 bytes. Every DISTINCT account
+ * costs 32 bytes in the message key table plus 1 byte in each instruction index
+ * list that names it — 33 bytes apiece for the settlement window. For the
+ * keeper bundle (one signature, record_pending_fill + settle, an 8-fill window)
+ * the serialized size is `295 + 33 * R` for settle_trades and `301 + 33 * R`
+ * for settle_from_log (6 bytes more instruction data), where R is the number of
+ * remaining accounts. Measured, not estimated: at R = 28 the two bundles
+ * serialize to 1219 and 1225 bytes; at R = 30 (the 15 owners an 8-fill window
+ * can produce) they are 1285 and 1291, and web3.js throws at serialize() time.
+ *
+ * So 28 remaining accounts — 14 distinct owners, since settlement needs each
+ * owner's UserAccount AND Position.
+ *
+ * Why this is a hard error and not the caller's problem: the keepers size their
+ * window by FILL COUNT, but the cost is driven by DISTINCT COUNTERPARTIES. On a
+ * busy market a run of 8 fills can land between 15 different wallets. The throw
+ * happens locally, before the tx reaches an RPC, so nothing lands,
+ * `Market.last_settled_sequence` never advances, and the next tick rebuilds
+ * byte-for-byte the same oversized window from the same cursor. Settlement for
+ * that market stops PERMANENTLY: fills never become L1 Positions, "Pending"
+ * rows never resolve, free_collateral is never credited.
+ *
+ * A caller that can hit the cap must size its window against this constant —
+ * truncate the fill window (it stays a contiguous prefix from the cursor, so the
+ * remainder is simply picked up next tick) rather than let the serializer decide.
+ */
+export const MAX_SETTLE_REMAINING_ACCOUNTS = 28;
+
+/** Fail named, here, rather than 1232 bytes later inside a serializer that
+ *  cannot say which window to shrink. */
+function assertSettleWindowFits(count: number, ixName: string): void {
+  if (count > MAX_SETTLE_REMAINING_ACCOUNTS) {
+    throw new Error(
+      `${ixName} window too wide: ${count} remaining accounts exceeds the ` +
+        `${MAX_SETTLE_REMAINING_ACCOUNTS} that fit a 1232-byte transaction ` +
+        `(2 accounts per distinct counterparty, so at most ` +
+        `${MAX_SETTLE_REMAINING_ACCOUNTS / 2} owners). Truncate the fill window to ` +
+        `fewer distinct owners and settle the remainder on the next pass.`
+    );
+  }
+}
+
 export function createSettleTradesInstruction(
   marketIndex: number,
   numFills: number,
   remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[],
   programId: PublicKey = PROGRAM_ID
 ): TransactionInstruction {
+  assertSettleWindowFits(remainingAccounts.length, "settle_trades");
+
   const [market] = findMarketPda(marketIndex, programId);
   const [orderBook] = findOrderBookPda(marketIndex, programId);
   const [globalState] = findGlobalStatePda(programId);
@@ -710,13 +783,42 @@ export function createSettleTradesInstruction(
 
 // ---- Liquidate Position (dual-oracle + grace window) ----
 
+/**
+ * liquidate_position
+ *   [0] market             (writable)
+ *   [1] position           (writable)
+ *   [2] user_account       (writable) — the LIQUIDATED owner's account
+ *   [3] pyth_feed          (read-only)
+ *   [4] switchboard_feed   (read-only)
+ *   [5] liquidation_intent (writable) — PDA, may be uninitialized
+ *   [6] liquidator         (signer, writable) — pays for intent creation
+ *   [7] system_program     (read-only)
+ *   [8] liquidatorUserAccount (writable) — OPTIONAL: where the bounty is paid.
+ *
+ * `liquidator_bonus` is subtracted from the liquidated trader's settlement
+ * whether or not anyone claims it. With [8] absent,
+ * `find_user_account_owned_by` finds nothing and the handler routes the whole
+ * bounty to `market.insurance_fund_balance` — value conserved, but the
+ * liquidator who paid the fee and took the execution risk is paid nothing.
+ * Every builder shipped without this account, so the documented permissionless-
+ * liquidation incentive was structurally zero for every caller.
+ *
+ * It stays OPTIONAL, matching the handler: the note at
+ * liquidate_position.rs:246-255 is right that a failed liquidation is a
+ * solvency risk while a misrouted bounty is not, so a liquidator with no
+ * initialized UserAccount must still be able to liquidate. Passing an account
+ * that does not exist yet is equally harmless — it arrives system-owned,
+ * `find_user_account_owned_by` skips it on its `owner() != program_id` check,
+ * and the bounty falls back to the insurance fund exactly as before.
+ */
 export function createLiquidatePositionInstruction(
   liquidator: PublicKey,
   positionOwner: PublicKey,
   marketIndex: number,
   pythFeed: PublicKey,
   switchboardFeed: PublicKey,
-  programId: PublicKey = PROGRAM_ID
+  programId: PublicKey = PROGRAM_ID,
+  liquidatorUserAccount?: PublicKey
 ): TransactionInstruction {
   const [market] = findMarketPda(marketIndex, programId);
   const [position] = findPositionPda(positionOwner, marketIndex, programId);
@@ -737,6 +839,9 @@ export function createLiquidatePositionInstruction(
       { pubkey: liquidationIntent, isSigner: false, isWritable: true },
       { pubkey: liquidator, isSigner: true, isWritable: true },
       { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+      ...(liquidatorUserAccount
+        ? [{ pubkey: liquidatorUserAccount, isSigner: false, isWritable: true }]
+        : []),
     ],
     programId,
     data,
@@ -1302,8 +1407,18 @@ export function createCommitFillLogInstruction(
 /**
  * settle_from_log (0x21): settle fills onto L1 by reading the committed FillLog
  * (read-only) instead of the 612 KB OrderBook.
- * Accounts: [0] market (w), [1] fill_log (r), [2..] user + position accounts.
+ * Accounts: [0] market (w), [1] fill_log (r), [2] global_state (r),
+ *           [3..] user + position accounts. (This list said "[2..] user +
+ *           position accounts" and was off by one: global_state became a fixed
+ *           account when the global pause switch was wired into settlement,
+ *           and the builder below was updated but this comment was not.)
  * Data: market_index u16, epoch u32, num_fills u16.
+ *
+ * Bounded by MAX_SETTLE_REMAINING_ACCOUNTS for the same reason settle_trades is
+ * — and this is the LIVE settlement path, so an unbounded window here is the
+ * one that actually stalls the cursor. Its bundle is 6 bytes larger than
+ * settle_trades' (9 bytes of data vs 3), so if either fits at 28, this is the
+ * one that decides the cap: 1225 bytes at 28, 1291 at 30.
  */
 export function createSettleFromLogInstruction(
   marketIndex: number,
@@ -1312,6 +1427,8 @@ export function createSettleFromLogInstruction(
   remainingAccounts: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[],
   programId: PublicKey = PROGRAM_ID
 ): TransactionInstruction {
+  assertSettleWindowFits(remainingAccounts.length, "settle_from_log");
+
   const [market] = findMarketPda(marketIndex, programId);
   const [fillLog] = findFillLogPda(marketIndex, epoch, programId);
   const [globalState] = findGlobalStatePda(programId);

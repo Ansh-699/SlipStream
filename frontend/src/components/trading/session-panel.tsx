@@ -2,16 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useModal } from "@phantom/react-sdk";
-import { useSession } from "@/hooks/use-session";
+import { MIN_SOL_LAMPORTS, useSession } from "@/hooks/use-session";
 import { useWallet } from "@/hooks/use-wallet-compat";
 
 const PRICE_SCALE = 1_000_000;
 const LAMPORTS_PER_SOL = 1_000_000_000;
 
-/** Enough SOL to cover fees plus rent for the UserAccount/TradingCredit/Position
- *  PDAs that setup creates. Below this, setup fails partway with a signing
- *  error, so warn before the user starts rather than after. */
-const MIN_SOL_LAMPORTS = 20_000_000; // 0.02 SOL
+// The SOL floor is IMPORTED, not restated. This file used to declare its own
+// 20_000_000 while the two preflights in use-session.ts refuse at 10_000_000,
+// so a wallet holding 0.015 SOL was shown the amber "setup can't run yet"
+// warning and then completed setup without a hitch. A warning that fires for
+// states the gate lets through teaches the user to ignore it.
 
 const FOCUS = "focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]";
 const SECONDARY_BTN =
@@ -169,10 +170,15 @@ export function SessionPanel() {
               {busy && step?.includes("USDC") ? "…" : "Get test USDC"}
             </button>
 
+            {/* Point at the button that fixes it. "Send some to the address
+             *  above" asked a user with an embedded wallet and no second wallet
+             *  to solve it out-of-band, when the button directly above this line
+             *  tops up SOL as well as USDC (/api/faucet drips both). */}
             {lowSol && (
               <p className="text-[10px] leading-tight text-[var(--t-warn)]">
-                This wallet needs a little devnet SOL for fees and account rent
-                before setup can run. Send some to the address above.
+                This wallet needs about {(MIN_SOL_LAMPORTS / LAMPORTS_PER_SOL).toFixed(3)} devnet
+                SOL for fees and account rent before setup can run. “Get test USDC” above tops up
+                SOL too — or send some to the address above.
               </p>
             )}
 
@@ -247,29 +253,50 @@ export function SessionPanel() {
                     ? "Moves your USDC into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups."
                     : state.usdcBalance > 0n
                       ? `Moves your ${usd(state.usdcBalance)} into the market and opens a rollup session. One wallet approval — after that, orders sign instantly with no popups.`
-                      : "Get test USDC first — then this moves it into the market and opens your trading session."}
+                      : inProtocol > 0n
+                        ? // Wallet USDC is 0 but money is already inside the
+                          // protocol — a half-finished withdraw, or a session
+                          // that was undelegated. "Get test USDC first" is
+                          // false advice here: oneShotSetup re-delegates what
+                          // is already there without needing a single atom more.
+                          `Re-opens a rollup session on the ${usd(inProtocol)} already in the market. One wallet approval.`
+                        : "Get test USDC first — then this moves it into the market and opens your trading session."}
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                <SessionKeyCard {...{ state, busy, rotate, expiresIn }} />
-                <div className="space-y-1.5">
-                  <button
-                    type="button"
-                    onClick={withdraw}
-                    disabled={busy || state.activeOrders > 0}
-                    className={`w-full ${SECONDARY_BTN} ${
-                      busy || state.activeOrders > 0 ? "cursor-not-allowed" : ""
-                    }`}
-                  >
-                    {busy ? "…" : "Withdraw all to wallet"}
-                  </button>
-                  <p className={HINT}>
-                    {state.activeOrders > 0
-                      ? "Cancel your open orders first."
-                      : "Leaves the rollup, releases your credit and returns the USDC here. Takes a few seconds to settle."}
-                  </p>
-                </div>
+              <SessionKeyCard {...{ state, busy, rotate, expiresIn }} />
+            )}
+
+            {/* Withdraw is NOT part of the delegated arm any more. A withdraw
+             *  that dies between its legs strands the money in a state the old
+             *  placement could not reach: undelegate landed but release did not
+             *  (credit > 0, not delegated) hid this button entirely, and release
+             *  landed but the transfer did not (credit 0, freeCollateral > 0)
+             *  left "Start trading" as the only control — which re-funds and
+             *  re-delegates the very money the user was trying to take out.
+             *  Both are `inProtocol > 0n`, and withdraw() is already resumable
+             *  leg by leg, so one click finishes whichever half is missing.
+             *  Kept for a delegated-but-empty credit too: that one still needs
+             *  an undelegate, and this is the only button that sends it. */}
+            {trusted && (state.delegated || inProtocol > 0n) && (
+              <div className="space-y-1.5">
+                <button
+                  type="button"
+                  onClick={withdraw}
+                  disabled={busy || state.activeOrders > 0}
+                  className={`w-full ${SECONDARY_BTN} ${
+                    busy || state.activeOrders > 0 ? "cursor-not-allowed" : ""
+                  }`}
+                >
+                  {busy ? "…" : "Withdraw all to wallet"}
+                </button>
+                <p className={HINT}>
+                  {state.activeOrders > 0
+                    ? "Cancel your open orders first."
+                    : state.delegated
+                      ? "Leaves the rollup, releases your credit and returns the USDC here. Takes a few seconds to settle."
+                      : "Your funds are in the market but off the rollup — this releases them and returns the USDC to your wallet."}
+                </p>
               </div>
             )}
           </>

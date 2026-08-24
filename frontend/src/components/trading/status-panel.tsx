@@ -49,8 +49,8 @@ function since(secs: number): string {
 }
 
 export function StatusPanel() {
-  const { market } = useMarket(0);
-  const { nextFillSequence } = useOrderBook(0);
+  const { market, status: marketStatus } = useMarket(0);
+  const { nextFillSequence, status: bookStatus } = useOrderBook(0);
   const { live, connected } = useLivePrice();
   const { mark, divergence, divergenceStale, stampStale, ageMins } = useMarkPrice(0);
   const [api, setApi] = useState<ApiStatus | null>(null);
@@ -120,12 +120,24 @@ export function StatusPanel() {
     markDetail = "no oracle to compare";
   }
 
-  // Settlement lag: matching-engine sequence vs the L1 settlement cursor.
+  // Settlement lag: matching-engine sequence vs the L1 settlement cursor. Both
+  // reads can fail independently, and "we have not fetched yet" is not "the
+  // read failed" — the same collapse the RPC rows above had, on the one row it
+  // was left in: an unreachable order-book account sat at an amber em dash
+  // that reads as "still loading" forever. Both hooks report which it is.
   let settleLevel: Level = "warn";
   let settleDetail = "—";
-  if (market && nextFillSequence > 0) {
+  if (bookStatus === "unavailable" || marketStatus === "unavailable") {
+    settleLevel = "down";
+    settleDetail = "read failed";
+  } else if (bookStatus === "loading" || marketStatus === "loading") {
+    settleDetail = "checking…";
+  } else if (market && nextFillSequence > 0) {
     const lag = Math.max(0, nextFillSequence - 1 - market.lastSettledSequence);
-    settleLevel = lag > 500 ? "down" : lag > 100 ? "warn" : "ok";
+    // A "stale" book is last-good data with the latest poll failing: the
+    // numerator is frozen while the settlement cursor keeps advancing, so the
+    // lag can only shrink. That must not be allowed to read green.
+    settleLevel = lag > 500 ? "down" : lag > 100 || bookStatus === "stale" ? "warn" : "ok";
     settleDetail = `${lag} fills behind`;
   }
 

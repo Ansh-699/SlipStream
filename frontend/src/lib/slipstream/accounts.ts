@@ -180,23 +180,26 @@ export function decodeMarket(data: Buffer): Market {
 export const MARK_PRICE_MAX_STALENESS_MINS = 30;
 
 /**
- * Mirror of `Market::is_mark_price_fresh` (state/market.rs:154-161), including
- * its wrapping u16 minute arithmetic and its treatment of an unstamped market.
+ * Mirror of `Market::is_mark_price_fresh` (state/market.rs:154-161) and its
+ * treatment of an unstamped market.
  *
  * This is the program's OWN definition of a usable mark - the one that decides
  * whether close_position, execute_trigger, claim_funding and (since S2-X03)
  * place_order will accept it. A client that guesses instead, e.g. by comparing
  * against an oracle, disagrees with the chain at the boundary and needs the
  * oracle stream up to say anything at all.
+ *
+ * Derived from `markPriceAgeMins` rather than repeating the minute arithmetic,
+ * so the client-clock-skew rule documented there applies to both. It is the one
+ * place the two can disagree with the chain, and one copy of it is enough.
  */
 export function isMarkPriceFresh(
   market: Pick<Market, "markPriceMinute">,
   nowSec: number
 ): boolean {
-  const stamp = market.markPriceMinute;
-  if (stamp === 0) return true; // unstamped: the program preserves pre-upgrade behaviour
-  const nowMin = Math.floor(nowSec / 60) % 65536;
-  return ((nowMin - stamp) & 0xffff) <= MARK_PRICE_MAX_STALENESS_MINS;
+  const age = markPriceAgeMins(market, nowSec);
+  // Unstamped (null): the program preserves pre-upgrade behaviour and accepts it.
+  return age === null || age <= MARK_PRICE_MAX_STALENESS_MINS;
 }
 
 /** Age of the mark-price stamp in minutes, or null when the market is unstamped. */
@@ -206,7 +209,29 @@ export function markPriceAgeMins(
 ): number | null {
   if (market.markPriceMinute === 0) return null;
   const nowMin = Math.floor(nowSec / 60) % 65536;
-  return (nowMin - market.markPriceMinute) & 0xffff;
+  const d = (nowMin - market.markPriceMinute) & 0xffff;
+  // The program compares two reads of the SAME Clock, so its delta is never
+  // negative. Here `nowSec` is the client's wall clock and the stamp is the
+  // chain's, so a stamp from a minute this client has not reached yet wraps to
+  // ~65535 and reads as a mark 46 DAYS old. Two ways in, neither exotic: the
+  // crank stamps at 12:00:01 and the market poll delivers it while the client
+  // is still at 11:59:59, or the laptop's clock is simply a minute slow (no
+  // NTP - VMs, corporate images, a phone back from airplane mode), which never
+  // leaves that state at all. It turned the Mark column amber with "the TWAP
+  // crank has stopped - mark is 46d old" one second after the crank ran, and
+  // with the oracle stream also down it left the price reference null, so both
+  // close paths refused outright: the user could not exit a position because
+  // their clock was a minute slow.
+  //
+  // The far half of the ring is a client clock behind, not an ancient mark -
+  // the program's own comment scopes this arithmetic to "any real age < ~22
+  // days". Age it as 0, which tolerates arbitrary client-behind-chain skew.
+  //
+  // CEILING: a mark genuinely 22-45 days old also lands in the far half and is
+  // reported fresh here while the chain would refuse it. Deliberate trade - a
+  // slow client clock is routine, a month-dead crank on a live market is not,
+  // and the program is still the final gate on anything that settles.
+  return d > 32768 ? 0 : d;
 }
 
 // ---- UserAccount (56 bytes) ----

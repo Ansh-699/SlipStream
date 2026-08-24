@@ -8,6 +8,7 @@ import {
   createExecuteTriggerInstruction,
 } from "../../client/src/instructions";
 import { PRICE_SCALE, DISC_TRIGGER_ORDER } from "../../client/src/constants";
+import { findUserAccountPda } from "../../client/src/pda";
 import { decodeTriggerOrder, TRIGGER_ORDER_SIZE } from "../../client/src/accounts";
 import bs58 from "bs58";
 
@@ -247,12 +248,26 @@ async function main() {
 
         try {
           const posOwner = pos.owner;
+          // Pass the keeper's own UserAccount so the liquidation bounty is paid
+          // to it. It is the optional trailing account: without it,
+          // `find_user_account_owned_by` finds nothing and the bounty the trader
+          // was already charged goes to the insurance fund instead
+          // (liquidate_position.rs:246-255), so this keeper worked for free.
+          // Derived under the SAME programId the instruction is built with —
+          // the manifest's, which is what fetchAllPositions discovered these
+          // positions under. If the account is not initialized yet the handler
+          // skips it on its `owner() != program_id` check and falls back to the
+          // insurance fund, so this can never make a liquidation fail.
+          const liqProgramId = getKeeperAddresses().programId;
+          const [liquidatorUserAccount] = findUserAccountPda(keeper.publicKey, liqProgramId);
           const ix = createLiquidatePositionInstruction(
             keeper.publicKey,
             new PublicKey(posOwner),
             MARKET_INDEX,
             pythFeed,
             getSwitchboardFeed(),
+            liqProgramId,
+            liquidatorUserAccount
           );
           const tx = new Transaction().add(ix);
           const sig = await sendAndConfirm(connection, tx, [keeper]);

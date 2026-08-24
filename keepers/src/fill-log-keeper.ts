@@ -17,6 +17,7 @@ import {
   createCommitFillLogInstruction,
   createSettleFromLogInstruction,
   createRecordPendingFillInstruction,
+  MAX_SETTLE_REMAINING_ACCOUNTS,
 } from "../../client/src/instructions";
 import { findFillLogPda, findUserAccountPda, findPositionPda } from "../../client/src/pda";
 import { DELEGATION_PROGRAM_ID } from "../../client/src/constants";
@@ -292,6 +293,37 @@ async function main() {
           `epoch ${epoch}: seq ${cursor + 1n} has no L1 UserAccount/Position — queue blocked, not skipped`
         );
         return;
+      }
+
+      // Rule (c): the window is sized by FILL COUNT, but the TRANSACTION is
+      // sized by DISTINCT COUNTERPARTIES — settlement carries each owner's
+      // UserAccount AND Position, so 15 owners is 30 remaining accounts and
+      // 1291 serialized bytes against a 1232-byte limit. web3.js throws at
+      // serialize() time, locally, so nothing reaches an RPC, the cursor never
+      // advances, and the next tick rebuilds byte-for-byte the same oversized
+      // window from the same cursor: settlement stalls permanently, not just
+      // for this tick. Truncate to a contiguous prefix of at most
+      // MAX_SETTLE_REMAINING_ACCOUNTS / 2 owners and pick up the remainder next
+      // tick, exactly like the orphan truncation above.
+      //
+      // This can never truncate to an empty window: each fill contributes at
+      // most 2 owners, so the running count first exceeds 14 at index >= 7 —
+      // seven fills are always kept. (MAX_FILLS_PER_TX is 8, so in practice
+      // this only ever drops the last fill of a very wide window.)
+      const ownerCap = MAX_SETTLE_REMAINING_ACCOUNTS / 2;
+      const seenOwners = new Set<string>();
+      for (let i = 0; i < windowFills.length; i++) {
+        const f = windowFills[i];
+        seenOwners.add(new PublicKey(f.maker).toBase58());
+        seenOwners.add(new PublicKey(f.taker).toBase58());
+        if (seenOwners.size > ownerCap) {
+          log(
+            "FILLLOG-KEEPER",
+            `epoch ${epoch}: window spans >${ownerCap} owners — truncating ${windowFills.length} fills to ${i}`
+          );
+          windowFills.length = i;
+          break;
+        }
       }
 
       const userSet = new Map<string, PublicKey>();

@@ -22,6 +22,14 @@ export interface MarketData {
    *  staleness gate. Consumed by `useMarkPrice`. */
   markPriceMinute: number;
   twapPrice: number | null;
+  /**
+   * Misnamed by history: this is `cumulative_funding_index`, the market's
+   * running 18-dp (FUNDING_SCALE) total, NOT a per-interval rate. It is only
+   * meaningful against a position's `fundingIndexSnapshot` - the DIFFERENCE of
+   * the two is the rate compute_funding_payment applies to signed notional
+   * (math/funding.rs:66-101). Reading it as a rate on its own overstates
+   * funding by however many intervals the market has ever accrued.
+   */
   fundingRate: bigint;
   /** L1 settlement cursor (highest settled fill sequence). */
   lastSettledSequence: number;

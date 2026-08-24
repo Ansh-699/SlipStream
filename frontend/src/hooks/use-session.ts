@@ -46,13 +46,19 @@ import { confirmSignature } from "@/lib/confirm";
 
 const DELEGATION_PROGRAM = DELEGATION_PROGRAM_ID.toBase58();
 
+/** Rent for UserAccount(56B) + TradingCredit(96B) + Position(96B) = 4_398_720
+ *  lamports, plus fees and delegate()'s own account creations. Rounded up.
+ *
+ *  Exported because it is the number that actually REFUSES: both preflights
+ *  below quote it verbatim. session-panel.tsx used to carry its own copy at
+ *  20_000_000 (the faucet's top-up floor, FAUCET_SOL_FLOOR), so every wallet
+ *  between 0.01 and 0.02 SOL got an amber "setup can't run yet" warning and
+ *  then watched setup run perfectly. One threshold, imported, cannot drift. */
+export const MIN_SOL_LAMPORTS = 10_000_000; // 0.01 SOL
+
 /** Session lifetime (seconds). The browser session key is authorized for this
  *  long; after it expires the user must rotate (one signature) to keep trading
  *  popup-less. 24h keeps a leaked key's blast radius bounded. */
-/** Rent for UserAccount(56B) + TradingCredit(96B) + Position(96B) = 4_398_720
- *  lamports, plus fees and delegate()'s own account creations. Rounded up. */
-const MIN_SOL_LAMPORTS = 10_000_000; // 0.01 SOL
-
 const SESSION_TTL_SECS = 24 * 60 * 60;
 
 /** A tiny SOL float optionally sent to the session key on delegate so it can
@@ -613,10 +619,17 @@ export function useSession(marketIndex: number = 0) {
         return;
       }
       slog("faucet", `minted ${body.amount} USDC, sig=${body.signature}`);
+      // Three outcomes, three sentences — the route already reports all three
+      // (see its header comment) and this collapsed the last two into "You can
+      // start trading now", which is exactly what an operator out of devnet SOL
+      // makes false: the USDC landed, the SOL top-up threw, and Start trading
+      // then dies at the MIN_SOL_LAMPORTS gate with no hint of why.
       setNotice(
         body.sol
           ? `Received ${body.amount} test USDC and ${body.sol} SOL for fees. You're ready to start.`
-          : `Received ${body.amount} test USDC. You can start trading now.`
+          : body.solError
+            ? `Received ${body.amount} test USDC, but the SOL top-up failed — the faucet may be out of devnet SOL. You need about ${(MIN_SOL_LAMPORTS / 1e9).toFixed(3)} SOL for fees and rent before Start trading will work.`
+            : `Received ${body.amount} test USDC. You can start trading now.`
       );
       // Give the RPC a moment to reflect the mint, then refresh balances.
       await new Promise((r) => setTimeout(r, 1500));

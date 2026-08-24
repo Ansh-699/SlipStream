@@ -26,8 +26,24 @@ export interface PositionData {
   entryPrice: bigint;
   collateral: bigint;
   realizedPnl: bigint;
+  /**
+   * The position's last-realized funding index (18-dp, i128). Needed to price
+   * the funding the position has accrued but not yet paid: `collateral` is only
+   * debited when something realizes the accrual (settle_trades.rs:355-384,
+   * claim_funding), so between those the chain counts a debt against this
+   * position that the collateral figure alone cannot see. Paired with
+   * `useMarket().fundingRate` (the market's cumulative index) at the render
+   * site, exactly as liquidate_position.rs:129-158 pairs them.
+   */
+  fundingIndexSnapshot: bigint;
   isLong: boolean;
-  unrealizedPnl: number;
+  /**
+   * Mark-to-market PnL in dollars, or null when there is no trustworthy price
+   * to mark against. Null is not 0: the two used to be collapsed here, and the
+   * row printed a confident green "+$0.00" beside Mark/Liq./Health cells that
+   * were honestly rendering "—".
+   */
+  unrealizedPnl: number | null;
 }
 
 export function useUserAccount() {
@@ -146,6 +162,7 @@ export function usePositions(markPrice: bigint | null) {
           entryPrice: pos.entryPrice,
           collateral: pos.collateral,
           realizedPnl: pos.realizedPnl,
+          fundingIndexSnapshot: pos.fundingIndexSnapshot,
           isLong: pos.size > 0n,
         });
       }
@@ -168,16 +185,16 @@ export function usePositions(markPrice: bigint | null) {
   const positions: PositionData[] = useMemo(
     () =>
       raw.map((p) => {
-        let unrealizedPnl = 0;
-        if (markPrice) {
-          // Mirrors the on-chain compute_unrealized_pnl: size is 9-dp base
-          // atoms, so (size * priceDiff) / BASE_SCALE (1e9) yields 6-dp quote
-          // PnL; then / PRICE_SCALE (1e6) for a human dollar value.
-          const priceDiff = markPrice - p.entryPrice;
-          const rawPnl = (p.size * priceDiff) / 1_000_000_000n; // BASE_SCALE
-          unrealizedPnl = Number(rawPnl) / PRICE_SCALE;
-        }
-        return { ...p, unrealizedPnl };
+        // No trustworthy price is not "zero PnL". It used to fall through to 0
+        // here, which the table rendered as a green "+$0.00" in the same row
+        // whose Mark, Liq. and Health cells were correctly showing "—".
+        if (!markPrice) return { ...p, unrealizedPnl: null };
+        // Mirrors the on-chain compute_unrealized_pnl: size is 9-dp base
+        // atoms, so (size * priceDiff) / BASE_SCALE (1e9) yields 6-dp quote
+        // PnL; then / PRICE_SCALE (1e6) for a human dollar value.
+        const priceDiff = markPrice - p.entryPrice;
+        const rawPnl = (p.size * priceDiff) / 1_000_000_000n; // BASE_SCALE
+        return { ...p, unrealizedPnl: Number(rawPnl) / PRICE_SCALE };
       }),
     [raw, markPrice]
   );

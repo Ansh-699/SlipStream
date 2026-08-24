@@ -11,6 +11,7 @@ import { useOpenOrders } from "@/hooks/use-open-orders";
 import { useSession } from "@/hooks/use-session";
 import { useTriggers } from "@/hooks/use-triggers";
 import { useMarkPrice } from "@/hooks/use-mark-price";
+import { useMarket } from "@/hooks/use-market";
 import { PROGRAM_ID, MARKET_INDEX, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
@@ -19,6 +20,7 @@ import {
   createCancelTriggerInstruction,
   TRIGGER_KIND_STOP_LOSS,
   TRIGGER_KIND_TAKE_PROFIT,
+  FUNDING_SCALE,
   humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
@@ -77,7 +79,26 @@ export function PositionsTable({}: PositionsTableProps) {
   // figures derived from the frozen mark. Passing `markPrice` here would leave
   // the Mark column honest while the PnL beside it stayed wrong.
   const { positions, error: positionsError, refresh } = usePositions(referenceAtoms);
-  const { position: erPosition } = useErPosition(publicKey ?? null, referenceAtoms);
+  const { position: erPosition, error: erError } = useErPosition(
+    publicKey ?? null,
+    referenceAtoms
+  );
+  // HEALTH-1 (funding half). Position.collateral is only debited when something
+  // REALIZES the accrual - settle_trades.rs:355-384 on the next fill, or
+  // claim_funding - so between those the chain carries a funding debt against
+  // the position that collateral alone cannot show, and this table used to
+  // ignore it entirely. liquidate_position.rs:139-158 subtracts
+  // compute_funding_payment(size, cumulative_index, snapshot, mark) from the
+  // health numerator, so a position with a large unclaimed debt read healthier
+  // here than the keeper computed it. `market.fundingRate` is that cumulative
+  // index; the per-position snapshot now comes through usePositions.
+  //
+  // Same shared 5s Market source useMarkPrice already subscribes to (one
+  // poller per key however many components mount it), so this costs no RPC.
+  // Null while that read is in flight or unreachable: an unknown debt is not a
+  // zero one, and the cells render "—" rather than guess.
+  const { market } = useMarket(MARKET_INDEX);
+  const cumFundingIndex = market ? market.fundingRate : null;
   // Both of these select from the ONE shared order-book source (useSharedSource,
   // one 2s poller per market however many components mount it) that
   // order-book-display, status-panel, fill-toasts and useErPosition already
@@ -483,10 +504,11 @@ export function PositionsTable({}: PositionsTableProps) {
           Positions
         </span>
         <span className="text-[11px] text-[var(--t-text-3)] tnum">
-          {/* "0 open" is a claim about the chain. When the position read threw
-              and we have nothing cached we do not know the count, so say so
-              with a dash rather than asserting flat. */}
-          {positionsError && positions.length === 0 && !erPosition
+          {/* "0 open" is a claim about the chain. When either read threw and we
+              have nothing cached we do not know the count, so say so with a
+              dash rather than asserting flat. The ER read counts too: it is the
+              half that would be carrying an unsettled, fully-levered fill. */}
+          {(positionsError || erError) && positions.length === 0 && !erPosition
             ? "—"
             : `${positions.length + (erPosition ? 1 : 0)} open`}
         </span>
@@ -494,13 +516,15 @@ export function PositionsTable({}: PositionsTableProps) {
       <div className="p-3">
         {positions.length === 0 && !erPosition ? (
           <div className="text-center text-xs text-[var(--t-text-2)] py-6">
-            {/* usePositions now separates a failed read from an empty one. They
+            {/* Both hooks now separate a failed read from an empty one. They
                 used to render identically, so a trader reloading through a
                 devnet rate-limit was told they were flat while a leveraged
-                position was live and moving. */}
+                position was live and moving. `erError` is the same claim about
+                the pending half - with the book or the settlement cursor
+                unreadable, "no pending position" is a guess, not an answer. */}
             {!publicKey
               ? "Sign in to see your positions"
-              : positionsError
+              : positionsError || erError
                 ? "Can't reach Solana — positions unknown, retrying"
                 : "No open positions"}
           </div>
@@ -551,7 +575,14 @@ export function PositionsTable({}: PositionsTableProps) {
                       Math.abs(erPosition.size),
                       erPosition.entryPrice,
                       mk,
-                      erPosition.collateral
+                      erPosition.collateral,
+                      // 0, and it is exact rather than a stand-in: this position
+                      // has not settled, so no Position account carries a
+                      // funding snapshot for it yet. settle_trades.rs:385 stamps
+                      // the snapshot at the CURRENT cumulative index as it
+                      // creates the position, so no funding can have accrued
+                      // against these fills before then.
+                      0
                     );
                     return (
                       <>
@@ -564,8 +595,22 @@ export function PositionsTable({}: PositionsTableProps) {
                       </>
                     );
                   })()}
-                  <td className={`text-right tnum ${erPosition.unrealizedPnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
-                    {fmtSignedUsd(erPosition.unrealizedPnl)}
+                  {/* PNL-1/ERPNL-1: the className branches on null as well as
+                      the text. `null >= 0` is TRUE in JS, so testing only the
+                      sign paints a GREEN em dash - a confident profit colour on
+                      the cell that is admitting it has no number. */}
+                  <td
+                    className={`text-right tnum ${
+                      erPosition.unrealizedPnl === null
+                        ? "text-[var(--t-text-3)]"
+                        : erPosition.unrealizedPnl >= 0
+                          ? "text-[var(--t-up)]"
+                          : "text-[var(--t-down)]"
+                    }`}
+                  >
+                    {erPosition.unrealizedPnl === null
+                      ? "—"
+                      : fmtSignedUsd(erPosition.unrealizedPnl)}
                   </td>
                   <td className="px-2 text-right">
                     <button
@@ -621,12 +666,21 @@ export function PositionsTable({}: PositionsTableProps) {
                     </td>
                     {(() => {
                       const mk = reference;
+                      // The dimensionless rate compute_funding_payment applies
+                      // to signed notional: (cumulative_index - snapshot) /
+                      // FUNDING_SCALE, both 18-dp i128 (funding.rs:76-98).
+                      const fundingRate =
+                        cumFundingIndex === null
+                          ? null
+                          : Number(cumFundingIndex - pos.fundingIndexSnapshot) /
+                            Number(FUNDING_SCALE);
                       const { liq, health } = liqAndHealth(
                         pos.isLong,
                         size,
                         Number(pos.entryPrice) / PRICE_SCALE,
                         mk,
-                        Number(pos.collateral) / PRICE_SCALE
+                        Number(pos.collateral) / PRICE_SCALE,
+                        fundingRate
                       );
                       return (
                         <>
@@ -639,8 +693,21 @@ export function PositionsTable({}: PositionsTableProps) {
                         </>
                       );
                     })()}
-                    <td className={`text-right tnum ${pos.unrealizedPnl >= 0 ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
-                      {fmtSignedUsd(pos.unrealizedPnl)}
+                    {/* Same null-before-sign branch as the ER row above, and
+                        for the same reason: `null >= 0` is true, so a text-only
+                        patch yields a green em dash. */}
+                    <td
+                      className={`text-right tnum ${
+                        pos.unrealizedPnl === null
+                          ? "text-[var(--t-text-3)]"
+                          : pos.unrealizedPnl >= 0
+                            ? "text-[var(--t-up)]"
+                            : "text-[var(--t-down)]"
+                      }`}
+                    >
+                      {pos.unrealizedPnl === null
+                        ? "—"
+                        : fmtSignedUsd(pos.unrealizedPnl)}
                     </td>
                     <td className="px-2 text-right">
                       <div className="inline-flex items-center gap-1">
@@ -863,14 +930,17 @@ function SideBadge({ isLong }: { isLong: boolean }) {
  * as before, while a funding-drained value (always smaller) is honoured, and
  * neither can overstate health.
  *
- * KNOWN GAP, and it is the other half of the same failure: accrued funding is
- * not subtracted. Position.funding_index_snapshot is decoded (accounts.ts) but
- * usePositions drops it, and the cumulative index is only exposed as
- * `fundingRate` in use-market.ts - both files are outside this change. So a
- * position whose collateral is intact but whose UNCLAIMED funding debt is large
- * still reads healthier here than on chain. The collateral floor covers the
- * case where claim_funding has already moved that debt out of collateral, which
- * is what the keeper does; this covers the rest.
+ * Accrued funding IS subtracted, which is the other half of the same failure.
+ * The collateral floor above only covers the case where something has already
+ * realized the debt out of collateral (claim_funding, or settle_trades on the
+ * next fill); between those the debt is unclaimed, collateral is untouched, and
+ * the position read healthier here than the keeper computed it. `fundingRate`
+ * is (Market.cumulative_funding_index - Position.funding_index_snapshot) /
+ * FUNDING_SCALE - the dimensionless rate compute_funding_payment (funding.rs:
+ * 66-101) applies to SIGNED notional, so a long pays a positive delta and a
+ * short receives it, and it is subtracted from the numerator exactly as
+ * liquidate_position.rs:153-158 does (it passes -funding_payment into
+ * compute_health_factor, which adds it).
  *
  * `mark` is the reference price (oracle first), not Market::last_mark_price, so
  * these figures track the market rather than the crank - deliberate, and the
@@ -892,10 +962,15 @@ function liqAndHealth(
   sizeSol: number,
   entry: number,
   mark: number | null,
-  collateral: number
+  collateral: number,
+  // Nullable for the same reason `mark` is: without the Market's cumulative
+  // funding index the position's unclaimed debt is UNKNOWN, and an unknown debt
+  // rendered as zero is the overstatement this parameter exists to remove.
+  fundingRate: number | null
 ): { liq: number | null; health: number | null } {
   if (sizeSol <= 0 || entry <= 0) return { liq: null, health: null };
   if (mark === null || mark <= 0) return { liq: null, health: null };
+  if (fundingRate === null) return { liq: null, health: null };
 
   const notional = sizeSol * mark;
   const derivedMargin = notional / MAX_LEVERAGE;
@@ -904,21 +979,32 @@ function liqAndHealth(
   const margin = collateral > 0 ? Math.min(collateral, derivedMargin) : derivedMargin;
 
   const uPnl = (isLong ? mark - entry : entry - mark) * sizeSol;
-  const health = (margin + uPnl) / maintMargin;
+  // Positive = the position PAYS, so it comes OFF the numerator. Signed
+  // notional, not |notional|: that sign is the whole of funding's direction
+  // (funding.rs:87-94), and dropping it would credit longs with the debt shorts
+  // owe them.
+  const funding = (isLong ? notional : -notional) * fundingRate;
+  const health = (margin + uPnl - funding) / maintMargin;
 
   // Liquidation price: solve health(P) = 1 for P. Because maintenance margin is
   // itself a function of the mark, the old fixed "buffer" form no longer
   // matches this health number - and a liq price that disagrees with the health
   // factor printed next to it is the defect this whole function is fixing.
-  //   margin + (isLong ? P - entry : entry - P) * size = size * P / (2*leverage)
-  // With k = size / (2*leverage):
-  //   long   P = (size*entry - margin) / (size - k)
-  //   short  P = (size*entry + margin) / (size + k)
-  // (size - k) is size * (1 - 1/(2*leverage)), positive for any leverage >= 1.
+  // Funding is a function of the mark too (it is a rate on notional), so it has
+  // to be solved WITH it rather than held constant at today's price. With
+  // q = +size for a long / -size for a short and k = size / (2*leverage):
+  //   margin + q*(P - entry) - q*P*rate = |q| * P / (2*leverage)
+  //   P = (q*entry - margin) / (q*(1 - rate) - k)
+  // which is the pair below (the short form is that expression multiplied
+  // through by -1). At rate = 0 both collapse to the previous formula.
+  // (size - k) is size * (1 - 1/(2*leverage)), positive for any leverage >= 1;
+  // the (1 - rate) factor only perturbs it, and a degenerate denominator falls
+  // out through the isFinite/positive filter below.
   const k = sizeSol / (2 * MAX_LEVERAGE);
+  const qAdj = sizeSol * (1 - fundingRate);
   const liq = isLong
-    ? (sizeSol * entry - margin) / (sizeSol - k)
-    : (sizeSol * entry + margin) / (sizeSol + k);
+    ? (sizeSol * entry - margin) / (qAdj - k)
+    : (sizeSol * entry + margin) / (qAdj + k);
 
   return { liq: Number.isFinite(liq) && liq > 0 ? liq : null, health };
 }

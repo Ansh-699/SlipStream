@@ -24,8 +24,9 @@ export interface ErPosition {
   collateral: number;
   /** Realized PnL booked on reductions/flips (USD). */
   realizedPnl: number;
-  /** Mark-to-market unrealized PnL at the current mark (USD). */
-  unrealizedPnl: number;
+  /** Mark-to-market unrealized PnL at the current mark (USD), or null when
+   *  there is no trustworthy price to mark against — see `markPrice` below. */
+  unrealizedPnl: number | null;
   /** Number of ER fills that make up this position (not yet on L1). */
   fillCount: number;
 }
@@ -129,22 +130,19 @@ function reconstruct(
   if (count === 0 || size === 0n) return null;
 
   const up = markPrice === null ? null : pnl(size, entry, markPrice);
-  // KNOWN GAP, and the comment on `markPrice` above only tells half the truth:
-  // `up` is correctly null when there is no trustworthy price, and then
-  // `Number(null)` collapses it straight back to 0. The row therefore paints a
-  // green "+$0.00" in the one money cell while Mark, Liq. and Health beside it
-  // honestly render "—". Widening this field to `number | null` is the right
-  // fix but it does not compile on its own: positions-table.tsx reads
-  // `unrealizedPnl >= 0` (and use-positions.ts fabricates the same 0 for the
-  // settled row), and `null >= 0` is true, so the class must branch on null
-  // too or the dash comes out green. Both render sites are outside this file.
+  // `up` stays null all the way to the cell. It used to be handed to
+  // `Number(null)`, which is 0, so the row painted a green "+$0.00" in the one
+  // money cell while Mark, Liq. and Health beside it honestly rendered "—".
+  // The render site branches its className on null as well as its text: the
+  // colour test was `unrealizedPnl >= 0` and `null >= 0` is true in JS, which
+  // would have produced a green em dash.
   return {
     isLong: size > 0n,
     size: Number(size) / 1e9,
     entryPrice: Number(entry) / PRICE_SCALE,
     collateral: Number(collateral) / PRICE_SCALE,
     realizedPnl: Number(realized) / PRICE_SCALE,
-    unrealizedPnl: Number(up) / PRICE_SCALE,
+    unrealizedPnl: up === null ? null : Number(up) / PRICE_SCALE,
     fillCount: count,
   };
 }
@@ -166,8 +164,8 @@ export function useErPosition(
   // markPrice stays out of the data path entirely for the same reason it used
   // to be kept out of the fetch's dependency array: the live feed pushes ~20
   // prices/second, and it may only ever PRICE the fills, never re-read them.
-  const { market } = useMarket(marketIndex);
-  const { fillEvents } = useOrderBook(marketIndex);
+  const { market, status: marketStatus } = useMarket(marketIndex);
+  const { fillEvents, status: bookStatus } = useOrderBook(marketIndex);
 
   // The settlement cursor, or null when we do not have one.
   //
@@ -210,5 +208,15 @@ export function useErPosition(
     [owner, fillEvents, markPrice, settledSeq]
   );
 
-  return { position };
+  // POS-1. `position === null` has two causes that must not render alike: "you
+  // hold nothing pending" and "we could not read the fills or the settlement
+  // cursor at all". Only the second is an error, and this hook no longer has a
+  // catch of its own to raise it from — it is a pure selection over two shared
+  // sources, so the error has to come from them. "unavailable" is the one
+  // status on either source that means unreachable AND nothing cached; "stale"
+  // still carries a last-good answer and "loading"/"missing" are answers of
+  // their own.
+  const error = marketStatus === "unavailable" || bookStatus === "unavailable";
+
+  return { position, error };
 }

@@ -14,6 +14,7 @@ import {
   createSettleTradesInstruction,
   createRecordPendingFillInstruction,
   createCommitOrderbookInstruction,
+  MAX_SETTLE_REMAINING_ACCOUNTS,
 } from "../../client/src/instructions";
 import {
   findUserAccountPda,
@@ -183,6 +184,24 @@ async function main() {
     // settle_from_log there is no orphan case to mirror: settle_trades uses the
     // erroring find_user_account / find_position_account, so a missing account
     // reverts the whole bundle and rolls the bump back with it.)
+    //
+    // The window also stops at MAX_SETTLE_REMAINING_ACCOUNTS / 2 DISTINCT
+    // OWNERS. MAX_FILLS_PER_TX bounds the window by fill count, but the
+    // transaction is sized by counterparties: settle_trades carries each
+    // owner's UserAccount AND Position, so 15 owners is 30 remaining accounts
+    // and 1285 serialized bytes against a 1232-byte limit. web3.js throws at
+    // serialize() time, locally, so nothing reaches an RPC, the cursor never
+    // advances, and the next tick rebuilds byte-for-byte the same oversized
+    // window from the same cursor — settlement stalls permanently rather than
+    // just skipping a tick. Stopping the window short keeps it a contiguous
+    // prefix, so the remainder is simply picked up on the next pass.
+    //
+    // Breaking here (rather than truncating afterwards) is what keeps
+    // `maxSeqInWindow` honest: it is only ever set for a fill actually
+    // submitted. The window can never come out empty — each fill adds at most
+    // 2 owners, so the cap cannot bind before the 8th fill.
+    const ownerCap = MAX_SETTLE_REMAINING_ACCOUNTS / 2;
+    const seenOwners = new Set<string>();
     const newFills: { sequence: bigint; maker: PublicKey; taker: PublicKey }[] = [];
     let maxSeqInWindow: bigint | null = null;
     let next = cursor + 1n;
@@ -191,11 +210,16 @@ async function main() {
       const fill = decodeFillEvent(data, base + idx * FILL_EVENT_SIZE);
       if (fill.sequence < next) continue; // already settled
       if (fill.sequence !== next) break; // gap — the program stops here too
-      newFills.push({
-        sequence: fill.sequence,
-        maker: new PublicKey(fill.maker),
-        taker: new PublicKey(fill.taker),
-      });
+      const maker = new PublicKey(fill.maker);
+      const taker = new PublicKey(fill.taker);
+      // Deduplicated against the owners already in the window AND against each
+      // other, so a self-trade counts once.
+      const newOwners = new Set(
+        [maker.toBase58(), taker.toBase58()].filter((o) => !seenOwners.has(o))
+      );
+      if (seenOwners.size + newOwners.size > ownerCap) break;
+      newOwners.forEach((o) => seenOwners.add(o));
+      newFills.push({ sequence: fill.sequence, maker, taker });
       maxSeqInWindow = fill.sequence;
       next += 1n;
     }

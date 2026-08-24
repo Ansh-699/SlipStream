@@ -31,7 +31,7 @@ export interface OpenOrder {
  * nothing was lost with the poller.
  */
 export function useOpenOrders(owner: PublicKey | null, marketIndex: number = 0) {
-  const { orderSlots } = useOrderBook(marketIndex);
+  const { orderSlots, status } = useOrderBook(marketIndex);
 
   const orders = useMemo<OpenOrder[]>(() => {
     if (!owner) return [];
@@ -56,13 +56,15 @@ export function useOpenOrders(owner: PublicKey | null, marketIndex: number = 0) 
     return mine;
   }, [owner, orderSlots]);
 
-  // Deliberately a no-op, not a forgotten stub. open-orders.tsx calls this
-  // after a confirmed cancel to make the row disappear at once; the book is now
-  // the shared 2s poller's and a single subscriber cannot make it tick early,
-  // so the cancelled row clears on the next shared poll instead — within 2s of
-  // a confirmation that itself took seconds. Delete this together with the
-  // `refresh()` call at open-orders.tsx:60, which is the only caller.
-  const refresh = () => {};
-
-  return { orders, refresh };
+  // POS-1. An empty list has two causes the panel used to render identically:
+  // "you have no resting orders" and "we could not read the book at all". Only
+  // "unavailable" is the second one — it is useOrderBook's word for unreachable
+  // WITH nothing cached; "stale" still holds a last-good book, and "loading"
+  // and "empty" are answers.
+  //
+  // (The `refresh` this used to return was a documented no-op — the book is the
+  // shared 2s poller's and one subscriber cannot make it tick early — so it was
+  // deleted along with its only call site in open-orders.tsx. A cancelled row
+  // still clears on the next shared poll, within 2s.)
+  return { orders, error: status === "unavailable" };
 }
