@@ -595,12 +595,14 @@ export function PositionsTable({}: PositionsTableProps) {
           <table className="w-full border-collapse">
             <thead>
               <tr className="text-[11px] text-[var(--t-text-3)] border-b border-[var(--t-surface-2)]">
-                <th className="h-[26px] px-2 text-left font-normal">Side</th>
+                {/* Six columns, not eight. Entry and Mark are read as one
+                    comparison, and Liq. is meaningless without the health beside
+                    it, so each pair shares a cell and stacks. Same figures, same
+                    honest empty states — fewer things to scan. */}
+                <th className="h-[26px] px-2 text-left font-normal">Position</th>
                 <th className="h-[26px] px-2 text-right font-normal">Size</th>
-                <th className="h-[26px] px-2 text-right font-normal">Entry</th>
-                <th className="h-[26px] px-2 text-right font-normal">Mark</th>
-                <th className="h-[26px] px-2 text-right font-normal">Liq.</th>
-                <th className="h-[26px] px-2 text-right font-normal">Health</th>
+                <th className="h-[26px] px-2 text-right font-normal">Entry / Mark</th>
+                <th className="h-[26px] px-2 text-right font-normal">Liq. / Health</th>
                 <th className="h-[26px] px-2 text-right font-normal">uPnL</th>
                 <th className="h-[26px]"></th>
               </tr>
@@ -609,27 +611,37 @@ export function PositionsTable({}: PositionsTableProps) {
               {/* ER (pending-settlement) position — filled on the rollup, not yet
                   settled to an L1 Position. Reconstructed from the ER fill queue. */}
               {erPosition && (
-                <tr className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
+                <tr className="h-[42px] text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
                   <td className="px-2 text-left">
-                    <span className="inline-flex items-center gap-2">
-                      <SideBadge isLong={erPosition.isLong} />
-                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--t-warn)]">
-                        <span className="h-1 w-1 rounded-full bg-[var(--t-warn)] animate-pulse" />
-                        Pending
+                    <div className="flex flex-col gap-0.5 leading-tight">
+                      <span className="font-semibold text-[var(--t-text)]">SOL-PERP</span>
+                      <span className="inline-flex items-center gap-1.5">
+                        <SideBadge isLong={erPosition.isLong} />
+                        <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--t-warn)]">
+                          <span className="h-1 w-1 rounded-full bg-[var(--t-warn)] animate-pulse" />
+                          Pending
+                        </span>
                       </span>
-                    </span>
+                    </div>
                   </td>
-                  <td className={`text-right tnum ${erPosition.isLong ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+                  <td className={`px-2 text-right tnum ${erPosition.isLong ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                     {Math.abs(erPosition.size).toFixed(3)}
                   </td>
-                  <td className="px-2 text-right tnum text-[var(--t-text)]">
-                    ${erPosition.entryPrice.toFixed(2)}
-                  </td>
-                  <td
-                    className={`px-2 text-right tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text)]"}`}
-                    title={markStale && markReason ? markReason : undefined}
-                  >
-                    {reference !== null ? `$${reference.toFixed(2)}` : "—"}
+                  {/* Entry over Mark. Mark keeps its own staleness colour and
+                      reason tooltip — pairing them must not make the live half
+                      inherit the entry's certainty. */}
+                  <td className="px-2 text-right">
+                    <div className="flex flex-col gap-0.5 leading-tight">
+                      <span className="tnum text-[var(--t-text)]">
+                        ${erPosition.entryPrice.toFixed(2)}
+                      </span>
+                      <span
+                        className={`tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text-2)]"}`}
+                        title={markStale && markReason ? markReason : undefined}
+                      >
+                        {reference !== null ? `${reference.toFixed(2)}` : "—"}
+                      </span>
+                    </div>
                   </td>
                   {(() => {
                     const mk = reference;
@@ -648,14 +660,14 @@ export function PositionsTable({}: PositionsTableProps) {
                       0
                     );
                     return (
-                      <>
-                        <td className="px-2 text-right tnum text-[var(--t-warn)]">
-                          {liq !== null ? `$${liq.toFixed(2)}` : "—"}
-                        </td>
-                        <td className="px-2 text-right">
+                      <td className="px-2 text-right">
+                        <div className="flex flex-col items-end gap-0.5 leading-tight">
+                          <span className="tnum text-[var(--t-warn)]">
+                            {liq !== null ? `${liq.toFixed(2)}` : "—"}
+                          </span>
                           <HealthCell health={health} />
-                        </td>
-                      </>
+                        </div>
+                      </td>
                     );
                   })()}
                   {/* PNL-1/ERPNL-1: the className branches on null as well as
@@ -691,9 +703,11 @@ export function PositionsTable({}: PositionsTableProps) {
                 const size = Number(pos.size < 0n ? -pos.size : pos.size) / 1e9;
                 const sizeAtoms = pos.size < 0n ? -pos.size : pos.size;
                 return (
-                  <tr key={i} className="h-7 text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
+                  <tr key={i} className="h-[42px] text-[11.5px] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)]">
                     <td className="px-2 text-left">
-                      <span className="inline-flex items-center gap-2">
+                      <div className="flex flex-col gap-0.5 leading-tight">
+                        <span className="font-semibold text-[var(--t-text)]">SOL-PERP</span>
+                      <span className="inline-flex items-center gap-1.5">
                         <SideBadge isLong={pos.isLong} />
                         {(triggers.stopLoss || triggers.takeProfit) && (
                           <span className="inline-flex items-center gap-1">
@@ -714,18 +728,23 @@ export function PositionsTable({}: PositionsTableProps) {
                           </span>
                         )}
                       </span>
+                      </div>
                     </td>
-                    <td className={`text-right tnum ${pos.size > 0n ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
+                    <td className={`px-2 text-right tnum ${pos.size > 0n ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
                       {size.toFixed(3)}
                     </td>
-                    <td className="px-2 text-right tnum text-[var(--t-text)]">
-                      ${(Number(pos.entryPrice) / PRICE_SCALE).toFixed(2)}
-                    </td>
-                    <td
-                      className={`px-2 text-right tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text)]"}`}
-                      title={markStale && markReason ? markReason : undefined}
-                    >
-                      {reference !== null ? `$${reference.toFixed(2)}` : "—"}
+                    <td className="px-2 text-right">
+                      <div className="flex flex-col gap-0.5 leading-tight">
+                        <span className="tnum text-[var(--t-text)]">
+                          ${(Number(pos.entryPrice) / PRICE_SCALE).toFixed(2)}
+                        </span>
+                        <span
+                          className={`tnum ${markStale ? "text-[var(--t-warn)]" : "text-[var(--t-text-2)]"}`}
+                          title={markStale && markReason ? markReason : undefined}
+                        >
+                          {reference !== null ? `${reference.toFixed(2)}` : "—"}
+                        </span>
+                      </div>
                     </td>
                     {(() => {
                       const mk = reference;
@@ -746,14 +765,14 @@ export function PositionsTable({}: PositionsTableProps) {
                         fundingRate
                       );
                       return (
-                        <>
-                          <td className="px-2 text-right tnum text-[var(--t-warn)]">
-                            {liq !== null ? `$${liq.toFixed(2)}` : "—"}
-                          </td>
-                          <td className="px-2 text-right">
+                        <td className="px-2 text-right">
+                          <div className="flex flex-col items-end gap-0.5 leading-tight">
+                            <span className="tnum text-[var(--t-warn)]">
+                              {liq !== null ? `${liq.toFixed(2)}` : "—"}
+                            </span>
                             <HealthCell health={health} />
-                          </td>
-                        </>
+                          </div>
+                        </td>
                       );
                     })()}
                     {/* Same null-before-sign branch as the ER row above, and
@@ -824,7 +843,7 @@ export function PositionsTable({}: PositionsTableProps) {
                   per-owner-per-market Position + TriggerOrder PDAs). */}
               {triggerOpen && positions.length > 0 && (
                 <tr className="border-b border-[var(--t-surface-2)] last:border-b-0">
-                  <td colSpan={8} className="py-3">
+                  <td colSpan={6} className="py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       <label className="flex items-center gap-1.5 text-[11px] text-[var(--t-text-2)]">
                         Stop-loss $
