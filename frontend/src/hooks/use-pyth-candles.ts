@@ -11,7 +11,7 @@ export interface Candle {
   c: number;
 }
 
-/** TradingView-style resolution codes the Benchmarks API accepts. */
+/** TradingView-style resolution codes the UDF history proxy accepts. */
 export interface Resolution {
   label: string;
   /** UDF resolution code (e.g. "1", "60", "D"). */
@@ -36,12 +36,18 @@ export const RESOLUTIONS: Resolution[] = [
 const NO_CANDLES: Candle[] = [];
 
 /**
- * Load REAL historical OHLC candles for SOL/USD from Pyth Benchmarks (via the
- * same-origin /api/pyth/history proxy). These are genuine measured candles from
- * Pythnet — not client-accumulated samples.
+ * Load REAL historical OHLC candles for SOL/USD via the same-origin
+ * /api/pyth/history proxy. Genuine measured candles, not client-accumulated
+ * samples.
+ *
+ * The proxy picks the upstream (Pyth retired its free Benchmarks TradingView
+ * shim on 2026-08-26), so WHICH source answered is data, not a constant: it
+ * comes back as `src` and is surfaced as `source` here. The chart labels
+ * itself from that rather than hardcoding an attribution that may be false.
  */
 export function usePythCandles(resolution: Resolution) {
   const [candles, setCandles] = useState<Candle[]>(NO_CANDLES);
+  const [source, setSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const reqId = useRef(0);
@@ -91,6 +97,7 @@ export function usePythCandles(resolution: Resolution) {
         c: data.c[i],
       }));
       setCandles(out);
+      setSource(typeof data.src === "string" ? data.src : null);
     } catch (e) {
       if (id === reqId.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -105,5 +112,5 @@ export function usePythCandles(resolution: Resolution) {
     return startPoll(load, 60_000);
   }, [load]);
 
-  return { candles, loading, error, reload: load };
+  return { candles, loading, error, source, reload: load };
 }

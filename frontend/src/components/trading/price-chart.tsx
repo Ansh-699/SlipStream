@@ -13,7 +13,11 @@ const CHIP =
 export function PriceChart() {
   const [resIdx, setResIdx] = useState(1); // default 5m
   const resolution = RESOLUTIONS[resIdx];
-  const { candles: history, loading, error } = usePythCandles(resolution);
+  // `source` is data, not a constant. Pyth retired its free Benchmarks
+  // TradingView shim on 2026-08-26, so the proxy chooses the upstream and the
+  // labels below name whichever one actually answered — hardcoding "via Pyth"
+  // would caption Coinbase candles with the wrong attribution.
+  const { candles: history, loading, error, source } = usePythCandles(resolution);
   const { live } = useLivePrice();
   // The header price comes from useMarkPrice, not from `live`. useLivePrice
   // gates only on `connected`, and a socket that stays OPEN and stops
@@ -153,7 +157,7 @@ export function PriceChart() {
         <span className="text-[var(--t-text-2)]">
           <span className="font-semibold text-[var(--t-text)]">SOL-PERP</span>
           {" · "}
-          {resolution.label} · SOL/USD via Pyth
+          {resolution.label} · SOL/USD{source ? ` via ${source}` : ""}
         </span>
         <span className="flex items-center gap-2 text-[var(--t-text-3)]">
           <span>
@@ -186,8 +190,8 @@ export function PriceChart() {
             </span>
             <span className="max-w-[42ch] text-[12px] leading-relaxed text-[var(--t-text-2)]">
               {error
-                ? "The Pyth Benchmarks feed didn't answer. It retries on its own; pick another interval if it stays empty."
-                : "Crypto.SOL/USD · Pyth Benchmarks"}
+                ? "The price-history feed didn't answer. It retries on its own; pick another interval if it stays empty."
+                : `Crypto.SOL/USD${source ? ` · ${source}` : ""}`}
             </span>
           </div>
         )}
@@ -199,7 +203,9 @@ export function PriceChart() {
             at this width rather than promise one that no longer does. */}
         <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
         <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
-        <span>{resolution.label} candles · Pyth Benchmarks history + MagicBlock live</span>
+        <span>
+          {resolution.label} candles · {source ? `${source} history` : "history"} + MagicBlock live
+        </span>
       </div>
     </div>
   );
