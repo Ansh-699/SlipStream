@@ -164,9 +164,9 @@ export function OrderBookDisplay() {
                 {/* Asks — col-reverse so best ask sits at the bottom (by the mid)
                     and the section scrolls reliably into deeper levels. */}
                 <div className="flex-1 flex flex-col-reverse min-h-0 overflow-y-auto slim-scroll">
-                  {askRows.map((l, i) => (
+                  {askRows.map((l) => (
                     <Row
-                      key={`a-${i}`}
+                      key={`a-${l.price}`}
                       {...l}
                       maxCum={maxCum}
                       side="ask"
@@ -179,9 +179,9 @@ export function OrderBookDisplay() {
 
                 {/* Bids — scrollable, anchored to the top (best bid near the mid) */}
                 <div className="flex-1 flex flex-col justify-start min-h-0 overflow-y-auto slim-scroll">
-                  {bidRows.map((l, i) => (
+                  {bidRows.map((l) => (
                     <Row
-                      key={`b-${i}`}
+                      key={`b-${l.price}`}
                       {...l}
                       maxCum={maxCum}
                       side="bid"
@@ -384,6 +384,14 @@ function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) 
  *
  * Returns a stamp per level; the stamp changes only on a real change, so a Row
  * can flash off it and stays quiet through pure re-ordering.
+ *
+ * This only works because the rows are KEYED BY PRICE. Getting the stamps right
+ * was not enough on its own: with index keys React hands row 5 a different LEVEL
+ * when the ladder shifts, so its `stamp` prop changes from one level's stamp to
+ * another's and it flashes although neither level moved. Measured, that left
+ * ~2 flashes per genuinely changed level. A price key gives each level a stable
+ * component, so it carries its own stamp as it moves rows, and levels that
+ * appear or leave mount and unmount instead of being recycled.
  */
 function useLevelStamps(
   askRows: { price: number; size: number }[],
