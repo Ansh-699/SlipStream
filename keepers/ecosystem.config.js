@@ -77,7 +77,13 @@ module.exports = {
       BOT_MM_LEVELS: "6",
       BOT_MM_SPREAD_BPS: "2",
       BOT_MM_INTERVAL_MS: "2000",
-      BOT_MM_REFRESH_BPS: "8",
+      // Re-quote once the mid has moved 4 bps (~$0.04 at $105) instead of 8.
+      // The ladder is only 6 levels x 2 bps = 12 bps wide per side, so at the old
+      // threshold the mid could walk two thirds of the way through the ladder
+      // before the bots reacted and the top of book drifted visibly off spot.
+      // Cancel/replace creates no FILLS, only order churn, so this costs ER
+      // transactions and nothing on the settlement path.
+      BOT_MM_REFRESH_BPS: "4",
     }),
     // Taker: continuously crosses the MM's book so the demo shows live fills
     // (Recent Trades / Trade History / toasts / the fills indexer all need real

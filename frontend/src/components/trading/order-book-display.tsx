@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useOrderBook } from "@/hooks/use-orderbook";
 import { explorerAddress, TICK_SIZE } from "@/lib/manifest";
 
@@ -165,17 +165,7 @@ export function OrderBookDisplay() {
                   ))}
                 </div>
 
-                {/* Mid / spread. The mid is neither a bid nor an ask, so it stays
-                    neutral — green and red mean side in this panel. */}
-                <div className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
-                  <span className="text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
-                    {mid !== null ? mid.toFixed(3) : "—"}
-                  </span>
-                  <span className="text-[11px] text-[var(--t-text-3)]">mid</span>
-                  <span className="ml-auto text-[11px] text-[var(--t-text-2)] tnum">
-                    {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
-                  </span>
-                </div>
+                <MidRow mid={mid} spread={spread} />
 
                 {/* Bids — scrollable, anchored to the top (best bid near the mid) */}
                 <div className="flex-1 flex flex-col justify-start min-h-0 overflow-y-auto slim-scroll">
@@ -263,6 +253,100 @@ export function OrderBookDisplay() {
 
 
 
+/**
+ * Flash an element when the values it displays change.
+ *
+ * Web Animations API rather than a CSS class toggle: re-applying the SAME
+ * animation name to an element does not restart it, so a class-based flash
+ * silently stops firing once a row updates twice in a row -- which is every row,
+ * every tick, on a live book. `element.animate()` builds a fresh animation each
+ * call, so it always restarts, and it needs no extra state and no re-render to
+ * do it (20 rows x ~0.4 updates/s, so the object churn is nothing).
+ *
+ * Never flashes on FIRST paint: `prev === null` means "we have not seen a value
+ * yet", not "the value changed", and without that distinction the whole ladder
+ * strobes on every mount and every tab switch.
+ *
+ * Honours prefers-reduced-motion by simply not animating -- the numbers still
+ * update, they just do not pulse.
+ */
+function useFlash<T>(deps: T, tint: string, durationMs = 420) {
+  const ref = useRef<HTMLDivElement>(null);
+  const prev = useRef<string | null>(null);
+  const sig = JSON.stringify(deps);
+  useEffect(() => {
+    const first = prev.current === null;
+    const changed = !first && prev.current !== sig;
+    prev.current = sig;
+    if (!changed) return;
+    const el = ref.current;
+    if (!el || typeof el.animate !== "function") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    el.animate(
+      [{ backgroundColor: tint }, { backgroundColor: "transparent" }],
+      { duration: durationMs, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+    );
+  }, [sig, tint, durationMs]);
+  return ref;
+}
+
+/**
+ * Mid / spread, with a direction arrow and a flash on change.
+ *
+ * The NUMBER stays neutral. This panel's standing rule is that green and red
+ * mean SIDE, and the mid is neither a bid nor an ask -- colouring it would make
+ * the loudest number on the panel say "ask" every time the book ticked up.
+ * The arrow and the flash are a deliberate, narrow exception: they encode
+ * direction in TIME, they are transient, and an arrow cannot be read as a side.
+ */
+function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) {
+  // Direction lives in STATE, not in a ref read during render. Deriving it from
+  // `prevMid.current` inline is a render-phase ref read: React may render without
+  // committing, so the "previous" mid can advance for a paint that never happened
+  // and the arrow ends up describing a move the user never saw. It is also the
+  // exact rule (react-hooks/refs) that lib/shared-source.ts had to be fixed for.
+  // Keeping it in state also makes the arrow persist between ticks by itself,
+  // instead of needing a second ref to hold it.
+  const [shown, setShown] = useState<"up" | "down" | null>(null);
+  const prevMid = useRef<number | null>(null);
+  useEffect(() => {
+    const p = prevMid.current;
+    prevMid.current = mid;
+    if (p === null || mid === null || mid === p) return;
+    setShown(mid > p ? "up" : "down");
+  }, [mid]);
+  const ref = useFlash(
+    [mid, spread],
+    shown === "down" ? "rgba(239,68,68,0.13)" : "rgba(34,197,94,0.13)",
+    500
+  );
+
+  return (
+    <div
+      ref={ref}
+      className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]"
+    >
+      <span className="text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
+        {mid !== null ? mid.toFixed(3) : "—"}
+      </span>
+      {shown && mid !== null && (
+        <span
+          aria-hidden
+          className={`text-[11px] leading-[34px] ${
+            shown === "up" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"
+          }`}
+        >
+          {shown === "up" ? "▲" : "▼"}
+        </span>
+      )}
+      <span className="text-[11px] text-[var(--t-text-3)]">mid</span>
+      <span className="ml-auto text-[11px] text-[var(--t-text-2)] tnum">
+        {spread !== null ? `spread ${spread.toFixed(3)}` : ""}
+      </span>
+    </div>
+  );
+}
+
 function Row({
   price,
   size,
@@ -277,12 +361,26 @@ function Row({
   side: "bid" | "ask";
 }) {
   const pct = Math.min(100, (total / maxCum) * 100);
+  // Tinted with the row's own side rather than a white wash: white is invisible
+  // in light mode, and the side colour already means "bid"/"ask" here. 0.16 over
+  // the bar's own 0.10 is a lift you notice at the edge of vision and cannot
+  // mistake for a real depth change.
+  const ref = useFlash(
+    [price, size],
+    side === "bid" ? "rgba(34,197,94,0.16)" : "rgba(239,68,68,0.16)"
+  );
   return (
-    <div className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]">
-      {/* cumulative-depth bar grows from the right edge */}
+    <div
+      ref={ref}
+      className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]"
+    >
+      {/* cumulative-depth bar grows from the right edge. The width transition is
+          what stops the ladder from snapping between frames: the bar slides to
+          its new depth over one frame-budget-friendly 260ms instead of jumping,
+          which is most of what reads as "smooth" in a live book. */}
       <div
         aria-hidden
-        className="absolute inset-y-0 right-0"
+        className="absolute inset-y-0 right-0 motion-safe:transition-[width] motion-safe:duration-[260ms] motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]"
         style={{
           width: `${pct}%`,
           backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
