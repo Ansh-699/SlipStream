@@ -83,7 +83,7 @@ module.exports = {
       // before the bots reacted and the top of book drifted visibly off spot.
       // Cancel/replace creates no FILLS, only order churn, so this costs ER
       // transactions and nothing on the settlement path.
-      BOT_MM_REFRESH_BPS: "4",
+      BOT_MM_REFRESH_BPS: "2",
     }),
     // Taker: continuously crosses the MM's book so the demo shows live fills
     // (Recent Trades / Trade History / toasts / the fills indexer all need real

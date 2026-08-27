@@ -315,18 +315,16 @@ function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) 
     if (p === null || mid === null || mid === p) return;
     setShown(mid > p ? "up" : "down");
   }, [mid]);
-  const ref = useFlash(
+  const flashRef = useFlash(
     [mid, spread],
-    shown === "down" ? "rgba(239,68,68,0.13)" : "rgba(34,197,94,0.13)",
-    500
+    shown === "down" ? "rgba(239,68,68,0.26)" : "rgba(34,197,94,0.26)",
+    560
   );
 
   return (
-    <div
-      ref={ref}
-      className="h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]"
-    >
-      <span className="text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
+    <div className="relative h-[34px] shrink-0 flex items-baseline gap-2 px-3 border-y border-[var(--t-border)]">
+      <div ref={flashRef} aria-hidden className="absolute inset-0 pointer-events-none" />
+      <span className="relative text-[15px] font-bold tnum text-[var(--t-text)] leading-[34px]">
         {mid !== null ? mid.toFixed(3) : "—"}
       </span>
       {shown && mid !== null && (
@@ -365,15 +363,19 @@ function Row({
   // in light mode, and the side colour already means "bid"/"ask" here. 0.16 over
   // the bar's own 0.10 is a lift you notice at the edge of vision and cannot
   // mistake for a real depth change.
-  const ref = useFlash(
+  // The flash paints on its OWN overlay, not on the row's background. The row's
+  // background sits UNDERNEATH the depth bar, so a row whose bar is wide had most
+  // of its flash muted by the bar's own 0.10 fill — the wider the level, the less
+  // you saw, which is backwards. The overlay is a later sibling than the bar, so
+  // it composites above it, and the text spans are `relative` so they stay on top
+  // of both.
+  const flashRef = useFlash(
     [price, size],
-    side === "bid" ? "rgba(34,197,94,0.16)" : "rgba(239,68,68,0.16)"
+    side === "bid" ? "rgba(34,197,94,0.30)" : "rgba(239,68,68,0.30)",
+    520
   );
   return (
-    <div
-      ref={ref}
-      className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]"
-    >
+    <div className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]">
       {/* cumulative-depth bar grows from the right edge. The width transition is
           what stops the ladder from snapping between frames: the bar slides to
           its new depth over one frame-budget-friendly 260ms instead of jumping,
@@ -386,6 +388,8 @@ function Row({
           backgroundColor: side === "bid" ? "rgba(34,197,94,0.10)" : "rgba(239,68,68,0.10)",
         }}
       />
+      {/* Flash overlay — full width, above the depth bar, below the text. */}
+      <div ref={flashRef} aria-hidden className="absolute inset-0 pointer-events-none" />
       <span className={`relative tnum ${side === "bid" ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
         {price.toFixed(3)}
       </span>
