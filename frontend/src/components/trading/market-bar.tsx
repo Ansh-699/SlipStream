@@ -122,9 +122,13 @@ export function MarketBar() {
         </span>
         {day && up !== null && (
           <span className={`tnum text-[12px] font-medium ${up ? "text-[var(--t-up)]" : "text-[var(--t-down)]"}`}>
-            {up ? "+" : ""}
-            {day.change.toFixed(2)} {up ? "+" : ""}
-            {day.changePct.toFixed(2)}%
+            {/* The absolute change carries a $ and the percentage is bracketed.
+                Printed bare and side by side as "+11.30 +11.78%", the first
+                number has no unit and reads as a second percentage — two
+                signed figures of the same magnitude, one of which silently
+                means dollars. */}
+            {up ? "+" : "−"}${Math.abs(day.change).toFixed(2)}{" "}
+            ({up ? "+" : "−"}{Math.abs(day.changePct).toFixed(2)}%)
           </span>
         )}
       </div>

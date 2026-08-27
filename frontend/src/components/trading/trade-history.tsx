@@ -1,15 +1,25 @@
 "use client";
 
 import { startPoll } from "@/lib/poll";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useOrderBook } from "@/hooks/use-orderbook";
 import { useWallet } from "@/hooks/use-wallet-compat";
 import { explorerAddress } from "@/lib/manifest";
 import { PRICE_SCALE, SIDE_BID } from "@/lib/slipstream";
 
 /**
- * Settled trade history, served from the fills indexer the settlement keeper
- * writes (/api/trades). Connected wallet -> personal history with Maker/Taker
- * role + fees; otherwise the market-wide settled tape.
+ * Trade history: the wallet's SETTLED fills from the L1 indexer the settlement
+ * keeper writes (/api/trades), plus its fills that have executed on the ER but
+ * not yet settled.
+ *
+ * Showing only settled fills made this panel read "No settled fills yet" to a
+ * trader who had demonstrably just traded — every fill was sitting unsettled in
+ * the ER ring, and the panel had no way to say so. That is the same failure this
+ * codebase keeps having to remove: a state the UI cannot express being rendered
+ * as an emphatic, wrong, empty one. Settlement being behind is a fact about the
+ * pipeline, not evidence that nothing happened.
+ *
+ * Pending rows come from the shared order book, so they cost no extra request.
  */
 
 interface FillRow {
@@ -60,7 +70,39 @@ export function TradeHistory() {
     };
   }, [wallet]);
 
-  const volume = fills.reduce((s, f) => s + (f.quantity / 1e9) * (f.price / PRICE_SCALE), 0);
+  // Unsettled fills for this wallet, straight off the shared ER book.
+  const { fillEvents, status: bookStatus } = useOrderBook(0);
+  const pending = useMemo(() => {
+    if (!wallet) return [];
+    const settledSeq = new Set(fills.map((f) => f.sequence));
+    const out: FillRow[] = [];
+    for (const fe of fillEvents) {
+      if (fe.quantity <= 0n) continue;
+      const maker = fe.maker.toBase58();
+      const taker = fe.taker.toBase58();
+      if (maker !== wallet && taker !== wallet) continue;
+      const seq = Number(fe.sequence);
+      // A fill that HAS settled is already in `fills` with a real timestamp and
+      // fee figures; the ring copy would be a worse duplicate of it.
+      if (settledSeq.has(seq)) continue;
+      out.push({
+        sequence: seq,
+        price: Number(fe.price),
+        quantity: Number(fe.quantity),
+        maker,
+        taker,
+        maker_side: fe.makerSide,
+        taker_fee_bps: 0,
+        maker_rebate_bps: 0,
+        settled_at: 0, // 0 = not settled; the row renders "pending" instead of a time
+      });
+    }
+    out.sort((a, b) => b.sequence - a.sequence);
+    return out.slice(0, 60);
+  }, [fillEvents, wallet, fills]);
+
+  const rows = useMemo(() => [...pending, ...fills], [pending, fills]);
+  const volume = rows.reduce((s, f) => s + (f.quantity / 1e9) * (f.price / PRICE_SCALE), 0);
 
   return (
     <div className="flex flex-col min-h-0">
@@ -69,13 +111,16 @@ export function TradeHistory() {
           Trade History
         </span>
         <div className="flex items-center gap-3 text-[11px] text-[var(--t-text-3)] truncate">
-          {fills.length > 0 && (
+          {rows.length > 0 && (
             <span className="tnum">
-              {fills.length} fills · ${volume.toFixed(0)} vol
+              {rows.length} fills · ${volume.toFixed(0)} vol
             </span>
           )}
+          {pending.length > 0 && (
+            <span className="tnum text-[var(--t-warn)]">{pending.length} settling</span>
+          )}
           <span className="truncate">
-            {wallet ? "Your settled fills" : "All settled fills"} · from the L1 settlement pipeline
+            {wallet ? "Your fills" : "All settled fills"} · L1 settlement + live rollup
           </span>
         </div>
       </div>
@@ -91,12 +136,18 @@ export function TradeHistory() {
         </div>
 
         <div className="max-h-[220px] overflow-y-auto slim-scroll">
-          {fills.length === 0 ? (
+          {rows.length === 0 ? (
             <div className="text-center text-xs text-[var(--t-text-2)] py-6">
-              {indexed ? "No settled fills yet" : "Indexer warming up…"}
+              {bookStatus === "loading"
+                ? "Loading your fills…"
+                : bookStatus === "unavailable"
+                  ? "Can't reach the order book"
+                  : !indexed
+                    ? "Indexer warming up…"
+                    : "No fills yet"}
             </div>
           ) : (
-            fills.map((f) => {
+            rows.map((f) => {
               const isMaker = wallet !== null && f.maker === wallet;
               // Taker side is opposite the resting (maker) side; flip again for
               // the viewer's own side when they were the maker.
@@ -105,13 +156,24 @@ export function TradeHistory() {
               const counterparty = isMaker ? f.taker : f.maker;
               return (
                 <a
-                  key={f.sequence}
+                  key={`${f.settled_at === 0 ? "p" : "s"}-${f.sequence}`}
                   href={explorerAddress(counterparty, "er")}
                   target="_blank"
                   rel="noopener noreferrer"
                   className={`${GRID} group h-7 text-[11.5px] text-[var(--t-text)] border-b border-[var(--t-surface-2)] last:border-b-0 hover:bg-[var(--t-surface-3)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--t-up)]`}
                 >
-                  <span className="font-mono tnum text-[var(--t-text-2)]">{fmtTime(f.settled_at)}</span>
+                  <span
+                    className={`font-mono tnum ${
+                      f.settled_at === 0 ? "text-[var(--t-warn)]" : "text-[var(--t-text-2)]"
+                    }`}
+                    title={
+                      f.settled_at === 0
+                        ? "Executed on the rollup; waiting on L1 settlement"
+                        : undefined
+                    }
+                  >
+                    {f.settled_at === 0 ? "settling" : fmtTime(f.settled_at)}
+                  </span>
                   <span className="text-right font-mono tnum">
                     {(f.price / PRICE_SCALE).toFixed(3)}
                   </span>

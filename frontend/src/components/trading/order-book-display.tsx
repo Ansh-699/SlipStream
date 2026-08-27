@@ -50,6 +50,10 @@ export function OrderBookDisplay() {
     return { askRows, bidRows: bidCum, maxCum, mid, spread, buyPct };
   }, [bids, asks]);
 
+  // Change detection lives HERE, above the rows, because it needs to compare
+  // whole LEVEL SETS between ticks — something no individual row can see.
+  const levelStamps = useLevelStamps(askRows, bidRows);
+
   const empty = bids.length === 0 && asks.length === 0;
   const sellPct = 100 - buyPct;
 
@@ -161,7 +165,13 @@ export function OrderBookDisplay() {
                     and the section scrolls reliably into deeper levels. */}
                 <div className="flex-1 flex flex-col-reverse min-h-0 overflow-y-auto slim-scroll">
                   {askRows.map((l, i) => (
-                    <Row key={`a-${i}`} {...l} maxCum={maxCum} side="ask" />
+                    <Row
+                      key={`a-${i}`}
+                      {...l}
+                      maxCum={maxCum}
+                      side="ask"
+                      stamp={levelStamps.get(`a:${l.price}`) ?? 0}
+                    />
                   ))}
                 </div>
 
@@ -170,7 +180,13 @@ export function OrderBookDisplay() {
                 {/* Bids — scrollable, anchored to the top (best bid near the mid) */}
                 <div className="flex-1 flex flex-col justify-start min-h-0 overflow-y-auto slim-scroll">
                   {bidRows.map((l, i) => (
-                    <Row key={`b-${i}`} {...l} maxCum={maxCum} side="bid" />
+                    <Row
+                      key={`b-${i}`}
+                      {...l}
+                      maxCum={maxCum}
+                      side="bid"
+                      stamp={levelStamps.get(`b:${l.price}`) ?? 0}
+                    />
                   ))}
                 </div>
               </>
@@ -270,13 +286,17 @@ export function OrderBookDisplay() {
  * Honours prefers-reduced-motion by simply not animating -- the numbers still
  * update, they just do not pulse.
  */
-function useFlash<T>(deps: T, tint: string, durationMs = 420) {
+function useFlash<T>(deps: T, tint: string, durationMs = 420, flashOnFirst = false) {
   const ref = useRef<HTMLDivElement>(null);
   const prev = useRef<string | null>(null);
   const sig = JSON.stringify(deps);
   useEffect(() => {
     const first = prev.current === null;
-    const changed = !first && prev.current !== sig;
+    // `flashOnFirst` covers a level that appears as a NEW row rather than by
+    // re-pricing an existing one: the component mounts already carrying a
+    // change stamp, and treating that as "first sight, nothing changed" would
+    // swallow the one flash the user most wants to see — a level being ADDED.
+    const changed = first ? flashOnFirst : prev.current !== sig;
     prev.current = sig;
     if (!changed) return;
     const el = ref.current;
@@ -286,6 +306,10 @@ function useFlash<T>(deps: T, tint: string, durationMs = 420) {
       [{ backgroundColor: tint }, { backgroundColor: "transparent" }],
       { duration: durationMs, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
     );
+    // flashOnFirst is read only on the very first run by construction, so it is
+    // deliberately not a dependency: including it would re-fire the flash every
+    // time the parent recomputed the stamp map.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, tint, durationMs]);
   return ref;
 }
@@ -345,18 +369,78 @@ function MidRow({ mid, spread }: { mid: number | null; spread: number | null }) 
   );
 }
 
+/**
+ * Which PRICE LEVELS changed, keyed by price rather than by row position.
+ *
+ * The flash used to live inside Row and compare that row's own previous props.
+ * Rows are index-keyed, so row 0 is always "best ask" — when the ladder shifts
+ * by a single level every row's displayed price changes and the ENTIRE book
+ * flashed, even though almost every level was untouched and had merely moved up
+ * or down one slot. That is not what a level update looks like.
+ *
+ * Keying on price makes the identity right: a level flashes when it is ADDED, or
+ * when its size changes. A level that only moved rows does not, because as far as
+ * the book is concerned nothing happened to it.
+ *
+ * Returns a stamp per level; the stamp changes only on a real change, so a Row
+ * can flash off it and stays quiet through pure re-ordering.
+ */
+function useLevelStamps(
+  askRows: { price: number; size: number }[],
+  bidRows: { price: number; size: number }[]
+): Map<string, number> {
+  const [stamps, setStamps] = useState<Map<string, number>>(() => new Map());
+  const prevSizes = useRef<Map<string, number> | null>(null);
+  const seq = useRef(0);
+
+  useEffect(() => {
+    const now = new Map<string, number>();
+    for (const l of askRows) now.set(`a:${l.price}`, l.size);
+    for (const l of bidRows) now.set(`b:${l.price}`, l.size);
+    const prev = prevSizes.current;
+    prevSizes.current = now;
+    // First book we ever see: everything is "new" only in the trivial sense.
+    // Flashing the whole ladder on arrival is exactly the strobe being removed.
+    if (prev === null) return;
+
+    let any = false;
+    for (const [k, size] of now) {
+      const before = prev.get(k);
+      if (before === undefined || before !== size) { any = true; break; }
+    }
+    if (!any) return;
+
+    const stamp = (seq.current += 1);
+    // Rebuilt from `now`'s keys, so levels that leave the book drop out of the
+    // map instead of accumulating for the lifetime of the page.
+    setStamps((prevStamps) => {
+      const next = new Map<string, number>();
+      for (const [k, size] of now) {
+        const before = prev.get(k);
+        next.set(k, before === undefined || before !== size ? stamp : prevStamps.get(k) ?? 0);
+      }
+      return next;
+    });
+  }, [askRows, bidRows]);
+
+  return stamps;
+}
+
 function Row({
   price,
   size,
   total,
   maxCum,
   side,
+  stamp,
 }: {
   price: number;
   size: number;
   total: number;
   maxCum: number;
   side: "bid" | "ask";
+  /** Bumped by useLevelStamps only when THIS price level changed size or appeared. */
+  stamp: number;
 }) {
   const pct = Math.min(100, (total / maxCum) * 100);
   // Tinted with the row's own side rather than a white wash: white is invisible
@@ -369,10 +453,16 @@ function Row({
   // you saw, which is backwards. The overlay is a later sibling than the bar, so
   // it composites above it, and the text spans are `relative` so they stay on top
   // of both.
+  // Keyed off the level stamp, NOT off [price, size]. This row's own price
+  // changes every time the ladder shifts by one slot, which is why the whole
+  // book used to flash at once; the stamp only moves when this PRICE LEVEL
+  // actually changed. `stamp > 0` on first sight means the row mounted for a
+  // level that had just been added, which should flash.
   const flashRef = useFlash(
-    [price, size],
+    [stamp],
     side === "bid" ? "rgba(34,197,94,0.30)" : "rgba(239,68,68,0.30)",
-    520
+    520,
+    stamp > 0
   );
   return (
     <div className="relative grid grid-cols-3 items-center h-5 shrink-0 px-3 text-[11.5px]">

@@ -137,7 +137,13 @@ export function useOrderBook(marketIndex: number = 0): OrderBookData {
       spread,
       trades,
       orderSlots: book.orderSlots,
-      fillEvents: book.fillEvents,
+      // The ring's LIVE WINDOW, newest first — not the raw slot array.
+      // book.fillEvents is a 4096-slot ring buffer: the raw array is in physical
+      // slot order and still holds drained entries, so a consumer reading it
+      // positionally gets neither "recent" nor "valid". recentFills walks it from
+      // fillEventHead for fillEventCount entries and drops the empty slots, which
+      // is what every consumer actually wants.
+      fillEvents: recentFills(book, book.header.fillEventCount),
       nextFillSequence: Number(book.header.nextFillSequence),
       status: bids.length || asks.length ? "live" : "empty",
       updatedAt: Date.now(),
