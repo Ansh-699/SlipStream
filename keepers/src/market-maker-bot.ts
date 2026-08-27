@@ -172,7 +172,9 @@ async function cycleWallet(
   ctx: MmContext,
   wallet: BotWallet,
   pyth: PythPrice,
-  bandIndex: number
+  bandIndex: number,
+  cycle: number,
+  walletCount: number
 ): Promise<void> {
   const owner = wallet.keypair.publicKey;
   const mid6 = pyth.price6;
@@ -188,7 +190,24 @@ async function cycleWallet(
   const targetOrders = LEVELS * 2;
   let shouldRefresh = myOrders.length === 0 || prevMid === undefined;
   if (!shouldRefresh && myOrders.length < targetOrders * 0.6) shouldRefresh = true;
-  if (!shouldRefresh && prevMid !== undefined) {
+  // STAGGERED. A refresh is cancel-then-place across two transactions, so while
+  // it runs this wallet has NO orders on the book. Both MM wallets watch the same
+  // Pyth mid, so before this they re-quoted on the same tick and the book could
+  // lose every level on a side at once -- which is what surfaced in the UI as the
+  // ask ladder collapsing to half depth, the spread jumping from 0.04 to 0.30,
+  // and the ancient $74 orders scrolling up into view because the fresh levels
+  // above them had momentarily gone. The panel was rendering that honestly; the
+  // book really was that thin for a moment.
+  //
+  // Only one wallet may take the mid-move refresh per cycle, so the other always
+  // holds a full ladder. The cost is that a wallet's quotes can be one cycle
+  // (INTERVAL_MS) stale, which is far cheaper than a hole in the book.
+  //
+  // Deliberately does NOT gate the two recovery triggers above: a wallet with no
+  // orders, or one that has been eaten down, must re-quote on the spot -- those
+  // are the cases where waiting a cycle makes the hole WORSE.
+  const myTurn = walletCount <= 1 || cycle % walletCount === bandIndex;
+  if (!shouldRefresh && prevMid !== undefined && myTurn) {
     const moveBps = Number((abs(mid6 - prevMid) * 10_000n) / (prevMid === 0n ? 1n : prevMid));
     if (moveBps >= REFRESH_BPS) shouldRefresh = true;
   }
@@ -198,15 +217,21 @@ async function cycleWallet(
     return;
   }
 
-  // Cancel stale quotes, then re-place.
-  let cancelled = 0;
-  if (myOrders.length > 0) cancelled = await cancelAll(ctx, wallet, myOrders);
-
+  // Credit is read BEFORE cancelling. It does not depend on the cancel, and it
+  // is a base-layer + ER round trip -- sitting between cancelAll and placeLadder
+  // it put that entire latency INSIDE the window where this wallet has no orders
+  // resting. Reading it first shortens the hole to just the two transactions.
+  // It also means a missing credit aborts before the orders are pulled, instead
+  // of cancelling the ladder and then discovering there is nothing to re-place
+  // with -- which left the wallet flat until the next cycle noticed.
   const credit = await readTradingCredit(ctx.base, ctx.er, owner, ctx.marketIndex);
   if (!credit) {
     log("market-maker", `${wallet.name} no trading credit found — run bot-setup first`);
     return;
   }
+
+  let cancelled = 0;
+  if (myOrders.length > 0) cancelled = await cancelAll(ctx, wallet, myOrders);
 
   const result = await placeLadder(ctx, wallet, mid6, credit.available, 1 + bandIndex * LEVELS);
   lastQuotedMid.set(wallet.name, mid6);
@@ -261,7 +286,7 @@ async function main() {
 
       const ctx: MmContext = { base, er, market, marketIndex: addrs.marketIndex };
       for (let i = 0; i < wallets.length; i++) {
-        await cycleWallet(ctx, wallets[i], pyth, i);
+        await cycleWallet(ctx, wallets[i], pyth, i, cycle, wallets.length);
       }
       consecutiveErrors = 0;
     } catch (err: any) {
