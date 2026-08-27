@@ -60,9 +60,48 @@ function errorEnvelope(body: string, code: number, message: string): string {
 // is ~100 B and would come out larger.
 const GZIP_MIN_BYTES = 1024;
 
-async function forward(upstream: string, body: string, accept: string): Promise<Response> {
-  // A couple of quick retries smooth over the ER's occasional transient errors
-  // (the same flakiness that surfaced as "Failed to fetch" in the browser).
+/**
+ * Where each layer goes when its configured upstream will not serve.
+ *
+ * WHY THIS EXISTS: BASE_RPC_UPSTREAM was a single point of failure. The public
+ * endpoint below was only ever a DEFAULT for when the env var is unset, so once
+ * it was set to a keyed provider and that key ran out, the whole base layer went
+ * down with it -- balances, settlement cursor and keeper status all read
+ * "unreachable" while the public endpoint sat there answering 200 in 200ms.
+ * That is exactly what happened: Helius returned
+ *   HTTP 429 {"jsonrpc":"2.0","error":{"code":-32429,"message":"max usage reached"}}
+ * on every call. The ER and the oracle stayed green because neither touches it.
+ *
+ * The fallback is deliberately the FREE public endpoint, not a second key: it is
+ * slower and throttles under load, but it is always there, and a degraded chain
+ * read beats a dead one.
+ */
+const FALLBACKS: Record<string, string> = {
+  base: "https://api.devnet.solana.com",
+  er: "https://devnet.magicblock.app",
+};
+
+type Attempt =
+  | { ok: true; res: Response }
+  | { ok: false; reason: "quota" | "rate" | "unavailable" | "unreachable" };
+
+/**
+ * A JSON-RPC quota error, matched on the CODE rather than the message text.
+ * Length-bounded because an error envelope is a few hundred bytes: without it
+ * this would scan an 836 KB order-book reply on every single poll, and a base64
+ * account blob can contain any substring you care to name.
+ */
+function isQuotaBody(text: string): boolean {
+  return text.length < 4096 && /"code"\s*:\s*-32429/.test(text);
+}
+
+/** One upstream, with retries. Never returns the upstream URL to the caller. */
+async function attemptUpstream(
+  upstream: string,
+  body: string,
+  accept: string,
+  label: string
+): Promise<Attempt> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -73,69 +112,104 @@ async function forward(upstream: string, body: string, accept: string): Promise<
         // Server-side fetch: no CORS, generous timeout via AbortSignal.
         signal: AbortSignal.timeout(20_000),
       });
-      // An HTTP 429/5xx is a SUCCESSFUL fetch, so the catch below never saw it
-      // and the loop returned immediately without retrying. Worse, the response
-      // was stamped Content-Type: application/json regardless — and a public
-      // devnet 429 is usually text or HTML, so the client did
-      // JSON.parse("Too Many Requests") and reported a generic failure rather
-      // than "rate limited". Retry it like the transport failures it resembles,
-      // and if it persists, return a WELL-FORMED JSON-RPC error.
-      if ((res.status === 429 || res.status >= 500) && attempt < 2) {
-        const retryAfter = Number(res.headers.get("retry-after"));
-        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0
-          ? Math.min(retryAfter * 1000, 4_000)
-          : 300 * (attempt + 1);
-        await new Promise((r) => setTimeout(r, waitMs));
-        continue;
-      }
       const text = await res.text();
-      if (res.status === 429 || res.status >= 500) {
-        console.error(`[rpc-proxy] upstream ${res.status}`);
-        return new Response(
-          errorEnvelope(
-            body,
-            -32005,
-            res.status === 429
-              ? "Upstream RPC is rate limiting this request."
-              : "Upstream RPC is unavailable."
-          ),
-          { status: 200, headers: { "Content-Type": "application/json" } }
-        );
+
+      // 429 is NOT retried here any more. When we hold a second upstream,
+      // sleeping on Retry-After is strictly worse than just asking the other
+      // one -- and for a quota error (-32429) the wait is guaranteed wasted,
+      // because it does not clear until the provider's billing window rolls
+      // over. The old loop burned ~900ms per call to arrive at the same
+      // failure, on every poll, for every open tab.
+      if (res.status === 429) {
+        const quota = isQuotaBody(text) || /max usage reached/i.test(text);
+        console.error(`[rpc-proxy] ${label} 429 (${quota ? "quota exhausted" : "rate limited"})`);
+        return { ok: false, reason: quota ? "quota" : "rate" };
       }
+      if (res.status >= 500) {
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+          continue;
+        }
+        console.error(`[rpc-proxy] ${label} upstream ${res.status}`);
+        return { ok: false, reason: "unavailable" };
+      }
+      // A 200 can still carry a quota error in the JSON-RPC envelope.
+      if (isQuotaBody(text)) {
+        console.error(`[rpc-proxy] ${label} quota exhausted (200 body)`);
+        return { ok: false, reason: "quota" };
+      }
+
       // Async gzip, never gzipSync: at ~1.5 order-book responses per second per
       // viewer, synchronously compressing 836 KB would block the event loop for
       // ~15 ms each time and stall every other request on the server. undici has
       // already decompressed the upstream reply, so `text` is plaintext here.
-      // Only the success path is compressed — the error envelope, 403, 413 and
-      // 404 below are a few hundred bytes each.
       if (text.length >= GZIP_MIN_BYTES && /\bgzip\b/.test(accept)) {
-        return new Response(await gz(text), {
-          status: res.status,
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Encoding": "gzip",
-            Vary: "Accept-Encoding",
-          },
-        });
+        return {
+          ok: true,
+          res: new Response(await gz(text), {
+            status: res.status,
+            headers: {
+              "Content-Type": "application/json",
+              "Content-Encoding": "gzip",
+              Vary: "Accept-Encoding",
+            },
+          }),
+        };
       }
-      return new Response(text, {
-        status: res.status,
-        headers: { "Content-Type": "application/json" },
-      });
+      return {
+        ok: true,
+        res: new Response(text, {
+          status: res.status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      };
     } catch (e) {
       lastErr = e;
       await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
     }
   }
-  // Log the real error server-side only: fetch failures can embed the upstream
+  // Log the real error server-side ONLY: a fetch failure can embed the upstream
   // URL, and the base upstream carries a private API key that must never reach
   // the browser.
-  console.error("[rpc-proxy] upstream failed:", lastErr);
+  console.error(`[rpc-proxy] ${label} unreachable:`, lastErr);
+  return { ok: false, reason: "unreachable" };
+}
+
+/**
+ * Try the configured upstream, then the public one.
+ *
+ * Re-sending on the fallback is safe for sendTransaction too: a Solana
+ * transaction is idempotent by signature, so a duplicate is deduplicated by the
+ * cluster rather than executed twice -- and the failures that reach the fallback
+ * (429 / 5xx / no connection) are ones where the primary rejected the request
+ * before it ever reached the network.
+ */
+async function forward(layer: string, body: string, accept: string): Promise<Response> {
+  const primary = UPSTREAMS[layer];
+  const fallback = FALLBACKS[layer];
+
+  const first = await attemptUpstream(primary, body, accept, `${layer}/primary`);
+  if (first.ok) return first.res;
+
+  // Skip when they are the same endpoint, or the "fallback" is just a second
+  // call to the thing that already failed.
+  if (fallback && fallback !== primary) {
+    console.error(`[rpc-proxy] ${layer}: primary ${first.reason} -> failing over to public endpoint`);
+    const second = await attemptUpstream(fallback, body, accept, `${layer}/fallback`);
+    if (second.ok) return second.res;
+  }
+
+  const message =
+    first.reason === "quota"
+      ? "RPC quota is exhausted and the public fallback did not answer."
+      : first.reason === "rate"
+        ? "Upstream RPC is rate limiting this request."
+        : "Upstream RPC is unavailable.";
   // Status 200 with a JSON-RPC error body, not 502: web3.js surfaces a non-2xx
   // as an opaque transport failure, which is what produced "Failed to fetch" in
   // the browser instead of this message.
   return new Response(
-    errorEnvelope(body, -32603, "RPC proxy failed: upstream unreachable"),
+    errorEnvelope(body, first.reason === "unreachable" ? -32603 : -32005, message),
     { status: 200, headers: { "Content-Type": "application/json" } }
   );
 }
@@ -258,7 +332,7 @@ export async function POST(
       { status: 403, headers: { "Content-Type": "application/json" } }
     );
   }
-  return forward(upstream, body, req.headers.get("accept-encoding") ?? "");
+  return forward(layer, body, req.headers.get("accept-encoding") ?? "");
 }
 
 // Some web3.js paths probe with GET (health). Return a simple OK.
