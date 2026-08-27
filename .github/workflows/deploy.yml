@@ -1,13 +1,21 @@
 name: Deploy frontend
 
-# Deploys the frontend to the production droplet on every push to master.
+# Deploys the frontend to the production droplet on every push to the branch
+# production actually runs.
+#
+# THAT BRANCH IS NOT master. origin/master has no frontend/src/app/trade/ at all
+# -- its only routes are /, /landing, /docs, /auth/callback and the API handlers
+# -- so deploying it does not "roll back" the site, it removes the entire trading
+# terminal. This workflow used to trigger on master and the forced command below
+# used to end in "master", which meant the one-click path to production was also
+# the one-click path to taking /trade offline. It has done exactly that once.
 #
 # The SSH key in DEPLOY_SSH_KEY is NOT the box's admin key. It is a dedicated
 # ed25519 key whose authorized_keys entry is
-#     restrict,command="/opt/slipstream/deploy.sh master"
+#     restrict,command="/opt/slipstream/deploy.sh factory/remediate"
 # so it cannot open a shell, forward a port, or run anything else — the remote
 # command below is ignored and the deploy script runs instead. A leaked secret
-# can trigger a deploy of master and nothing more. This matters here: S10-01 in
+# can trigger a deploy of that one branch and nothing more. This matters here: S10-01 in
 # the audit is precisely "one key does everything", and reusing the root key for
 # CI would have made that worse.
 #
@@ -16,7 +24,7 @@ name: Deploy frontend
 
 on:
   push:
-    branches: [master]
+    branches: [factory/remediate]
   workflow_dispatch:
 
 # Never let two deploys interleave on the box. cancel-in-progress is false on
@@ -60,7 +68,7 @@ jobs:
           set -euo pipefail
           sleep 10
           fail=0
-          for p in / /trade /api/status; do
+          for p in / /trade /docs /api/status; do
             code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$SITE$p" || echo 000)
             echo "$p -> $code"
             [ "$code" = "200" ] || fail=1

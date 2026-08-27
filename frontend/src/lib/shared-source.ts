@@ -33,6 +33,15 @@ interface Entry<T> {
   error: unknown;
   subscribers: Set<() => void>;
   stop?: () => void;
+  /** The poller's own fetch, exposed so `revalidate` can run it off-schedule. */
+  run?: () => Promise<void>;
+  /**
+   * Issue order for reads of this key. A manual revalidate can overlap a
+   * scheduled tick -- startPoll only serialises ITS OWN loop -- so without this
+   * the slower of the two wins by finishing last and an older book can overwrite
+   * a newer one. Same defect that had to be fixed in useSession and usePositions.
+   */
+  seq: number;
 }
 
 const registry = new Map<string, Entry<unknown>>();
@@ -40,7 +49,7 @@ const registry = new Map<string, Entry<unknown>>();
 function entryFor<T>(key: string): Entry<T> {
   let e = registry.get(key) as Entry<T> | undefined;
   if (!e) {
-    e = { data: null, error: null, subscribers: new Set() };
+    e = { data: null, error: null, subscribers: new Set(), seq: 0 };
     registry.set(key, e as Entry<unknown>);
   }
   return e;
@@ -96,10 +105,17 @@ export function useSharedSource<T>(
       // docstring promised a guarantee the code did not provide.
       const capturedFetcher = fetcherRef.current;
       const run = async () => {
+        const my = ++e.seq;
         try {
-          e.data = await capturedFetcher();
+          const next = await capturedFetcher();
+          // A newer read already landed. Drop this one rather than applying a
+          // stale book over a fresh one, and stay silent -- the newer read
+          // notified, or is about to.
+          if (my !== e.seq) return;
+          e.data = next;
           e.error = null;
         } catch (err) {
+          if (my !== e.seq) return;
           // Keep the last good value on screen; a transient RPC failure should
           // not blank a book that was correct a second ago. But tell the
           // subscribers AND rethrow: startPoll's geometric backoff keys off a
@@ -117,6 +133,7 @@ export function useSharedSource<T>(
       // The first tick is not run by startPoll, so it has no catch of its own.
       // Its rejection is already recorded on the entry above; the .catch only
       // keeps it from surfacing as an unhandled rejection.
+      e.run = run;
       void run().catch(() => {});
       e.stop = startPoll(run, intervalMs);
     }
@@ -136,4 +153,33 @@ export function useSharedSource<T>(
   // changes before the effect commits, or a component that unmounts first).
   const e = key ? (registry.get(key) as Entry<T> | undefined) : undefined;
   return { data: e?.data ?? null, error: e?.error ?? null };
+}
+
+/**
+ * Re-read a shared key NOW, off the poll schedule.
+ *
+ * WHY: the poller is the only thing that refreshes a shared source, and its gap
+ * is `intervalMs` AFTER the previous fetch completes -- plus startPoll's
+ * geometric backoff, which reaches 16s for a 2s source. Measured on production:
+ * the book's render gaps were 2.3s, 2.5s, 2.5s, 2.8s and then 12.3s. So a user
+ * who cancels an order sees the row sit there for anything up to ~16s, having
+ * just watched a confirmation succeed. A comment in open-orders.tsx claimed
+ * that wait was "within 2s"; it is not, and the cancel path was left with no
+ * way to ask for a read at all.
+ *
+ * Deliberately narrow:
+ *  - never CREATES an entry, so it cannot resurrect a key nothing is watching
+ *    and start an orphan poller;
+ *  - no-ops when the last subscriber has unmounted;
+ *  - runs the poller's own fetch, so there is exactly one code path writing
+ *    the entry, and the seq guard above keeps a slow manual read from
+ *    overwriting a fast scheduled one.
+ * Call it AFTER a confirmation, from an event handler -- never during render.
+ */
+export function revalidate(key: string): void {
+  const e = registry.get(key);
+  if (!e || e.subscribers.size === 0 || !e.run) return;
+  // The rejection is already recorded on the entry by run(); this only stops it
+  // surfacing as an unhandled rejection.
+  void e.run().catch(() => {});
 }

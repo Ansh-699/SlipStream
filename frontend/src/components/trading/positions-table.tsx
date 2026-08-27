@@ -24,6 +24,7 @@ import {
   humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
+import { revalidateOrderBook } from "@/hooks/use-orderbook";
 
 const PRICE_SCALE = 1_000_000;
 // LOT_SIZE / MAX_LEVERAGE come from the Deploy_Manifest (see @/lib/manifest).
@@ -372,6 +373,9 @@ export function PositionsTable({}: PositionsTableProps) {
       // at once rather than up to 5s later on the trigger poll. See TRIG-1.
       refresh();
       refreshTriggers();
+      // The IOC just consumed levels; re-read the shared book at once rather
+      // than leaving the ladder showing depth that is already gone.
+      revalidateOrderBook(MARKET_INDEX);
     } catch (err) {
       // The pre-flight hints are attached HERE rather than left standing on
       // screen: they describe a revert that may never happen, so they stop

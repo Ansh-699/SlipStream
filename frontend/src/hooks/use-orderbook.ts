@@ -1,7 +1,7 @@
 "use client";
 
 import { baseConnection, erConnection } from "@/lib/connections";
-import { useSharedSource } from "@/lib/shared-source";
+import { useSharedSource, revalidate } from "@/lib/shared-source";
 import { useCallback, useMemo } from "react";
 import { PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, ORDER_BOOK, MARKET_INDEX } from "@/lib/manifest";
@@ -153,4 +153,21 @@ export function useOrderBook(marketIndex: number = 0): OrderBookData {
     if (!data) return error ? { ...EMPTY, status: "unavailable" as const } : EMPTY;
     return error ? { ...data, status: "stale" as const } : data;
   }, [data, error]);
+}
+
+/**
+ * Force an immediate re-read of the shared book.
+ *
+ * Exported as a function rather than letting callers pass the key string,
+ * because the key format is this module's business: useSharedSource's contract
+ * is that the key must encode every input the fetcher depends on, and a caller
+ * hand-writing "orderbook:0" is exactly how two sources end up sharing one
+ * entry by accident.
+ *
+ * Use it after a CONFIRMED write that changes the book -- a cancel, a fill --
+ * so the row disappears at once instead of on the next poll tick, which is 2.5s
+ * away at best and ~16s in backoff.
+ */
+export function revalidateOrderBook(marketIndex: number = 0): void {
+  revalidate(`orderbook:${marketIndex}`);
 }

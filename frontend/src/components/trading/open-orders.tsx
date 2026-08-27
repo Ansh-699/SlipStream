@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
 import { Transaction } from "@solana/web3.js";
 import { useOpenOrders } from "@/hooks/use-open-orders";
+import { revalidateOrderBook } from "@/hooks/use-orderbook";
 import { useSession } from "@/hooks/use-session";
 import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
 import { createCancelOrderInstruction,
@@ -60,11 +61,15 @@ export function OpenOrders() {
         sig = await sendTransaction(tx, erConn, { skipPreflight: false });
       }
       await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
-      // Nothing to refresh here: the book is the ONE shared 2s poller's and a
-      // single subscriber cannot make it tick early, so the cancelled row
-      // clears on its next tick — within 2s of a confirmation that itself took
-      // seconds. The no-op `refresh()` that used to sit on this line, and the
-      // stub behind it in useOpenOrders, were deleted together.
+      // Re-read the shared book NOW. The claim that used to sit here -- that
+      // the next poll tick lands "within 2s" -- was wrong: startPoll's gap is
+      // 2s AFTER the previous fetch completes and decays geometrically to 16s
+      // on failure. Measured in production the render gaps were 2.3s, 2.5s,
+      // 2.5s, 2.8s, 12.3s. A user who just watched a cancel confirm sat looking
+      // at the order for up to ~16s and reasonably concluded it had not worked.
+      // This does not resurrect the third poller that was deleted: it runs the
+      // ONE shared fetch once, off-schedule.
+      revalidateOrderBook(MARKET_INDEX);
     } catch (err) {
       setCancelErr(humanizeError(err));
       console.error("cancel failed:", err);

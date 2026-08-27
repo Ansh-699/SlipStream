@@ -28,6 +28,7 @@ import {
   humanizeError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
+import { revalidateOrderBook } from "@/hooks/use-orderbook";
 
 type OrderType = "limit" | "market";
 const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: ORDER_TYPE_LIMIT, market: ORDER_TYPE_MARKET };
@@ -266,6 +267,10 @@ export function OrderForm() {
       // same-origin proxy and would hang forever).
       try {
         await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
+        // The order either rested (a new level) or crossed (levels consumed).
+        // Either way the shared book is now behind; ask for it immediately
+        // instead of showing the pre-trade ladder for up to a poll interval.
+        revalidateOrderBook(MARKET_INDEX);
       } catch (confErr) {
         const confMsg = confErr instanceof Error ? confErr.message : String(confErr);
         let logs: string[] = [];
