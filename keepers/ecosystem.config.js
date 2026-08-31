@@ -71,7 +71,12 @@ module.exports = {
       // (L1 says delegated so fund_trading_credit refuses; the ER never took
       // ownership so the magic program refuses to undelegate). A credit PDA
       // derives from the owner key, so fresh wallets are the only way out.
-      BOT_MM_PREFIX: "mm-v2",
+      // mm-v3: the mm-v2 credits went the same way mm-v1 did — stuck with the
+      // delegation program owning the account on BOTH layers, which is neither
+      // delegated (the ER copy is not program-owned, so place_order cannot write
+      // it) nor undelegated (ScheduleCommitAndUndelegate refuses it). A credit PDA
+      // derives from the owner key, so fresh wallets remain the only way out.
+      BOT_MM_PREFIX: "mm-v3",
       BOT_MM_COUNT: "2",
       BOT_MM_SIZE_LOTS: "20", // 20 lots × 0.1 SOL = 2.0 SOL per order
       BOT_MM_LEVELS: "6",
