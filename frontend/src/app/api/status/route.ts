@@ -51,6 +51,30 @@ interface LayerStatus {
   degraded?: boolean;
 }
 
+interface KeeperStatus {
+  /** Unix seconds of the last compute_funding, or null if unreadable. */
+  lastFundingTs: number | null;
+  /** Seconds since that call. */
+  ageSecs: number | null;
+  /** True once age exceeds STALE_FACTOR funding intervals. Null = unknown. */
+  stalled: boolean | null;
+}
+
+interface StatusPayload {
+  base: LayerStatus;
+  er: LayerStatus;
+  indexer: { lastFillAt: number | null };
+  keepers: KeeperStatus;
+  at: number;
+}
+
+// A funding keeper that misses this many intervals is not merely late. Three
+// leaves room for one retry plus the poll cadence without crying wolf; the
+// interval itself comes from the market, so no threshold is hardcoded here.
+const STALE_FACTOR = 3;
+
+let cached: StatusPayload | null = null;
+
 async function getSlot(layer: "base" | "er"): Promise<LayerStatus> {
   const out = await rpcPost(UPSTREAMS[layer], FALLBACKS[layer], { jsonrpc: "2.0", id: 1, method: "getSlot" });
   if (!out) return { ok: false, slot: null };
