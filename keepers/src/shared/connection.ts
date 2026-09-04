@@ -120,13 +120,65 @@ export function loadKeypair(): Keypair {
   return Keypair.fromSecretKey(secretKey);
 }
 
+const CONFIRM_TIMEOUT_MS = 60_000;
+const CONFIRM_POLL_MS = 2_000;
+
+/**
+ * Confirm by POLLING getSignatureStatuses over HTTP, not via
+ * connection.confirmTransaction().
+ *
+ * WHY: confirmTransaction() waits on a `signatureSubscribe` WEBSOCKET, and
+ * web3.js derives the websocket endpoint from the HTTP one. The failover above
+ * only covers HTTP, so against a quota-dead primary the socket never connects
+ * and every confirm died at "Transaction was not confirmed in 30.00 seconds" --
+ * while the transaction had already SUCCEEDED on chain. Verified on the TWAP
+ * crank 5U2JHJKDGJu5oqss4cKh9uwHWVj9vRGoGh9owr8tQmWph45Kya2Unjy1uhEZrRnGqHUwRDpqAEmh9Havzuw9wYLk:
+ * landed at slot 493099080 with err=None, and the keeper still logged it as a
+ * failure, counted it toward its backoff, and re-cranked.
+ *
+ * Polling routes the confirmation through the same failing-over fetch as every
+ * other read, so confirmation survives exactly what sending survives.
+ */
+async function confirmBySignatureStatus(
+  connection: Connection,
+  sig: string,
+  lastValidBlockHeight: number
+): Promise<void> {
+  const deadline = Date.now() + CONFIRM_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const { value } = await connection.getSignatureStatuses([sig]);
+    const st = value[0];
+    if (st) {
+      // A tx can LAND and still fail on-chain (custom program error). Without
+      // this check every caller treated a reverted tx as success — masking real
+      // failures on skip-preflight paths.
+      if (st.err) {
+        throw new Error(`tx ${sig} failed on-chain: ${JSON.stringify(st.err)}`);
+      }
+      if (st.confirmationStatus === "confirmed" || st.confirmationStatus === "finalized") {
+        return;
+      }
+    } else {
+      // No status at all: once the chain is past the blockhash's last valid
+      // height the transaction can never land, so stop waiting out the timeout.
+      const height = await connection.getBlockHeight("confirmed");
+      if (height > lastValidBlockHeight) {
+        throw new Error(`tx ${sig} expired unconfirmed (block height ${height} > ${lastValidBlockHeight})`);
+      }
+    }
+    await sleep(CONFIRM_POLL_MS);
+  }
+  throw new Error(`tx ${sig} not confirmed within ${CONFIRM_TIMEOUT_MS / 1000}s`);
+}
+
 export async function sendAndConfirm(
   connection: Connection,
   tx: import("@solana/web3.js").Transaction,
   signers: Keypair[],
   skipPreflight: boolean = false
 ): Promise<string> {
-  tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+  const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+  tx.recentBlockhash = blockhash;
   tx.feePayer = signers[0].publicKey;
   tx.sign(...signers);
 
@@ -134,13 +186,7 @@ export async function sendAndConfirm(
     skipPreflight,
     preflightCommitment: "confirmed",
   });
-  const conf = await connection.confirmTransaction(sig, "confirmed");
-  // A tx can LAND and still fail on-chain (custom program error); confirm's
-  // result carries that. Without this check every caller treated a reverted
-  // tx as success — masking real failures on skip-preflight paths.
-  if (conf.value.err) {
-    throw new Error(`tx ${sig} failed on-chain: ${JSON.stringify(conf.value.err)}`);
-  }
+  await confirmBySignatureStatus(connection, sig, lastValidBlockHeight);
   return sig;
 }
 
