@@ -16,6 +16,7 @@
 // infrastructure, and is the same read that surfaced the live outage.
 
 import { existsSync } from "fs";
+import { PUBLIC_FALLBACKS, rpcPost } from "@/lib/rpc-failover";
 import { join, dirname, resolve } from "path";
 
 export const runtime = "nodejs";
@@ -26,51 +27,36 @@ const UPSTREAMS = {
   er: process.env.ER_RPC_UPSTREAM || "https://devnet.magicblock.app",
 };
 
+/**
+ * Same fallbacks as /api/rpc/[layer]. This route was calling UPSTREAMS
+ * DIRECTLY, so when the keyed base provider hit its quota on 2026-09-01 this
+ * endpoint reported `base.ok: false` for 2.7 days while the app itself kept
+ * working through the proxy's failover. A health endpoint that reports an
+ * outage the product is not having is worse than no health endpoint: it sends
+ * whoever is on call after the wrong thing.
+ */
+const FALLBACKS = PUBLIC_FALLBACKS;
+
 const CACHE_MS = 5_000;
 
 interface LayerStatus {
   ok: boolean;
   slot: number | null;
+  /**
+   * True when the configured upstream refused and the public fallback answered.
+   * This is the early warning the last outage lacked: a spent key shows up here
+   * as `ok: true, degraded: true` while everything still works, instead of
+   * surfacing days later as "the site is down".
+   */
+  degraded?: boolean;
 }
 
-interface KeeperStatus {
-  /** Unix seconds of the last compute_funding, or null if unreadable. */
-  lastFundingTs: number | null;
-  /** Seconds since that call. */
-  ageSecs: number | null;
-  /** True once age exceeds STALE_FACTOR funding intervals. Null = unknown. */
-  stalled: boolean | null;
-}
-
-interface StatusPayload {
-  base: LayerStatus;
-  er: LayerStatus;
-  indexer: { lastFillAt: number | null };
-  keepers: KeeperStatus;
-  at: number;
-}
-
-// A funding keeper that misses this many intervals is not merely late. Three
-// leaves room for one retry plus the poll cadence without crying wolf; the
-// interval itself comes from the market, so no threshold is hardcoded here.
-const STALE_FACTOR = 3;
-
-let cached: StatusPayload | null = null;
-
-async function getSlot(upstream: string): Promise<LayerStatus> {
-  try {
-    const res = await fetch(upstream, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "getSlot" }),
-      signal: AbortSignal.timeout(5_000),
-    });
-    const json = await res.json();
-    if (typeof json?.result === "number") return { ok: true, slot: json.result };
-    return { ok: false, slot: null };
-  } catch {
-    return { ok: false, slot: null };
-  }
+async function getSlot(layer: "base" | "er"): Promise<LayerStatus> {
+  const out = await rpcPost(UPSTREAMS[layer], FALLBACKS[layer], { jsonrpc: "2.0", id: 1, method: "getSlot" });
+  if (!out) return { ok: false, slot: null };
+  const result = (out.json as { result?: unknown })?.result;
+  if (typeof result !== "number") return { ok: false, slot: null };
+  return { ok: true, slot: result, degraded: out.degraded };
 }
 
 function dbPath(): string | null {
@@ -105,7 +91,7 @@ async function lastFillAt(): Promise<number | null> {
   }
 }
 
-async function keeperStatus(upstream: string): Promise<KeeperStatus> {
+async function keeperStatus(layer: "base" | "er"): Promise<KeeperStatus> {
   const unknown: KeeperStatus = { lastFundingTs: null, ageSecs: null, stalled: null };
   try {
     // Imported inside the try, not at module scope: `@/lib/manifest` THROWS on
@@ -114,18 +100,14 @@ async function keeperStatus(upstream: string): Promise<KeeperStatus> {
     // report. Same reason the keepers now resolve their feed lazily (S7-02).
     const { MARKET } = await import("@/lib/manifest");
     const { decodeMarket } = await import("@/lib/slipstream");
-    const res = await fetch(upstream, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getAccountInfo",
-        params: [MARKET.toBase58(), { encoding: "base64" }],
-      }),
-      signal: AbortSignal.timeout(5_000),
+    const out = await rpcPost(UPSTREAMS[layer], FALLBACKS[layer], {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "getAccountInfo",
+      params: [MARKET.toBase58(), { encoding: "base64" }],
     });
-    const json = await res.json();
+    if (!out) return unknown;
+    const json = out.json as { result?: { value?: { data?: unknown[] } } };
     const b64 = json?.result?.value?.data?.[0];
     if (typeof b64 !== "string") return unknown;
     const market = decodeMarket(Buffer.from(b64, "base64"));
@@ -146,10 +128,10 @@ export async function GET(): Promise<Response> {
     return Response.json(cached);
   }
   const [base, er, fillTs, keepers] = await Promise.all([
-    getSlot(UPSTREAMS.base),
-    getSlot(UPSTREAMS.er),
+    getSlot("base"),
+    getSlot("er"),
     lastFillAt(),
-    keeperStatus(UPSTREAMS.base),
+    keeperStatus("base"),
   ]);
   cached = { base, er, indexer: { lastFillAt: fillTs }, keepers, at: Date.now() };
   return Response.json(cached);

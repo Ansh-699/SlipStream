@@ -19,6 +19,7 @@
 // amount, a simple in-memory per-wallet cooldown, and requires the operator key
 // to be present on the server (OPERATOR_KEYPAIR). It is NOT for mainnet.
 import { NextRequest } from "next/server";
+import { PUBLIC_FALLBACKS, makeFailoverFetch, fallbackWsEndpoint } from "@/lib/rpc-failover";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -54,6 +55,22 @@ const BASE_RPC =
   process.env.BASE_RPC_UPSTREAM ||
   process.env.BASE_RPC ||
   "https://api.devnet.solana.com";
+
+/**
+ * The faucet is the ONLY in-app source of both test USDC and the devnet SOL a
+ * new wallet needs for fees and rent, so when it dies a new user cannot start
+ * at all. During the 2026-09-01 quota outage it did exactly that: every drip
+ * failed against the keyed upstream while /api/rpc/base served the whole
+ * trading UI from the public fallback, and the 429 branch below told the
+ * operator to configure BASE_RPC_UPSTREAM -- the variable that was broken.
+ *
+ * Both halves are needed. The fetch covers the reads and sends; pinning
+ * wsEndpoint covers the CONFIRMS, because mintTo and sendAndConfirmTransaction
+ * confirm over a signatureSubscribe websocket whose endpoint web3.js derives
+ * from the HTTP url -- so without this a mint that had already landed would
+ * still time out.
+ */
+const BASE_FALLBACK = PUBLIC_FALLBACKS.base;
 
 // Per-wallet cooldown (best-effort; resets on server restart).
 const lastDrip = new Map<string, number>();
@@ -287,7 +304,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   // the reservation back for; after it, a confirm timeout is not.
   let minting = false;
   try {
-    const conn = new Connection(BASE_RPC, "confirmed");
+    const conn = new Connection(BASE_RPC, {
+      commitment: "confirmed",
+      fetch: makeFailoverFetch(BASE_RPC, BASE_FALLBACK),
+      wsEndpoint: fallbackWsEndpoint(BASE_FALLBACK),
+    });
     // Create the requester's ATA if missing (operator pays), then mint to it.
     const ata = await getOrCreateAssociatedTokenAccount(
       conn,
