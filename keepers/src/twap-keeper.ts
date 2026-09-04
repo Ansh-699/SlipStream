@@ -2,10 +2,38 @@ import { Transaction } from "@solana/web3.js";
 import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./shared/connection";
 import { fetchMarket } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
+import { readPythPrice } from "./shared/pyth";
 import { createCrankTwapInstruction } from "../../client/src/instructions";
 
 const MARKET_INDEX = 0;
 const CRANK_INTERVAL_MS = 8_000; // 8 seconds
+
+/**
+ * BUG 3 fix: do not send a crank the program is certain to reject.
+ *
+ * crank_twap gates on the ORACLE's own publish time against the on-chain clock
+ * (`oracle::MAX_STALENESS_SECS` = 60s, see programs/slipstream/src/oracle.rs:22
+ * and crank_twap.rs's `reading.is_fresh(now_ts)`), so a crank sent while Pyth is
+ * stale fails preflight with custom program error 0x104 / OracleStale. That
+ * costs no lamports -- simulation rejects it before it lands -- but it counted
+ * as a keeper error, and 11 of them tripped the 60s backoff below.
+ *
+ * That backoff was the actual damage. The devnet Pyth feed
+ * (7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE) no longer publishes
+ * continuously: measured 2026-09-04 it published twice in 200s, 309s apart, and
+ * read fresh in only 9 of 40 samples. So the usable window is ~60s out of every
+ * ~300s, and a keeper that spends 88s failing and then sleeps 60s drifts in and
+ * out of phase with those windows -- it cranked ZERO times in 13 minutes while
+ * the feed published three times.
+ *
+ * Reading the feed first turns each doomed send into a cheap skip, which keeps
+ * the loop in phase and lets it crank on the first poll after every publish.
+ * The margin reserves part of the 60s for send + confirm, since freshness is
+ * re-evaluated on-chain at execution, not at send.
+ */
+const MAX_STALENESS_SECS = 60; // must match oracle::MAX_STALENESS_SECS
+const SEND_SAFETY_MARGIN_SECS = 15;
+const MAX_AGE_TO_SEND_SECS = MAX_STALENESS_SECS - SEND_SAFETY_MARGIN_SECS;
 
 async function main() {
   const connection = getBaseConnection();
@@ -18,6 +46,9 @@ async function main() {
   log("TWAP", `Using Pyth feed ${pythFeed.toBase58()}`);
 
   let consecutiveErrors = 0;
+  // Only log the stale/fresh transition, not every poll: at an 8s cadence an
+  // unconditional line would be ~10,800 entries a day and bury the real errors.
+  let wasStale = false;
 
   while (true) {
     try {
@@ -26,6 +57,23 @@ async function main() {
         log("TWAP", "Market not found, waiting...");
         await sleep(5_000);
         continue;
+      }
+
+      // Freshness is the program's gate, so check it before spending a send.
+      // A skip is NOT an error: counting it would trip the backoff below and
+      // desynchronise this loop from the feed's publish windows.
+      const px = await readPythPrice(connection, pythFeed);
+      if (px.ageSecs > MAX_AGE_TO_SEND_SECS) {
+        if (!wasStale) {
+          log("TWAP", `Pyth stale (${px.ageSecs}s > ${MAX_AGE_TO_SEND_SECS}s) — holding until it publishes`);
+          wasStale = true;
+        }
+        await sleep(CRANK_INTERVAL_MS);
+        continue;
+      }
+      if (wasStale) {
+        log("TWAP", `Pyth fresh again (${px.ageSecs}s, $${px.priceFloat.toFixed(4)}) — cranking`);
+        wasStale = false;
       }
 
       // BUG 2 fix: do NOT skip cranking when the circuit breaker is active.
