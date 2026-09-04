@@ -12,10 +12,16 @@ import { PUBLIC_FALLBACKS, rpcPost } from "@/lib/rpc-failover";
  * so a spent RPC key degrades this line instead of blanking it.
  */
 
-const UPSTREAM = process.env.BASE_RPC_UPSTREAM || PUBLIC_FALLBACKS.base;
+const BASE_UPSTREAM = process.env.BASE_RPC_UPSTREAM || PUBLIC_FALLBACKS.base;
+const ER_UPSTREAM = process.env.ER_RPC_UPSTREAM || PUBLIC_FALLBACKS.er;
 
-async function readAccount(address: string, dataSlice?: { offset: number; length: number }) {
-  const out = await rpcPost(UPSTREAM, PUBLIC_FALLBACKS.base, {
+async function readAccount(
+  layer: "base" | "er",
+  address: string,
+  dataSlice?: { offset: number; length: number }
+) {
+  const primary = layer === "base" ? BASE_UPSTREAM : ER_UPSTREAM;
+  const out = await rpcPost(primary, PUBLIC_FALLBACKS[layer], {
     jsonrpc: "2.0",
     id: 1,
     method: "getAccountInfo",
@@ -33,12 +39,19 @@ async function readLag(): Promise<{ pending: number; settled: number } | null> {
     const { MARKET, ORDER_BOOK } = await import("@/lib/manifest");
     const { decodeMarket } = await import("@/lib/slipstream/accounts");
 
+    // EACH ACCOUNT FROM THE LAYER THAT ACTUALLY OWNS IT. The market lives on
+    // L1. The order book is DELEGATED, so on L1 it is owned by the delegation
+    // program and its data is a stale pre-delegation snapshot -- measured
+    // 2026-09-04, L1 reports nextFillSequence = 10 while the ER reports 53,734.
+    // Reading the book from base would have printed a settlement lag that is not
+    // merely wrong but negative; the `nextFill < settled` guard below caught it,
+    // which is the only reason a nonsense number never shipped.
     const [marketBuf, bookHeader] = await Promise.all([
-      readAccount(MARKET.toBase58()),
+      readAccount("base", MARKET.toBase58()),
       // Header only. decodeOrderBook refuses a short buffer by design, and the
       // full account is ~626 KB -- an absurd read for one u64, on every
       // revalidation, for a line of text.
-      readAccount(ORDER_BOOK.toBase58(), { offset: 0, length: 48 }),
+      readAccount("er", ORDER_BOOK.toBase58(), { offset: 0, length: 48 }),
     ]);
     if (!marketBuf || !bookHeader || bookHeader.length < 48) return null;
 
