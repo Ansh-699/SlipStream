@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { Poppins, Geist_Mono, Inter } from "next/font/google";
 import "./globals.css";
 
-// No WalletProvider here. It pulled the Phantom + web3.js chunk into the
-// first load of every route, /docs and /landing included. It is declared in
-// src/app/trade/layout.tsx and src/app/auth/callback/layout.tsx instead — the
-// only two segments whose components call into `@/hooks/use-wallet-compat`.
-// Any new route that needs a wallet must declare it the same way.
+// No WalletProvider here. It pulled the Privy + web3.js chunk into the first
+// load of every route, /docs and / included. It is declared in
+// src/app/trade/layout.tsx instead — the only segment whose components call
+// into `@/hooks/use-wallet-compat`. Any new route that needs a wallet must
+// declare it the same way.
 
 const poppins = Poppins({
   variable: "--font-sans",
