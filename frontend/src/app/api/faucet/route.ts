@@ -13,12 +13,15 @@
 //
 // WHY: deposit_collateral transfers from the user's USDC token account. A fresh
 // wallet has neither test USDC nor an ATA, so the deposit fails preflight with
-// Phantom's generic "Unexpected error". This faucet removes that wall.
+// the wallet's generic "Unexpected error". This faucet removes that wall.
 //
-// SECURITY: this mints WORTHLESS devnet test tokens only. It is gated to a fixed
-// amount, a simple in-memory per-wallet cooldown, and requires the operator key
-// to be present on the server (OPERATOR_KEYPAIR). It is NOT for mainnet.
+// SECURITY: this mints WORTHLESS devnet test tokens only. It is gated on a
+// verified Privy sign-in (the primary gate — a fresh pubkey is free, a Google
+// account or a funded external wallet is not), a fixed amount, in-memory
+// per-user / per-wallet / per-IP cooldowns plus a global hourly cap, and it
+// requires the operator key on the server (OPERATOR_KEYPAIR). NOT for mainnet.
 import { NextRequest } from "next/server";
+import { jwtVerify, importSPKI, createRemoteJWKSet } from "jose";
 import { PUBLIC_FALLBACKS, makeFailoverFetch, fallbackWsEndpoint } from "@/lib/rpc-failover";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -72,6 +75,49 @@ const BASE_RPC =
  */
 const BASE_FALLBACK = PUBLIC_FALLBACKS.base;
 
+/**
+ * Privy access-token verification, with `jose` rather than @privy-io/node: the
+ * server SDK peers on @solana/kit ^5 while @privy-io/react-auth 3.40 peers on
+ * ^8 -- a real conflict -- and the token is a plain ES256 JWT (iss "privy.io",
+ * aud = app id, sub = the user's Privy DID), so a JWT library is all it needs.
+ *
+ * PRIVY_VERIFICATION_KEY (SPKI PEM from the dashboard) verifies with no network
+ * call. Without it, Privy's JWKS endpoint is fetched on first use and cached by
+ * jose. Either resolves once per server process.
+ */
+const PRIVY_APP_ID = process.env.PRIVY_APP_ID || process.env.NEXT_PUBLIC_PRIVY_APP_ID || "";
+const PRIVY_VERIFICATION_KEY = process.env.PRIVY_VERIFICATION_KEY || "";
+let privyKey: Promise<CryptoKey> | null = null;
+let privyJwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+if (PRIVY_APP_ID) {
+  if (PRIVY_VERIFICATION_KEY) {
+    // .env files commonly store a PEM with literal "\n" sequences.
+    privyKey = importSPKI(PRIVY_VERIFICATION_KEY.replace(/\\n/g, "\n"), "ES256");
+  } else {
+    privyJwks = createRemoteJWKSet(
+      new URL(`https://auth.privy.io/api/v1/apps/${PRIVY_APP_ID}/jwks.json`)
+    );
+  }
+}
+
+/** The verified Privy user id (DID) for a bearer token, or throws. */
+async function verifyPrivyToken(bearer: string): Promise<string> {
+  const options = { issuer: "privy.io", audience: PRIVY_APP_ID };
+  const { payload } = privyKey
+    ? await jwtVerify(bearer, await privyKey, options)
+    : privyJwks
+      ? await jwtVerify(bearer, privyJwks, options)
+      : (() => {
+          throw new Error("Privy is not configured");
+        })();
+  if (typeof payload.sub !== "string" || !payload.sub) throw new Error("token has no subject");
+  return payload.sub;
+}
+
+// Per-user cooldown, keyed on the VERIFIED Privy user id. This is the gate that
+// closes the "fresh pubkeys are free" hole described below.
+const lastDripByUser = new Map<string, number>();
+
 // Per-wallet cooldown (best-effort; resets on server restart).
 const lastDrip = new Map<string, number>();
 
@@ -94,6 +140,7 @@ const IP_COOLDOWN_MS = 60_000;
  */
 function sweepCooldowns(now: number): void {
   for (const [k, t] of lastDrip) if (now - t > COOLDOWN_MS) lastDrip.delete(k);
+  for (const [k, t] of lastDripByUser) if (now - t > COOLDOWN_MS) lastDripByUser.delete(k);
   for (const [k, t] of lastDripByIp) if (now - t > IP_COOLDOWN_MS) lastDripByIp.delete(k);
 }
 
@@ -246,9 +293,41 @@ export async function POST(req: NextRequest): Promise<Response> {
     return json({ ok: false, error: "Provide a valid base58 wallet pubkey." }, 400);
   }
 
+  // Sign-in gate FIRST, because it awaits. The check-then-reserve block below
+  // relies on nothing being awaited between the cooldown reads and the
+  // reservation (see the comment above `lastDrip.set`); putting an await inside
+  // that window would reopen the concurrent-request race it closes.
+  if (!PRIVY_APP_ID) {
+    return json(
+      { ok: false, error: "Faucet is not configured on this server (no Privy app)." },
+      503
+    );
+  }
+  const bearer = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  if (!bearer) {
+    return json({ ok: false, error: "Sign in to use the faucet." }, 401);
+  }
+  let userId: string;
+  try {
+    userId = await verifyPrivyToken(bearer);
+  } catch (e) {
+    // The reason (expired, wrong audience, bad signature) is for the operator's
+    // log; the token itself is never echoed and neither is the error text.
+    console.error("[faucet] token rejected:", e instanceof Error ? e.message : String(e));
+    return json({ ok: false, error: "Your sign-in has expired. Sign in again and retry." }, 401);
+  }
+
   const key = wallet.toBase58();
   const now = Date.now();
   sweepCooldowns(now);
+  const prevUser = lastDripByUser.get(userId) ?? 0;
+  if (now - prevUser < COOLDOWN_MS) {
+    const wait = Math.ceil((COOLDOWN_MS - (now - prevUser)) / 1000);
+    return json(
+      { ok: false, error: `Please wait ${wait}s before requesting more test USDC.` },
+      429
+    );
+  }
   const prev = lastDrip.get(key) ?? 0;
   if (now - prev < COOLDOWN_MS) {
     const wait = Math.ceil((COOLDOWN_MS - (now - prev)) / 1000);
@@ -296,6 +375,7 @@ export async function POST(req: NextRequest): Promise<Response> {
   // debugging it included) got "Faucet is rate limited right now" for an hour,
   // pointing the diagnosis at the wrong thing entirely.
   lastDrip.set(key, now);
+  lastDripByUser.set(userId, now);
   lastDripByIp.set(ip, now);
   dripTimes.push(now);
 
@@ -378,6 +458,7 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (!unconfirmed) {
       // `lastIndexOf`, not `pop()`: a concurrent request may have pushed after us.
       lastDrip.delete(key);
+      lastDripByUser.delete(userId);
       lastDripByIp.delete(ip);
       const slot = dripTimes.lastIndexOf(now);
       if (slot >= 0) dripTimes.splice(slot, 1);

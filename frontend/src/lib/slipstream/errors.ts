@@ -34,6 +34,10 @@ const ERR_NAMES = [
   "LotSizeViolation", "OracleDisagreement", "RestrictedMode", "InvalidSwitchboardFeed", "GracePeriodActive",
   "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded", "TriggerConditionNotMet",
   "SelfTrade", "PositionStillOpen",
+  // Round 9 — remediate. APPEND ONLY: keepers and this table decode by ordinal.
+  // These three were missing, so the credit ceiling — the error most likely to
+  // fire on a freshly seeded wallet — rendered as `custom 0x138`.
+  "CreditCeilingExceeded", "FillSequenceOutOfRange", "LegacyLayoutRejected",
 ] as const;
 
 /** What the trader should DO about it, for the ones they can actually hit. */
@@ -58,6 +62,9 @@ const ERR_ADVICE: Record<string, string> = {
   HealthFactorAboveThreshold: "The position is not liquidatable.",
   PositionNotFound: "No open position for this market.",
   OrderNotFound: "That order is no longer on the book — it may have filled or been cancelled.",
+  CreditCeilingExceeded:
+    "The rollup reports more credit than L1 recorded as funded — withdraw at most what you deposited, or wait for settlement to catch up.",
+  LegacyLayoutRejected: "This credit uses the old layout and can't be closed in place. Use a fresh wallet.",
 };
 
 /**
