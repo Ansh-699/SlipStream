@@ -28,14 +28,17 @@ export function PriceTicker() {
   // Re-render on a timer as well as on feed updates: if the socket goes quiet
   // the price stops arriving, so nothing would otherwise re-evaluate the age
   // and the last good value would sit here looking current.
-  const [, tick] = useState(0);
+  // Wall-clock as STATE, read only inside the interval and the lazy initializer:
+  // calling Date.now() in render scope is impure (react-hooks/purity) and the
+  // React Compiler refuses it. The lazy initializer runs once, so the first
+  // paint is not a second late.
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => tick((n) => n + 1), 1_000);
+    const id = setInterval(() => setNow(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
 
-  const fresh =
-    connected && live !== null && Date.now() / 1000 - live.publishTime <= MAX_AGE_SECS;
+  const fresh = connected && live !== null && now / 1000 - live.publishTime <= MAX_AGE_SECS;
 
   return (
     <span className="inline-flex items-baseline gap-2">
