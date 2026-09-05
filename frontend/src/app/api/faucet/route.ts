@@ -80,7 +80,22 @@ const lastDrip = new Map<string, number>();
 // rent, so an unbounded faucet drains the operator's SOL as well as minting
 // unlimited collateral into the live market. Add a global rate cap and a per-IP
 // cooldown so one client cannot loop with new pubkeys.
-const GLOBAL_MAX_PER_HOUR = Number(process.env.FAUCET_MAX_PER_HOUR || "60");
+// 60/hr x (0.05 SOL + ~0.0015 ATA rent + fee) = ~3.1 SOL/hr, against an
+// operator that holds 1.85 SOL: one IP could empty the fee payer in ~36
+// minutes, and the same key signs every keeper, the USDC mint and the program
+// upgrade. It has already gone to zero once, taking the fleet down for 79
+// hours. 20/hr is ~1 SOL/hr, and RESERVE_LAMPORTS below is the real floor.
+const GLOBAL_MAX_PER_HOUR = Number(process.env.FAUCET_MAX_PER_HOUR || "20");
+
+/**
+ * Never let the faucet take the operator below this. The operator key is also
+ * every keeper's fee payer, the USDC mint authority and the program upgrade
+ * authority: at zero SOL you cannot restart a keeper, run a repair
+ * instruction, or deploy. USDC still mints below the reserve (it costs the
+ * operator nothing but rent), so a new user is not blocked outright -- only
+ * the SOL top-up stops, and the response already reports that as `solError`.
+ */
+const RESERVE_LAMPORTS = Number(process.env.FAUCET_SOL_RESERVE || "1") * LAMPORTS_PER_SOL;
 const dripTimes: number[] = [];
 const lastDripByIp = new Map<string, number>();
 const IP_COOLDOWN_MS = 60_000;
@@ -333,7 +348,15 @@ export async function POST(req: NextRequest): Promise<Response> {
     if (FAUCET_SOL > 0) {
       try {
         const bal = await conn.getBalance(wallet);
-        if (bal < SOL_TOPUP_FLOOR * LAMPORTS_PER_SOL) {
+        // Check the OPERATOR's balance too, not just the requester's.
+        const opBal = await conn.getBalance(operator.publicKey);
+        const wouldLeave = opBal - Math.round(FAUCET_SOL * LAMPORTS_PER_SOL);
+        if (wouldLeave < RESERVE_LAMPORTS) {
+          console.error(
+            `[faucet] SOL top-up skipped: operator at ${(opBal / LAMPORTS_PER_SOL).toFixed(4)} SOL, reserve is ${(RESERVE_LAMPORTS / LAMPORTS_PER_SOL).toFixed(2)}`
+          );
+          solError = true;
+        } else if (bal < SOL_TOPUP_FLOOR * LAMPORTS_PER_SOL) {
           solSignature = await sendAndConfirmTransaction(
             conn,
             new Transaction().add(

@@ -282,6 +282,9 @@ async function readCapped(req: NextRequest, max: number): Promise<string | null>
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** Solana's own per-call ceiling for getMultipleAccounts; summed across a batch. */
+const MAX_MULTI_ACCOUNTS = 100;
+
 function methodsAllowed(body: string): boolean {
   let parsed: unknown;
   try {
@@ -291,13 +294,36 @@ function methodsAllowed(body: string): boolean {
   }
   const calls = Array.isArray(parsed) ? parsed : [parsed];
   if (calls.length === 0 || calls.length > 20) return false;
-  return calls.every(
-    (c) =>
-      typeof c === "object" &&
-      c !== null &&
-      typeof (c as { method?: unknown }).method === "string" &&
-      ALLOWED_METHODS.has((c as { method: string }).method)
-  );
+  if (
+    !calls.every(
+      (c) =>
+        typeof c === "object" &&
+        c !== null &&
+        typeof (c as { method?: unknown }).method === "string" &&
+        ALLOWED_METHODS.has((c as { method: string }).method)
+    )
+  ) {
+    return false;
+  }
+
+  // The byte cap and the 20-call batch cap bound the REQUEST; neither bounds
+  // what it fetches. getMultipleAccounts takes an array of pubkeys, and the
+  // accounts this program owns are large -- the order book is ~626 KB raw
+  // (~836 KB base64 on the wire). 2,125 pubkeys fit inside the ~100 KB body
+  // limit, and 20 batched calls of 100 each fit too, so one unauthenticated
+  // POST could pull ~1.7 GB from the upstream, on the deployer's paid quota,
+  // in a loop. Bound the ACCOUNTS, summed across the batch, at Solana's own
+  // per-call maximum.
+  let accounts = 0;
+  for (const c of calls) {
+    const { method, params } = c as { method: string; params?: unknown };
+    if (method !== "getMultipleAccounts") continue;
+    const keys = Array.isArray(params) ? params[0] : undefined;
+    if (!Array.isArray(keys)) return false;
+    accounts += keys.length;
+    if (accounts > MAX_MULTI_ACCOUNTS) return false;
+  }
+  return true;
 }
 
 export async function POST(

@@ -1091,6 +1091,34 @@ export function useSession(marketIndex: number = 0) {
 
       // 1. Leave the rollup. Only the schedule happens here; the base-layer
       //    handover is the validator's job, so poll for it afterwards.
+      //
+      // EXCEPT IT IS NOT, AND THAT IS WHY THIS RETURNS EARLY. The deployed
+      // program has no handler for the delegation program's undelegate
+      // callback -- instructions/mod.rs dispatches a 1-byte discriminator over
+      // 0x00..=0x2A and the callback arrives as an 8-byte one, so it falls
+      // through to InvalidInstructionData. ScheduleCommitAndUndelegate is
+      // accepted by the rollup, the validator then tries to hand the account
+      // back, the hand-back reverts, and the credit is left owned by the
+      // delegation program on BOTH layers: not delegated (the ER copy is no
+      // longer program-owned, so place_order cannot write it) and not
+      // undelegatable (ScheduleCommitAndUndelegate refuses it). Nothing --
+      // not the owner, not the authority, not emergency_undelegate -- can
+      // recover it without a program upgrade.
+      //
+      // Ten credits have already been lost this way. Pressing Withdraw is the
+      // ONLY way a user reaches this instruction, so refusing here is the
+      // whole mitigation. Remove this block in the same change that ships the
+      // 0xC4 arm, and not before.
+      if (delegated) {
+        slog("withdraw", "REFUSED: undelegation is a one-way door on the deployed program");
+        setError(
+          "Withdrawals are paused for delegated credit. The on-chain program is missing " +
+            "the rollup's hand-back step, so undelegating right now would strand your " +
+            "funds permanently. Your balance is safe and stays yours — this needs a " +
+            "program upgrade to unlock."
+        );
+        return false;
+      }
       if (delegated) {
         slog("withdraw", "undelegating trading credit from the ER");
         setStep("Returning funds from the rollup…");
