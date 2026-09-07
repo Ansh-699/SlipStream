@@ -15,7 +15,8 @@ use crate::instructions::ensure_not_globally_paused;
 use crate::state::{GlobalState, TradingCredit, SEED_CREDIT, SEED_DELEGATE_BUFFER, SEED_GLOBAL};
 
 // MagicBlock delegation program: DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
-const DELEGATION_PROGRAM_ID: Pubkey = [
+// `pub` so `process_undelegation` reuses this one rather than adding a 4th copy.
+pub const DELEGATION_PROGRAM_ID: Pubkey = [
     0xB5, 0xB7, 0x00, 0xE1, 0xF2, 0x57, 0x3A, 0xC0,
     0xCC, 0x06, 0x22, 0x01, 0x34, 0x4A, 0xCF, 0x97,
     0xB8, 0x35, 0x06, 0xEB, 0x8C, 0xE5, 0x19, 0x98,
