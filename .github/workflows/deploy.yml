@@ -12,12 +12,34 @@ name: Deploy frontend
 #
 # The SSH key in DEPLOY_SSH_KEY is NOT the box's admin key. It is a dedicated
 # ed25519 key whose authorized_keys entry is
-#     restrict,command="/opt/slipstream/deploy.sh factory/remediate"
+#     restrict,command="<path>/deploy.sh <branch>"
 # so it cannot open a shell, forward a port, or run anything else — the remote
 # command below is ignored and the deploy script runs instead. A leaked secret
 # can trigger a deploy of that one branch and nothing more. This matters here: S10-01 in
 # the audit is precisely "one key does everything", and reusing the root key for
 # CI would have made that worse.
+#
+# BROKEN AS OF 2026-09-07, and it fails silently — read this before trusting it.
+# Production moved off the DigitalOcean droplet (permanently dead) to an Oracle
+# Cloud box on 2026-09-06, and none of this followed it:
+#   * the login user is `ubuntu`, not `root` — Oracle's Ubuntu images disable
+#     root SSH outright, so every run dies at the ssh line
+#   * there is no /opt/slipstream on the new box; the repo lives in ~/slipstream
+#   * no restrict,command= entry exists in the new box's authorized_keys, so the
+#     forced command this design depends on is simply absent
+#   * production runs `audit-fixes`, not the `factory/remediate` this triggers on
+# The last run (33969924597, 2026-09-05) failed in 11s with a bare `exit code 1`
+# and nobody noticed, which is the actual defect: deploys have been manual since
+# the move and nothing said so. DEPLOY_USER below and the loud keyscan fix the
+# two things a config change can fix. The rest needs a human on the box:
+#   1. ssh-keygen a fresh ed25519 deploy key
+#   2. append it to ~ubuntu/.ssh/authorized_keys on 129.225.121.30 as
+#      restrict,command="/home/ubuntu/slipstream/deploy.sh <branch>" ssh-ed25519 ...
+#   3. update the DEPLOY_HOST and DEPLOY_SSH_KEY repo secrets (both still date
+#      from 2026-08-22, i.e. the droplet era)
+#   4. point the `on: push` branch below at whatever production should track
+# Until then this workflow is expected to fail, and `workflow_dispatch` is the
+# honest way to find out whether step 3 landed.
 #
 # Frontend only. The keepers hold live delegation and settlement-cursor state
 # and are deliberately left running — see deploy.sh.
@@ -42,6 +64,9 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          # Oracle's Ubuntu images disable root SSH. Overridable so the next
+          # host move is a variable, not another silent month of failures.
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'ubuntu' }}
         run: |
           set -euo pipefail
           if [ -z "${DEPLOY_SSH_KEY:-}" ] || [ -z "${DEPLOY_HOST:-}" ]; then
@@ -51,15 +76,20 @@ jobs:
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          # Pin the host key rather than accepting blindly on every run.
-          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Pin the host key rather than accepting blindly on every run. NOT
+          # silenced: swallowing this is how an unreachable host turned into a
+          # bare `exit code 1` five seconds later with nothing to read.
+          if ! ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts; then
+            echo "::error::ssh-keyscan could not reach DEPLOY_HOST. The secret may still point at the retired DigitalOcean droplet — see the header of this file."
+            exit 1
+          fi
           # IdentitiesOnly so only this key is offered. The remote command is a
           # placeholder — the forced command in authorized_keys is what runs.
           ssh -i ~/.ssh/deploy_key \
               -o IdentitiesOnly=yes \
               -o BatchMode=yes \
               -o ServerAliveInterval=30 \
-              "root@$DEPLOY_HOST" deploy
+              "$DEPLOY_USER@$DEPLOY_HOST" deploy
 
       - name: Smoke test
         env:
