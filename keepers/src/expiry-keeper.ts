@@ -1,6 +1,7 @@
 import { getErConnection, loadKeypair, sleep, log } from "./shared/connection";
 import { getKeeperAddresses } from "./shared/manifest";
 import { sendErTx, classifyTxError } from "./shared/ertx";
+import { beat } from "./shared/heartbeat";
 import { createCancelOrderInstruction } from "../../client/src/instructions";
 import { decodeOrderBook } from "../../client/src/accounts";
 
@@ -37,6 +38,7 @@ async function main() {
       const info = await erConn.getAccountInfo(obPda);
       if (!info) {
         log("EXPIRY", "OrderBook not found; sleeping");
+        beat("expiry", false, "OrderBook not found");
         await sleep(SCAN_INTERVAL_MS);
         continue;
       }
@@ -70,8 +72,10 @@ async function main() {
       if (cancelled > 0) {
         log("EXPIRY", `cancelled ${cancelled}/${expired.length} expired order(s)`);
       }
+      beat("expiry", true);
     } catch (e: any) {
       log("EXPIRY", `scan error: ${e.message ?? e}`);
+      beat("expiry", false, e?.message ?? String(e));
     }
     await sleep(SCAN_INTERVAL_MS);
   }

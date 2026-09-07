@@ -3,6 +3,7 @@ import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./sh
 import { fetchMarket, fetchAllPositions } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
 import { readPythPrice } from "./shared/pyth";
+import { beat } from "./shared/heartbeat";
 import {
   createLiquidatePositionInstruction,
   createExecuteTriggerInstruction,
@@ -189,12 +190,14 @@ async function main() {
       const market = await fetchMarket(connection, MARKET_INDEX);
       if (!market) {
         log("LIQUIDATION", "Market not found, waiting...");
+        beat("liquidation", true);
         await sleep(5_000);
         continue;
       }
 
       if (market.circuitBreakerActive) {
         log("LIQUIDATION", "Market paused, skipping");
+        beat("liquidation", true);
         await sleep(POLL_INTERVAL_MS);
         continue;
       }
@@ -217,6 +220,7 @@ async function main() {
         const twapPrice = computeTwap(market);
         if (!twapPrice) {
           log("LIQUIDATION", `No usable price (Pyth: ${e?.message ?? e}; no TWAP either), skipping`);
+          beat("liquidation", false, `no usable price: ${e?.message ?? e}`);
           await sleep(POLL_INTERVAL_MS);
           continue;
         }
@@ -329,9 +333,11 @@ async function main() {
       );
 
       consecutiveErrors = 0;
+      beat("liquidation", true);
     } catch (err: any) {
       consecutiveErrors++;
       log("LIQUIDATION", `Error (${consecutiveErrors}): ${err.message}`);
+      beat("liquidation", false, err?.message ?? String(err));
       if (consecutiveErrors > 10) {
         log("LIQUIDATION", "Too many errors, backing off 60s");
         await sleep(60_000);
