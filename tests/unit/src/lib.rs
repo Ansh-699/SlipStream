@@ -98,3 +98,10 @@ mod test_pending_fills_regressions;
 mod test_keeper_role_regressions;
 #[cfg(test)]
 mod test_funding_clamp_regressions;
+
+// Round 10 — the MagicBlock undelegation callback route (10 stranded credits)
+// and the funding-index delta clamp (the -10.52 live index).
+#[cfg(test)]
+mod test_undelegation_callback;
+#[cfg(test)]
+mod test_funding_delta_clamp;

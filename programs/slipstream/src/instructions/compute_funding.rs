@@ -71,12 +71,6 @@ pub fn process(
         (intervals, next_funding_ts)
     };
 
-    // Mark price = local TWAP from book midprice samples
-    let mark_price = {
-        let market = Market::from_account_info(market_acc)?;
-        market.get_twap().ok_or(SlipstreamError::OracleStale)?
-    };
-
     // Index price = dual-oracle median (also flips restricted_mode if oracles disagree)
     let index_price = {
         let market = Market::from_account_info_mut(market_acc)?;
@@ -92,6 +86,34 @@ pub fn process(
     if index_price == 0 {
         return Err(SlipstreamError::InvalidOracle.into());
     }
+
+    // NEEDS-DEPLOY. Mark price = the SAME oracle read as the index, taken in this
+    // instruction. The premium is `(mark - index) / index`, so both sides must
+    // come from one read at one moment or the term measures oracle LAG, not a
+    // book premium.
+    //
+    // This used to read `Market::get_twap()` — described in the deleted comment
+    // as "local TWAP from book midprice samples", which it never was: the ring is
+    // written only by `crank_twap` (crank_twap.rs:71) and only with a Pyth read.
+    // So the premium compared a ~30-minute average of PAST oracle samples against
+    // this call's FRESH dual-oracle read. That difference is one-signed for as
+    // long as the price trends, and whenever the crank stalls it saturates the
+    // +/-0.5% per-interval clamp in one direction every interval. That is how the
+    // live index reached -10.52 dimensionless on market ECUp8pXz... — roughly
+    // 2000 intervals of one-sided full-clamp accrual on a market with no real
+    // trading, which is exactly what `MAX_FUNDING_INDEX_DELTA` now has to contain.
+    //
+    // ponytail: CEILING — no book-derived mark exists anywhere in this program
+    // (settle_trades.rs:295 and settle_from_log.rs:339 both deliberately REFUSE
+    // to source a mark from user-controlled fill prices, and `crank_twap` is the
+    // sole writer of both the ring and `last_mark_price`), so the premium term is
+    // structurally zero and funding accrues exactly INTEREST_RATE_PER_INTERVAL.
+    // A market with no real trading is the only kind this program can currently
+    // price, and that is the correct answer for it. UPGRADE PATH — record an
+    // oracle-banded book mid at fill time and pass it in here as `mark_price`;
+    // `compute_funding_rate` (premium + interest + clamp) is unchanged and starts
+    // producing a real premium again with no other edit.
+    let mark_price = index_price;
 
     let funding_rate_per_interval = compute_funding_rate(mark_price, index_price)?;
     let funding_rate = funding_rate_per_interval

@@ -22,6 +22,33 @@ pub const MAX_FUNDING_RATE_PER_INTERVAL: i128 = 5_000_000_000_000_000;
 /// notional. Also economic policy; see `MAX_FUNDING_RATE_PER_INTERVAL`.
 pub const MAX_CATCHUP_INTERVALS: i64 = 3;
 
+/// Maximum |cumulative-index movement| ONE funding settlement may pay out,
+/// 18-dp fixed point. Derived, not a new policy number: it is exactly the most a
+/// single permissionless `compute_funding` call can add to the index
+/// (`MAX_FUNDING_RATE_PER_INTERVAL * MAX_CATCHUP_INTERVALS` = 1.5% of notional),
+/// so it caps a settlement at one crank's worth of accrual.
+///
+/// Why this exists at all: `compute_funding` bounds what goes INTO the index,
+/// but nothing bounded what came out of it. The live devnet index on market
+/// `ECUp8pXzVLzxjVs8mtKBJma3mdcHf8zSC4cqPeBy8MPy` reached -10.52 dimensionless
+/// (~2000 intervals of one-sided full-clamp accrual, root-caused in
+/// `compute_funding.rs`), which credited any near-zero-snapshot position 10.52x
+/// its notional out of a vault backed by a 0.085 USDC insurance fund.
+///
+/// ponytail: CEILING — the excess is FORGIVEN, not deferred, because every
+/// caller advances `Position.funding_index_snapshot` to the current index after
+/// settling (claim_funding.rs, settle_trades.rs `update_position`,
+/// close_position.rs, liquidate_position.rs), which is also what makes this
+/// per-settlement clamp a real total bound rather than a speed bump. Same
+/// forgive-don't-defer policy `compute_funding` already chose for its catch-up
+/// cap, and for the same reason: deferring hands the cap straight back. Cost: a
+/// position left unsettled across more than one crank forfeits the surplus.
+/// UPGRADE PATH — give `Position` a paid-through index (or a last-settled
+/// timestamp) so the clamp can be scaled by intervals actually elapsed; that is
+/// a state-layout change, so it waits for the next account migration.
+pub const MAX_FUNDING_INDEX_DELTA: i128 =
+    MAX_FUNDING_RATE_PER_INTERVAL * (MAX_CATCHUP_INTERVALS as i128);
+
 /// Compute the funding rate for one interval.
 ///
 /// formula: funding_rate = clamp(premium_rate + interest_rate)
@@ -73,9 +100,15 @@ pub fn compute_funding_payment(
         return Ok(0);
     }
 
+    // NEEDS-DEPLOY. Bound the payout at the source, where all four settlement
+    // paths route through, rather than in each caller. Unclamped this multiplied
+    // the RAW index delta by the position's notional, so the accrued -10.52 index
+    // (see `MAX_FUNDING_INDEX_DELTA`) paid 10.52x notional on the first
+    // settlement of any position whose snapshot was near zero.
     let index_delta = current_funding_index
         .checked_sub(snapshot_funding_index)
-        .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?;
+        .ok_or(ProgramError::from(SlipstreamError::MathOverflow))?
+        .clamp(-MAX_FUNDING_INDEX_DELTA, MAX_FUNDING_INDEX_DELTA);
 
     // The rate (index_delta / FUNDING_SCALE) is dimensionless; it must be applied
     // to the position's QUOTE-denominated notional, not to its raw base-atom size.

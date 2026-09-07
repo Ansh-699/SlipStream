@@ -42,6 +42,9 @@ pub mod accept_authority;
 pub mod seed_credit_ledger;
 pub mod reset_pending_fills;
 pub mod set_keeper;
+// MagicBlock's owner-program undelegation callback. Not a 1-byte instruction —
+// see the 8-byte route at the top of `process`.
+pub mod process_undelegation;
 
 use pinocchio::{account_info::AccountInfo, program_error::ProgramError, pubkey::Pubkey, ProgramResult};
 
@@ -114,6 +117,18 @@ pub fn process(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    // NEEDS-DEPLOY. The MagicBlock delegation program hands a delegated account
+    // back by CPI-ing THIS program with an 8-byte discriminator, so it must be
+    // matched before the 1-byte dispatch below — which otherwise reads byte 196,
+    // finds no arm, and reverts the validator's whole `undelegate` transaction.
+    // That is why 10 TradingCredit PDAs are stranded on devnet. 0xC4 is outside
+    // the 0x00..=0x2A one-byte space, so this route shadows no instruction.
+    if let Some(seeds) =
+        instruction_data.strip_prefix(&process_undelegation::EXTERNAL_UNDELEGATE_DISCRIMINATOR)
+    {
+        return process_undelegation::process(program_id, accounts, seeds);
+    }
+
     let (discriminator, data) = instruction_data
         .split_first()
         .ok_or(ProgramError::InvalidInstructionData)?;
