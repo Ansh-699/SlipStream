@@ -4,7 +4,7 @@ import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import { Transaction } from "@solana/web3.js";
-import { usePositions } from "@/hooks/use-positions";
+import { usePositions, useUserAccount } from "@/hooks/use-positions";
 import { useErPosition } from "@/hooks/use-er-position";
 import { useOrderBook } from "@/hooks/use-orderbook";
 import { useOpenOrders } from "@/hooks/use-open-orders";
@@ -22,11 +22,16 @@ import {
   TRIGGER_KIND_TAKE_PROFIT,
   FUNDING_SCALE,
   humanizeError,
+  decodeProgramError,
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 import { revalidateOrderBook } from "@/hooks/use-orderbook";
 
 const PRICE_SCALE = 1_000_000;
+/** "1 unsettled fill" / "3 unsettled fills" / "unsettled fills" before the read lands. */
+function pendingLabel(n: number | undefined): string {
+  return n === undefined || n <= 0 ? "unsettled fills" : `${n} unsettled fill${n === 1 ? "" : "s"}`;
+}
 // LOT_SIZE / MAX_LEVERAGE come from the Deploy_Manifest (see @/lib/manifest).
 // Slippage bound on close-at-market: reject settling >1% through the current mark.
 const CLOSE_SLIPPAGE_BPS = 100n;
@@ -117,6 +122,12 @@ export function PositionsTable({}: PositionsTableProps) {
   // handleFlatten that turn a silent no-op and an opaque revert into a sentence.
   const book = useOrderBook(MARKET_INDEX);
   const { orders: openOrders } = useOpenOrders(publicKey ?? null, MARKET_INDEX);
+  // The pending-fill counter, purely so the PendingFillsExist revert below can
+  // be told truthfully. ponytail: one extra getAccountInfo every 5s for the
+  // UserAccount PDA (the same shape and cadence usePositions already runs
+  // beside it). Fold it into useSession's existing UserAccount read if that
+  // ever matters; it is one single-account fetch, not a scan.
+  const { user } = useUserAccount();
   const { state: session, status: sessionStatus, getSessionKeypair } = useSession(0);
   const { triggers, refresh: refreshTriggers } = useTriggers();
   // Market::mark_price_for_close (market.rs:173-183) only consults the freshness
@@ -139,6 +150,27 @@ export function PositionsTable({}: PositionsTableProps) {
   const [tpInput, setTpInput] = useState("");
   const [triggerBusy, setTriggerBusy] = useState(false);
   const [triggerErr, setTriggerErr] = useState<string | null>(null);
+
+  /**
+   * humanizeError, except for the one revert whose stock advice is a lie.
+   *
+   * errors.ts answers PendingFillsExist with "wait for settlement, then retry",
+   * and waiting is exactly what never clears it. `pending_fills` is bumped once
+   * per user per record_pending_fill and decremented once per settled (fill,
+   * side), so a partial-prefix settle leaves a residue that no amount of
+   * settlement can drain - reset_pending_fills.rs:11-21 says so in as many
+   * words, and names itself the ONLY path that clears it. That path is
+   * authority-gated (global_state.authority must sign), so the trader cannot
+   * take it. Telling them to wait sends them to retry a gate that will never
+   * open; the count is what lets them say which account is stuck when they ask
+   * an operator to clear it.
+   */
+  const explain = (err: unknown): string => {
+    if (decodeProgramError(err) !== "PendingFillsExist") return humanizeError(err);
+    // The count comes from a poll that may not have answered yet; the sentence
+    // is still true and still actionable without the exact number.
+    return `Your account has ${pendingLabel(user?.pendingFills)} stuck behind the pending-fills gate, and settlement cannot clear that gate. An operator has to send reset_pending_fills (authority-signed) - retrying will keep failing until then. (PendingFillsExist)`;
+  };
 
   // Flatten the ER (pending) position by placing an opposite-side IOC order that
   // crosses the book. This nets the position to zero at ER speed — the way to
@@ -381,7 +413,7 @@ export function PositionsTable({}: PositionsTableProps) {
       // screen: they describe a revert that may never happen, so they stop
       // being true the moment the close lands. When the revert IS one of them,
       // this is the only text saying what to do about it.
-      setFlattenErr([humanizeError(err), ...hints].join(" "));
+      setFlattenErr([explain(err), ...hints].join(" "));
       console.error("flatten failed:", err);
     } finally {
       setFlattening(false);
@@ -482,7 +514,7 @@ export function PositionsTable({}: PositionsTableProps) {
       refresh();
       refreshTriggers();
     } catch (err) {
-      setCloseErr(humanizeError(err));
+      setCloseErr(explain(err));
       console.error("Close position failed:", err);
     } finally {
       setClosing(null);
@@ -530,7 +562,7 @@ export function PositionsTable({}: PositionsTableProps) {
       setTriggerOpen(false);
       refreshTriggers();
     } catch (err) {
-      setTriggerErr(humanizeError(err));
+      setTriggerErr(explain(err));
     } finally {
       setTriggerBusy(false);
     }
@@ -546,7 +578,7 @@ export function PositionsTable({}: PositionsTableProps) {
       await confirmSignature(connection, sig, { timeoutMs: 30_000 });
       refreshTriggers();
     } catch (err) {
-      setTriggerErr(humanizeError(err));
+      setTriggerErr(explain(err));
     } finally {
       setTriggerBusy(false);
     }
@@ -968,6 +1000,20 @@ export function PositionsTable({}: PositionsTableProps) {
         )}
         {closeErr && (
           <div className="pt-2 text-[11px] text-[var(--t-down)] break-all">{closeErr}</div>
+        )}
+        {/* Standing, not error-triggered: a non-zero pending-fills counter is a
+            state the trader is already IN, and the first they hear of it today
+            is a withdrawal that reverts with advice ("wait for settlement")
+            that cannot come true. It gates withdraw_collateral (:78) and
+            close_user_account (:83) and only the authority-signed
+            reset_pending_fills clears it, so this says who has to act. Warn,
+            not error: nothing the trader just did failed. */}
+        {user && user.pendingFills > 0 && (
+          <div className="pt-2 text-[11px] text-[var(--t-warn)] break-all">
+            Your account has {pendingLabel(user.pendingFills)} stuck behind the pending-fills gate.
+            Settlement will not clear that gate — withdrawals stay blocked until an operator sends
+            reset_pending_fills.
+          </div>
         )}
       </div>
     </div>
