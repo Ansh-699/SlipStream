@@ -107,7 +107,7 @@ flowchart TB
 ```mermaid
 flowchart LR
   subgraph L4["Layer 4 — Frontend"]
-    F["Next.js 16<br/>React · Tailwind · Phantom Connect"]
+    F["Next.js 16<br/>React · Tailwind · Privy"]
   end
   subgraph L3["Layer 3 — Keepers"]
     K["TypeScript bots<br/>settlement · funding · liq · twap"]

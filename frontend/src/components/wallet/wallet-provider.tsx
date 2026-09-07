@@ -1,62 +1,29 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { PhantomProvider, type PhantomTheme } from "@phantom/react-sdk";
-import { AddressType, type AuthProviderType } from "@phantom/browser-sdk";
+import { PrivyProvider, type PrivyClientConfig } from "@privy-io/react-auth";
+import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
+import { createSolanaRpc, createSolanaRpcSubscriptions } from "@solana/kit";
+import { RPC_URL } from "@/lib/manifest";
 
 /**
- * Phantom Connect replaces `@solana/wallet-adapter-*`. It covers both the
- * embedded wallet (Google/Apple — key held by Phantom, never in app storage)
- * and the Phantom browser extension via the "injected" provider, so extension
- * users keep working under a single provider.
+ * Privy replaces the Phantom Connect SDK. Two kinds of wallet come through the
+ * one provider: the Privy EMBEDDED wallet (created on Google sign-in; key held
+ * in Privy's cross-origin iframe, never in app storage) and EXTERNAL wallets
+ * (Phantom, Solflare, …) via Privy's Solana standard-wallet connectors.
+ *
+ * External wallets are not a courtesy. The TradingCredit PDA derives from the
+ * OWNER pubkey (`[b"credit", owner, u16le(market_index)]`) and the program has
+ * no owner-transfer instruction, so a user with an existing credit under their
+ * Phantom pubkey can reach it ONLY by connecting that same wallet. That is also
+ * why `createOnLogin` is `users-without-wallets` and not `all-users`: minting an
+ * embedded wallet for an extension user would hand them a second, empty owner
+ * and hide the one that holds their money.
  *
  * No `ConnectionProvider` here: RPC connections are handed out by
  * `useConnection()` in `@/hooks/use-wallet-compat`, because this app talks to
  * two clusters (base layer + MagicBlock ER) rather than one.
  */
-
-/** Phantom-hosted theme, matched to the app's dark aurora + emerald accent. */
-const slipstreamTheme: Partial<PhantomTheme> = {
-  background: "#0a0f0e",
-  text: "#ffffff",
-  secondary: "#98979C",
-  brand: "#10b981",
-  error: "#f43f5e",
-  success: "#10b981",
-  borderRadius: "16px",
-  overlay: "rgba(0, 0, 0, 0.8)",
-};
-
-/**
- * The same theme with its surfaces and signals swapped for the app's light
- * tokens. Phantom's modal renders with its own inline styles outside our CSS,
- * so it cannot pick up `.dark` on <html> — without this it stayed a #0a0f0e
- * panel under an 80%-black scrim over a white page, i.e. the sign-in step was
- * the one surface in the app that never followed the theme.
- *
- * `brand` and `error` move too, because they are not decoration here: the SDK
- * paints `brand` as the "Continue with Phantom" button fill under a hardcoded
- * #FFFFFF label (emerald-500 under white is 2.1:1; --t-up's #047857 is 4.8:1),
- * and `error` as the "Failed to disconnect" caption directly on `background`
- * (rose-500 on white is 3.4:1; --t-down's #be123c is 6.4:1). `success` is
- * declared by the type but the SDK never reads it, so it rides along unchanged.
- *
- * `secondary` must stay a "#" hex string: mergeTheme derives its aux colour
- * with hexToRgba and throws "Secondary color must be a hex color..." otherwise,
- * during PhantomProvider render at layout level — that takes the whole app
- * down, not just the modal. The SDK's own exported `lightTheme` is not used
- * because it carries Phantom's purple brand (#7C63E7) and would drop the
- * emerald accent.
- */
-const slipstreamThemeLight: Partial<PhantomTheme> = {
-  ...slipstreamTheme,
-  background: "#ffffff", // --t-bg
-  text: "#0e1417", // --t-text
-  secondary: "#5f6a74", // --t-text-3
-  brand: "#047857", // --t-up
-  error: "#be123c", // --t-down
-  overlay: "rgba(15, 23, 23, 0.5)",
-};
 
 export function WalletProvider({ children }: { children: ReactNode }) {
   // Read the class the ThemeToggle flips, and re-read it on the event it
@@ -72,39 +39,59 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("themechange", read);
   }, []);
 
-  const config = useMemo(() => {
-    const appId = process.env.NEXT_PUBLIC_PHANTOM_APP_ID;
-    const redirectUrl =
-      process.env.NEXT_PUBLIC_PHANTOM_REDIRECT_URL ??
-      (typeof window !== "undefined"
-        ? `${window.location.origin}/auth/callback`
-        : undefined);
+  const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
+  if (!appId) {
+    // Fail at build/first render, loudly and by name. Phantom had an
+    // "injected-only without an appId" fallback; Privy has no equivalent, and
+    // a sign-in button that silently does nothing is worse than a build error.
+    throw new Error("NEXT_PUBLIC_PRIVY_APP_ID is not set");
+  }
 
-    return {
-      // "injected" keeps working without an appId; Google/Apple require one.
-      providers: (appId
-        ? ["google", "apple", "injected"]
-        : ["injected"]) as AuthProviderType[],
-      appId,
-      addressTypes: [AddressType.solana],
-      // Must be "user-wallet": Phantom rejects "app-wallet" at provider init
-      // ("app-wallet type is not currently supported"), which takes the whole
-      // page down rather than degrading. The sign-in experience is the same --
-      // Google/Apple, no extension -- the wallet is just the user's Phantom
-      // account rather than one scoped to this app.
-      embeddedWalletType: "user-wallet" as const,
-      autoConnect: true,
-      ...(redirectUrl ? { authOptions: { redirectUrl } } : {}),
-    };
-  }, []);
+  // Rebuilt only when the theme flips. Connectors and the kit RPC client must
+  // not be recreated per render — each construction is a fresh object graph
+  // the provider would treat as a config change.
+  const config = useMemo<PrivyClientConfig>(
+    () => ({
+      loginMethods: ["google", "wallet"],
+      appearance: {
+        walletChainType: "solana-only",
+        theme: dark ? ("dark") : ("light"),
+        // Same pair the Phantom themes used: brand emerald on dark, --t-up on
+        // light — emerald-500 under Privy's white button label is 2.1:1, and
+        // #047857 is 4.8:1.
+        accentColor: dark ? ("#10b981") : ("#047857"),
+        logo: "/apple-icon.png",
+        showWalletLoginFirst: false,
+      },
+      embeddedWallets: {
+        solana: { createOnLogin: "users-without-wallets" },
+      },
+      externalWallets: {
+        solana: { connectors: toSolanaWalletConnectors() },
+      },
+      solana: {
+        rpcs: {
+          // Privy's embedded-wallet modal simulates a transaction against this
+          // before signing. Route it through the same-origin proxy so the
+          // upstream key never reaches the browser and so a spent key fails
+          // over instead of blanking the sign-in step.
+          "solana:devnet": {
+            rpc: createSolanaRpc(RPC_URL),
+            // Required by the config type. Kit opens the socket lazily on the
+            // first `.subscribe()`, and nothing in this app's Privy flows
+            // subscribes, so this is never dialled. The proxy cannot serve WS.
+            rpcSubscriptions: createSolanaRpcSubscriptions("wss://api.devnet.solana.com"),
+            blockExplorerUrl: "https://explorer.solana.com?cluster=devnet",
+          },
+        },
+      },
+    }),
+    [dark]
+  );
 
   return (
-    <PhantomProvider
-      config={config}
-      theme={dark ? slipstreamTheme : slipstreamThemeLight}
-      appName="SlipStream"
-    >
+    <PrivyProvider appId={appId} config={config}>
       {children}
-    </PhantomProvider>
+    </PrivyProvider>
   );
 }

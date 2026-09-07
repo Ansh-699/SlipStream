@@ -1316,17 +1316,6 @@ input[type="number"] {
 .paper-status .live-dot { align-self: center; }
 
 
-/* Phantom's ConnectButton styles itself inline — white text on a 10%-grey fill,
-   which is invisible against the light canvas. Inline styles mean !important is
-   the only lever; scoped to light mode so the dark default is untouched. */
-:root:not(.dark) .phantom-connect button {
-  color: rgba(15, 23, 23, 0.95) !important;
-  background: rgba(15, 23, 23, 0.06) !important;
-}
-:root:not(.dark) .phantom-connect button * {
-  color: inherit !important;
-}
-
 /* The toggle is a shared component; inside the paper it drops its box and
    sets as another item in the running head. */
 .paper .paper-toggle {

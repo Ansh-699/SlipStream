@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useModal } from "@phantom/react-sdk";
+import QRCode from "qrcode";
 import { MIN_SOL_LAMPORTS, useSession } from "@/hooks/use-session";
 import { useWallet } from "@/hooks/use-wallet-compat";
 
@@ -45,8 +45,7 @@ export function SessionPanel() {
     rotate,
     closeLegacyCredit,
   } = useSession(0);
-  const { publicKey, connected } = useWallet();
-  const { open } = useModal();
+  const { publicKey, connected, connect, exportWallet } = useWallet();
 
   const address = publicKey?.toBase58() ?? null;
   const inProtocol = state.freeCollateral + state.credit;
@@ -131,13 +130,13 @@ export function SessionPanel() {
               Sign in to create your in-app wallet. It holds your funds, signs
               your trades, and needs no browser extension.
             </p>
-            <button type="button" onClick={open} className={primaryBtn(false)}>
+            <button type="button" onClick={connect} className={primaryBtn(false)}>
               Create wallet / sign in
             </button>
           </div>
         ) : (
           <>
-            <WalletIdentity address={address} />
+            <WalletIdentity address={address} exportWallet={exportWallet} />
 
             <div className="grid grid-cols-2 gap-2">
               <Stat label="USDC" value={money(state.usdcBalance)} hint="In your wallet" />
@@ -306,9 +305,23 @@ export function SessionPanel() {
   );
 }
 
-/** Address row with copy-to-clipboard and transient confirmation. */
-function WalletIdentity({ address }: { address: string | null }) {
+/**
+ * Address row with copy-to-clipboard, an optional QR for funding the wallet
+ * from elsewhere, and — for the embedded wallet only — Privy's export-key
+ * escape hatch. This is the "fund this wallet" affordance: on devnet there is
+ * no card onramp, so the paths are a transfer from another devnet wallet (the
+ * address + QR) or the faucet button below.
+ */
+function WalletIdentity({
+  address,
+  exportWallet,
+}: {
+  address: string | null;
+  exportWallet: (() => Promise<void>) | null;
+}) {
   const [copied, setCopied] = useState(false);
+  const [showQr, setShowQr] = useState(false);
+  const [qr, setQr] = useState<string | null>(null);
 
   const copy = useCallback(() => {
     if (!address) return;
@@ -324,25 +337,78 @@ function WalletIdentity({ address }: { address: string | null }) {
     return () => clearTimeout(id);
   }, [copied]);
 
+  // Rendered lazily: the QR is only wanted when the user is about to fund the
+  // wallet from elsewhere, and encoding is main-thread work.
+  useEffect(() => {
+    if (!showQr || !address) return;
+    let cancelled = false;
+    QRCode.toDataURL(address, { margin: 1, width: 160 }).then(
+      (url) => {
+        if (!cancelled) setQr(url);
+      },
+      () => {
+        if (!cancelled) setQr(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [showQr, address]);
+
   if (!address) return null;
   const short = `${address.slice(0, 4)}…${address.slice(-4)}`;
 
   return (
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex min-w-0 flex-col">
-        <span className="text-[10px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">Your wallet</span>
-        <span className="truncate font-mono text-[12px] text-[var(--t-text)]" title={address}>
-          {short}
-        </span>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-col">
+          <span className="text-[10px] uppercase tracking-[0.06em] text-[var(--t-text-3)]">Your wallet</span>
+          <span className="truncate font-mono text-[12px] text-[var(--t-text)]" title={address}>
+            {short}
+          </span>
+        </div>
+        <div className="flex shrink-0 gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowQr((v) => !v)}
+            aria-expanded={showQr}
+            className={SECONDARY_BTN}
+          >
+            {showQr ? "Hide QR" : "Show QR"}
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            aria-label={copied ? "Address copied" : "Copy wallet address"}
+            className={SECONDARY_BTN}
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={copy}
-        aria-label={copied ? "Address copied" : "Copy wallet address"}
-        className={`shrink-0 ${SECONDARY_BTN}`}
-      >
-        {copied ? "Copied" : "Copy"}
-      </button>
+      {showQr && (
+        <div className="flex flex-col items-center gap-1.5 rounded-[6px] border border-[var(--t-border)] bg-[var(--t-surface)] p-3">
+          {qr ? (
+            // A data: URL cannot go through next/image; the size is fixed.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={qr} alt="Wallet address as a QR code" width={160} height={160} className="rounded-[4px]" />
+          ) : (
+            <span className={HINT}>Generating…</span>
+          )}
+          <p className={`${HINT} max-w-[24ch] text-center`}>
+            Devnet only: send test SOL or USDC here from another devnet wallet, or use Get test USDC below.
+          </p>
+        </div>
+      )}
+      {exportWallet && (
+        <button
+          type="button"
+          onClick={() => void exportWallet()}
+          className={`${HINT} underline underline-offset-2 transition-colors hover:text-[var(--t-text-2)] ${FOCUS}`}
+        >
+          Export private key
+        </button>
+      )}
     </div>
   );
 }

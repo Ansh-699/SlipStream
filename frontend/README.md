@@ -43,8 +43,9 @@ faucet.
 | `NEXT_PUBLIC_MARKET` | Override market address | from `deploy.json` |
 | `NEXT_PUBLIC_ORDER_BOOK` | Override orderbook address | from `deploy.json` |
 | `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_ER_RPC` | Override direct RPC URLs | from `deploy.json` |
-| `NEXT_PUBLIC_PHANTOM_APP_ID` | Phantom Portal app ID. Required for Google/Apple embedded wallets; without it only the Phantom browser extension ("injected") is offered | none |
-| `NEXT_PUBLIC_PHANTOM_REDIRECT_URL` | OAuth redirect target, must be allowlisted in the Phantom Portal | `<origin>/auth/callback` |
+| `NEXT_PUBLIC_PRIVY_APP_ID` | Privy app ID (dashboard.privy.io). **Required** — the wallet provider throws by name without it. Enable Google + Wallet login and Solana embedded wallets on the app, and allowlist the site origin | none |
+| `PRIVY_APP_ID` | Same id, server-side, for verifying faucet access tokens | none |
+| `PRIVY_VERIFICATION_KEY` | Optional ES256 verification key (SPKI PEM, Settings → Basics). With it the faucet verifies tokens offline; without it Privy's JWKS is fetched on first use | none |
 
 ## Production build
 

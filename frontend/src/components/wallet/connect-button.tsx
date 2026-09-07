@@ -1,21 +1,37 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { AddressType } from "@phantom/browser-sdk";
+import { useWallet } from "@/hooks/use-wallet-compat";
 
-// Phantom's button reads browser/extension state on mount, so keep it client-only.
-const PhantomConnectButton = dynamic(
-  () => import("@phantom/react-sdk").then((mod) => mod.ConnectButton),
-  { ssr: false }
-);
-
+/**
+ * Sign-in / identity control for the terminal nav. Reads only React context, so
+ * unlike the old vendor button it needs no `dynamic({ ssr: false })` split and
+ * no `!important` overrides in globals.css to reach its inline styles.
+ */
 export function ConnectButton() {
-  // Wrapped so globals.css can reach the vendor button: it hardcodes
-  // white-on-translucent-grey via inline styles, which disappears on the light
-  // canvas and can only be overridden with !important.
+  const { publicKey, connected, connecting, connect, disconnect } = useWallet();
+
+  if (!connected) {
+    return (
+      <button
+        type="button"
+        onClick={connect}
+        disabled={connecting}
+        className="rounded-lg bg-[var(--t-up-3)] px-3.5 py-1.5 text-[13px] font-semibold text-[var(--t-on-fill)] transition-opacity hover:opacity-90 disabled:opacity-50"
+      >
+        {connecting ? "Connecting…" : "Sign in"}
+      </button>
+    );
+  }
+
+  const a = publicKey!.toBase58();
   return (
-    <span className="phantom-connect">
-      <PhantomConnectButton addressType={AddressType.solana} />
-    </span>
+    <button
+      type="button"
+      onClick={() => void disconnect()}
+      title="Sign out"
+      className="tnum rounded-lg border border-[var(--t-border-strong)] px-3 py-1.5 text-[13px] text-[var(--t-text-2)] transition-colors hover:text-[var(--t-text)]"
+    >
+      {a.slice(0, 4)}…{a.slice(-4)}
+    </button>
   );
 }

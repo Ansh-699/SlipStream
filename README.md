@@ -201,9 +201,11 @@ Exactly what a brand-new user does to go from nothing to a live trade. Everythin
 
 1. **Open the app** at [slipstream.ansht.tech](https://slipstream.ansht.tech) and click
    **Start trading** (or **Open the terminal**).
-2. **Sign in.** Google, Apple, or a Solana wallet you already have. Signing in with Google
-   or Apple creates a Phantom-secured in-app wallet — no extension, no seed phrase to
-   write down. That wallet is the on-chain owner of everything below.
+2. **Sign in.** Google, or a Solana wallet you already have. Signing in with Google
+   creates a Privy-secured in-app wallet — no extension, no seed phrase to write
+   down. That wallet is the on-chain owner of everything below. If you already have
+   a credit under a Phantom/Solflare address, connect that wallet: the credit is
+   keyed to its pubkey and cannot be moved.
 3. **Get test USDC.** Click **Get test USDC** in the Wallet panel. The faucet mints devnet
    USDC and, if the wallet is short, tops it up with the small amount of SOL that network
    fees need. Fresh wallets have neither, so this step is not optional.

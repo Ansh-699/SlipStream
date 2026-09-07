@@ -367,7 +367,7 @@ async function waitForUndelegation(
 
 export function useSession(marketIndex: number = 0) {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, sendTransaction, getAuthToken } = useWallet();
   const [state, setState] = useState<SessionState>({
     initialized: false,
     delegated: false,
@@ -627,9 +627,17 @@ export function useSession(marketIndex: number = 0) {
     setStep("Requesting test USDC…");
     try {
       slog("faucet", `requesting test USDC for ${publicKey.toBase58()}`);
+      // The faucet is gated on a verified Privy sign-in; the wallet address in
+      // the body is which ATA to mint to, the token is who is asking.
+      const token = await getAuthToken();
+      if (!token) {
+        setError("Sign in first — the faucet is for signed-in wallets.");
+        slog("faucet", "FAILED: no auth token (signed out?)");
+        return;
+      }
       const res = await fetch("/api/faucet", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ wallet: publicKey.toBase58() }),
       });
       const body = await res.json();
@@ -663,7 +671,7 @@ export function useSession(marketIndex: number = 0) {
       setStep(null);
       setBusy(false);
     }
-  }, [publicKey, refresh]);
+  }, [publicKey, refresh, getAuthToken]);
 
   // fund_trading_credit (0x0e) — base layer.
   const fund = useCallback(
