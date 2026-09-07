@@ -60,14 +60,47 @@ interface Udf {
   errmsg?: string;
 }
 
+/**
+ * Widest window this route will ask any upstream for. 10y of daily candles is
+ * more than the chart ever draws, and the point is to have a ceiling at all:
+ * `from`/`to` are interpolated straight into the UDF upstream's query string.
+ */
+const MAX_SPAN_SECONDS = 10 * 365 * 86400;
+
 export async function GET(req: NextRequest): Promise<Response> {
+  try {
+    return await handle(req);
+  } catch (e) {
+    // A throw anywhere below (a bad Date, a JSON blowup, an upstream that
+    // rejects a header) must NOT surface as text: the message can embed the
+    // upstream URL, and UDF_UPSTREAM carries an API key. Log it, return the
+    // same fixed sentence the exhausted-upstream path returns.
+    console.error("[history] unhandled failure:", e instanceof Error ? e.message : e);
+    return json({ s: "error", errmsg: "Price history is unavailable right now." }, 502);
+  }
+}
+
+async function handle(req: NextRequest): Promise<Response> {
   const { searchParams } = new URL(req.url);
   const symbol = searchParams.get("symbol") || "Crypto.SOL/USD";
   const resolution = searchParams.get("resolution") || "60";
   const from = Number(searchParams.get("from"));
   const to = Number(searchParams.get("to"));
 
-  if (!Number.isFinite(from) || !Number.isFinite(to) || from <= 0 || to <= from) {
+  // Validate BEFORE any URL or Date is built. Number.isFinite was not enough:
+  // it admits 1e300 and 0.5, and `new Date(1e300 * 1000).toISOString()` throws
+  // RangeError rather than returning anything — a query string could crash the
+  // handler. isSafeInteger plus a not-far-future `to` plus a span ceiling keeps
+  // every number that reaches an upstream inside a range Date can represent.
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (
+    !Number.isSafeInteger(from) ||
+    !Number.isSafeInteger(to) ||
+    from <= 0 ||
+    to <= from ||
+    to > nowSec + 86400 ||
+    to - from > MAX_SPAN_SECONDS
+  ) {
     return json({ s: "error", errmsg: "missing or invalid from/to" }, 400);
   }
   const bucket = SECONDS[resolution];
