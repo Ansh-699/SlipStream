@@ -53,7 +53,14 @@ const ERR_ADVICE: Record<string, string> = {
   CircuitBreakerTripped: "The circuit breaker is active — the TWAP has diverged. It clears itself as the crank catches up.",
   RestrictedMode: "The market is in closes-only mode after an oracle disagreement.",
   SelfTrade: "That order would have traded against your own resting order.",
-  PendingFillsExist: "You have unsettled fills — wait for settlement, then retry.",
+  // Root fix for the advice every caller of this error shows. Waiting is not a
+  // remedy: pending_fills is cleared ONLY by the authority-signed
+  // reset_pending_fills instruction (0x29), never by settlement advancing. The
+  // three raisers are withdraw_collateral.rs:78, close_user_account.rs:83 and
+  // the liquidate_position.rs:169 grace window. positions-table.tsx overrides
+  // this with the live count; this string is what everything else renders.
+  PendingFillsExist:
+    "Your account has unsettled fills recorded against it. Settlement cannot clear them — an operator has to run reset_pending_fills. Your balance is safe.",
   InvalidAuthority: "Your session key is not authorised (it may have expired). Press “New session key”.",
   HealthFactorAboveThreshold: "The position is not liquidatable.",
   PositionNotFound: "No open position for this market.",

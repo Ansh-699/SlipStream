@@ -4,7 +4,8 @@
 //
 //   GET /api/status
 //   -> { base: { ok, slot }, er: { ok, slot }, indexer: { lastFillAt | null },
-//        keepers: { lastFundingTs, ageSecs, stalled } }
+//        keepers: { lastFundingTs, ageSecs, stalled,
+//                   fleet: [{ name, ageSecs, ok, lastError, stale }], fleetOk } }
 //
 // S7-01/S8-05: the base/er blocks measure whether an RPC answers, which is not
 // whether a keeper is running -- both read healthy right through a 17-day keeper
@@ -14,8 +15,17 @@
 // is advanced only by compute_funding, which only a keeper sends, so its age is
 // a direct measure of whether the fleet is alive. It is on-chain, needs no new
 // infrastructure, and is the same read that surfaced the live outage.
+//
+// ...but it measures ONE keeper. `last_funding_ts` is advanced by
+// compute_funding alone, so a dead TWAP, liquidation, expiry or fill-log keeper
+// is invisible to it: the endpoint reports healthy while settlement is stopped.
+// `keepers.fleet` below reads the per-keeper heartbeat files the keepers write
+// (see KEEPER_HEARTBEAT_DIR), which is the only signal that covers the loops
+// that touch no market field.
 
 import { existsSync } from "fs";
+import { readdir, readFile } from "fs/promises";
+import { tmpdir } from "os";
 import { PUBLIC_FALLBACKS, rpcPost } from "@/lib/rpc-failover";
 import { join, dirname, resolve } from "path";
 
@@ -51,6 +61,18 @@ interface LayerStatus {
   degraded?: boolean;
 }
 
+/** One keeper's self-report, from `<KEEPER_HEARTBEAT_DIR>/<name>.json`. */
+interface HeartbeatStatus {
+  name: string;
+  /** Seconds since that keeper last wrote its file. */
+  ageSecs: number;
+  /** What the keeper said about itself at that write. */
+  ok: boolean;
+  lastError: string | null;
+  /** True once ageSecs exceeds HEARTBEAT_STALE_SECS — the loop stopped writing. */
+  stale: boolean;
+}
+
 interface KeeperStatus {
   /** Unix seconds of the last compute_funding, or null if unreadable. */
   lastFundingTs: number | null;
@@ -58,6 +80,14 @@ interface KeeperStatus {
   ageSecs: number | null;
   /** True once age exceeds STALE_FACTOR funding intervals. Null = unknown. */
   stalled: boolean | null;
+  /**
+   * Every keeper that has written a heartbeat, by name. EMPTY is "we cannot
+   * see them", not "there are none": the frontend may run on a different host
+   * from the keepers, in which case the directory simply is not here.
+   */
+  fleet: HeartbeatStatus[];
+  /** Every heartbeat fresh and self-reporting ok. Null = nothing to read. */
+  fleetOk: boolean | null;
 }
 
 interface StatusPayload {
@@ -72,6 +102,19 @@ interface StatusPayload {
 // leaves room for one retry plus the poll cadence without crying wolf; the
 // interval itself comes from the market, so no threshold is hardcoded here.
 const STALE_FACTOR = 3;
+
+// Where the keepers drop `<name>.json`. Defaults to the OS temp dir so a
+// single-box deployment needs no configuration; set it to a real directory if
+// /tmp is wiped under the process.
+const HEARTBEAT_DIR = process.env.KEEPER_HEARTBEAT_DIR || tmpdir();
+// ponytail: ONE threshold for every keeper. The loops beat on their own
+// cadences (fill-log 4s, liquidation 5s, twap 8s, funding and expiry 60s), so
+// this is 3x the SLOWEST of them - the same "three misses, not one" slack
+// STALE_FACTOR above already uses - rather than a per-keeper SLO. Env knob
+// because the right number is a property of the running fleet, not of this
+// file. Upgrade path: a `staleAfter` field in the heartbeat itself, so each
+// keeper declares its own deadline and this route stops guessing.
+const HEARTBEAT_STALE_SECS = Number(process.env.KEEPER_HEARTBEAT_STALE_SECS) || 180;
 
 let cached: StatusPayload | null = null;
 
@@ -115,8 +158,58 @@ async function lastFillAt(): Promise<number | null> {
   }
 }
 
-async function keeperStatus(layer: "base" | "er"): Promise<KeeperStatus> {
-  const unknown: KeeperStatus = { lastFundingTs: null, ageSecs: null, stalled: null };
+/**
+ * Read every `<name>.json` in HEARTBEAT_DIR. A missing directory, a missing
+ * file, a half-written file and a foreign .json are all the SAME answer here:
+ * omitted, and therefore unknown. None of them may be reported as a dead
+ * keeper — the frontend is routinely deployed away from the keeper host, and a
+ * health endpoint that cries outage because it cannot see the fleet is the
+ * exact failure the `base.ok:false` episode already taught this route.
+ */
+async function heartbeats(): Promise<HeartbeatStatus[]> {
+  let files: string[];
+  try {
+    files = (await readdir(HEARTBEAT_DIR)).filter((f) => f.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const out: HeartbeatStatus[] = [];
+  for (const f of files) {
+    try {
+      const hb = JSON.parse(await readFile(join(HEARTBEAT_DIR, f), "utf8")) as {
+        name?: unknown;
+        ts?: unknown;
+        ok?: unknown;
+        lastError?: unknown;
+      };
+      // All three, not just `ts`: the default directory is the OS temp dir,
+      // which on any real box also holds other programs' JSON. Requiring the
+      // full shape is what keeps someone else's scratch file out of the fleet.
+      if (typeof hb?.name !== "string" || typeof hb.ts !== "number" || typeof hb.ok !== "boolean") {
+        continue;
+      }
+      const ageSecs = now - hb.ts;
+      out.push({
+        name: hb.name,
+        ageSecs,
+        ok: hb.ok,
+        lastError: typeof hb.lastError === "string" ? hb.lastError : null,
+        stale: ageSecs > HEARTBEAT_STALE_SECS,
+      });
+    } catch {
+      // Unreadable or mid-write: skip this one, keep the rest.
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function keeperStatus(layer: "base" | "er"): Promise<Omit<KeeperStatus, "fleet" | "fleetOk">> {
+  const unknown: Omit<KeeperStatus, "fleet" | "fleetOk"> = {
+    lastFundingTs: null,
+    ageSecs: null,
+    stalled: null,
+  };
   try {
     // Imported inside the try, not at module scope: `@/lib/manifest` THROWS on
     // evaluation when deploy.json is absent, and a health endpoint that 500s
@@ -151,12 +244,23 @@ export async function GET(): Promise<Response> {
   if (cached && Date.now() - cached.at < CACHE_MS) {
     return Response.json(cached);
   }
-  const [base, er, fillTs, keepers] = await Promise.all([
+  const [base, er, fillTs, funding, fleet] = await Promise.all([
     getSlot("base"),
     getSlot("er"),
     lastFillAt(),
     keeperStatus("base"),
+    heartbeats(),
   ]);
-  cached = { base, er, indexer: { lastFillAt: fillTs }, keepers, at: Date.now() };
+  // Nothing read = unknown, NOT healthy and NOT down. `every` on [] is true,
+  // which would have reported a perfect fleet on a host that has never seen a
+  // keeper — the same false all-clear this whole block exists to end.
+  const fleetOk = fleet.length ? fleet.every((h) => h.ok && !h.stale) : null;
+  cached = {
+    base,
+    er,
+    indexer: { lastFillAt: fillTs },
+    keepers: { ...funding, fleet, fleetOk },
+    at: Date.now(),
+  };
   return Response.json(cached);
 }
