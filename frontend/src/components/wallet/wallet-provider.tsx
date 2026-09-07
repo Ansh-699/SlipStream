@@ -40,12 +40,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID;
-  if (!appId) {
-    // Fail at build/first render, loudly and by name. Phantom had an
-    // "injected-only without an appId" fallback; Privy has no equivalent, and
-    // a sign-in button that silently does nothing is worse than a build error.
-    throw new Error("NEXT_PUBLIC_PRIVY_APP_ID is not set");
-  }
 
   // Rebuilt only when the theme flips. Connectors and the kit RPC client must
   // not be recreated per render — each construction is a fresh object graph
@@ -88,6 +82,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }),
     [dark]
   );
+
+  // Loud, by name, but NOT a thrown build error. Throwing here fails the
+  // prerender of every route under this provider, so the branch could not be
+  // typechecked, linted or built until someone created the Privy app -- which
+  // is exactly when you most want CI to run. Phantom had an "injected-only
+  // without an appId" fallback; Privy has no equivalent, so the honest state
+  // is to say so on screen instead of pretending a sign-in button works.
+  // The check sits AFTER every hook so the hook order is unconditional.
+  if (!appId) {
+    return (
+      <div role="alert" className="p-4 text-[13px] text-[--t-down-3]">
+        NEXT_PUBLIC_PRIVY_APP_ID is not set — wallet sign-in is unavailable.
+      </div>
+    );
+  }
 
   return (
     <PrivyProvider appId={appId} config={config}>

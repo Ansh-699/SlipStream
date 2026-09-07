@@ -1113,10 +1113,16 @@ export function useSession(marketIndex: number = 0) {
       // not the owner, not the authority, not emergency_undelegate -- can
       // recover it without a program upgrade.
       //
-      // Ten credits have already been lost this way. Pressing Withdraw is the
-      // ONLY way a user reaches this instruction, so refusing here is the
-      // whole mitigation. Remove this block in the same change that ships the
-      // 0xC4 arm, and not before.
+      // Ten credits have already been lost this way.
+      //
+      // CORRECTION to this block's original commit message (d290cd9), which
+      // called this "the entire mitigation": it is not. The ER accepts
+      // ScheduleCommitAndUndelegate from ANY signer, so anyone driving the
+      // program directly still strands their credit. This guard only stops
+      // OUR UI from walking users into it -- a speed bump, not a fix. The
+      // actual fix is the 0xC4 undelegation callback in the program
+      // (instructions/mod.rs); remove this block in the same change that
+      // ships and DEPLOYS that, and not before.
       if (delegated) {
         slog("withdraw", "REFUSED: undelegation is a one-way door on the deployed program");
         setError(
