@@ -31,6 +31,8 @@ const ERR_NAMES = [
   "LotSizeViolation", "OracleDisagreement", "RestrictedMode", "InvalidSwitchboardFeed", "GracePeriodActive",
   "LiquidationIntentNotReady", "GlobalPaused", "FillMarginExceeded", "TriggerConditionNotMet",
   "SelfTrade", "PositionStillOpen",
+  // Round 9 — APPEND ONLY, error.rs decodes by ordinal.
+  "CreditCeilingExceeded", "FillSequenceOutOfRange", "LegacyLayoutRejected",
 ];
 const ERROR_BASE = 0x100;
 

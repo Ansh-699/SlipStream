@@ -1,4 +1,4 @@
-import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import {
   getBaseConnection,
   getErConnection,
@@ -10,6 +10,7 @@ import {
 import { getKeeperAddresses } from "./shared/manifest";
 import { sendErTx, classifyTxError, errText } from "./shared/ertx";
 import { recordSettledFills } from "./shared/fill-db";
+import { beat } from "./shared/heartbeat";
 import {
   createInitializeFillLogInstruction,
   createDelegateFillLogInstruction,
@@ -68,6 +69,44 @@ const MIRROR_ERRORS_BEFORE_ROTATE = 3;
 // see programs/slipstream/src/state/market.rs last_settled_sequence().
 const MARKET_CURSOR_OFFSET = 2058;
 
+/**
+ * ROTATION BRAKES.
+ *
+ * Rotating buys a fresh 10-commit budget; it costs one rent-exempt ~8 KB
+ * FillLog that is never reclaimed. That trade is only worth making while
+ * settlement is actually ADVANCING. It stopped advancing at sequence 49,784 and
+ * the keeper kept paying: 461 FillLog accounts holding 27.18 SOL of stranded
+ * rent, burning ~1.849 SOL every 23 minutes, until an operator killed the
+ * process — which is why settlement has been down rather than merely slow.
+ *
+ * Three independent brakes, all enforced in rotate() because all three callers
+ * (commit budget edge, sponsored-commit-limit revert, repeated mirror failure)
+ * route through it:
+ *   (a) wedge   — the L1 cursor has not moved since the last rotation.
+ *   (b) rate    — at most MAX_ROTATIONS_PER_HOUR in any rolling hour.
+ *   (c) balance — never initialize a new epoch below MIN_INIT_BALANCE_SOL.
+ */
+const MAX_ROTATIONS_PER_HOUR = 3;
+const ROTATION_WINDOW_MS = 60 * 60_000;
+// Long enough that a wedged keeper costs nothing and quiet enough not to bury
+// the log, short enough that it recovers on its own the moment an operator
+// unblocks settlement.
+const ROTATE_REFUSED_SLEEP_MS = 5 * 60_000;
+const MIN_INIT_BALANCE_SOL = 0.5;
+const MIN_INIT_BALANCE_LAMPORTS = MIN_INIT_BALANCE_SOL * LAMPORTS_PER_SOL;
+
+/**
+ * settle_from_log consumes only the CONTIGUOUS run from cursor + 1 — it breaks
+ * at the first gap and writes the prefix maximum (R4's S4-01 fix) — so the
+ * window this keeper submits mirrors that rule by default.
+ *
+ * FILL_LOG_REQUIRE_CONTIGUOUS=0 submits ACROSS a gap instead (the pre-R4
+ * behaviour), for the case where an operator has established that a hole in the
+ * log is permanent and wants the fills behind it. Default is unchanged, so
+ * nothing switches mode without someone deciding to.
+ */
+const REQUIRE_CONTIGUOUS = process.env.FILL_LOG_REQUIRE_CONTIGUOUS !== "0";
+
 async function main() {
   const base = getBaseConnection();
   const er = getErConnection();
@@ -87,6 +126,11 @@ async function main() {
   let commitsThisEpoch = 0;
   // L1 settlement cursor mirror (Market.last_settled_sequence is the source of truth).
   let lastSettledSeq: bigint | null = null;
+  // Rotation brakes — see the ROTATION BRAKES note above.
+  const rotationsAt: number[] = [];
+  // The L1 cursor as of the last rotation, seeded from chain at boot. A rotation
+  // that fails to move it past this bought a rent-exempt account and nothing else.
+  let rotationBaselineCursor: bigint | null = null;
 
   /**
    * Discover the current live epoch: the highest epoch whose FillLog already
@@ -110,6 +154,17 @@ async function main() {
     const [fillLog] = findFillLogPda(marketIndex, ep, programId);
     const info = await base.getAccountInfo(fillLog);
     if (!info) {
+      // (c) WALLET FLOOR. This is the ONLY place a FillLog is ever created, so
+      // guarding here covers boot and rotation alike. A keeper that has spent
+      // itself down to the rent for one more epoch cannot pay for the settles
+      // that epoch exists to enable.
+      const lamports = await base.getBalance(keeper.publicKey);
+      if (lamports < MIN_INIT_BALANCE_LAMPORTS) {
+        throw new Error(
+          `keeper wallet holds ${(lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL, below the ` +
+            `${MIN_INIT_BALANCE_SOL} SOL floor — refusing to initialize FillLog epoch ${ep}`
+        );
+      }
       const ix = createInitializeFillLogInstruction(keeper.publicKey, marketIndex, ep, programId);
       const sig = await sendAndConfirm(base, new Transaction().add(ix), [keeper]);
       log("FILLLOG-KEEPER", `epoch ${ep}: initialize_fill_log ${sig}`);
@@ -124,13 +179,78 @@ async function main() {
     }
   }
 
-  /** Rotate to the next epoch (fresh commit budget). */
-  async function rotate(): Promise<void> {
+  /**
+   * (a) WEDGE DETECTION. `null` = rotating is worth the rent; a string = the
+   * reason it is not.
+   *
+   * A rotation is only ever justified by settlement having MOVED since the last
+   * one. When the L1 cursor is frozen, the fill at cursor + 1 is either missing
+   * from the committed FillLog or unsettleable from it (an orphaned
+   * UserAccount/Position, a permanent hole in the ring) — and a fresh epoch
+   * fixes neither. That is the exact state settlement is in now, and it is what
+   * turned 461 rotations into 27.18 SOL of stranded rent.
+   *
+   * Note this deliberately tests cursor PROGRESS rather than "is cursor + 1 in
+   * the committed L1 log". The latter alone is not a wedge signal: settle()
+   * drains the log completely every tick, so in NORMAL operation the committed
+   * copy never contains cursor + 1 — gating on that would refuse every healthy
+   * rotation too. The committed log is still read, but only to say WHICH kind of
+   * wedge this is in the log line an operator will act on.
+   */
+  async function rotateRefusalReason(): Promise<string | null> {
+    // (b) RATE CAP first: it is a pure in-memory check and needs no RPC.
+    // ponytail: in-memory, so a pm2 restart clears the hour. The wedge check
+    // below is seeded from chain at boot and is what actually holds across
+    // restarts; persist this to the heartbeat file only if a crash loop ever
+    // manages to out-rotate it.
+    const cutoff = Date.now() - ROTATION_WINDOW_MS;
+    while (rotationsAt.length > 0 && rotationsAt[0] < cutoff) rotationsAt.shift();
+    if (rotationsAt.length >= MAX_ROTATIONS_PER_HOUR) {
+      return `${rotationsAt.length} rotations in the last hour (cap ${MAX_ROTATIONS_PER_HOUR}) — each one strands rent`;
+    }
+
+    const cursor = await readMarketCursor();
+    if (rotationBaselineCursor !== null && cursor <= rotationBaselineCursor) {
+      const stuckAt = cursor + 1n;
+      let detail = "next fill not committed on L1";
+      try {
+        const [fillLog] = findFillLogPda(marketIndex, epoch, programId);
+        const l1 = await base.getAccountInfo(fillLog);
+        if (l1 && decodeFillLogFills(l1.data as Buffer).some((f) => f.sequence === stuckAt)) {
+          detail = "next fill IS committed but will not settle (orphaned UserAccount/Position?)";
+        }
+      } catch {
+        /* diagnostic only — never let it decide the refusal */
+      }
+      return `settlement wedged at seq ${stuckAt} — ${detail}; a fresh epoch cannot fix this`;
+    }
+    return null;
+  }
+
+  /** Rotate to the next epoch (fresh commit budget). False = refused/failed. */
+  async function rotate(): Promise<boolean> {
+    const refusal = await rotateRefusalReason();
+    if (refusal) {
+      log("FILLLOG-KEEPER", `NOT rotating epoch ${epoch}: ${refusal}`);
+      await sleep(ROTATE_REFUSED_SLEEP_MS);
+      return false;
+    }
     const next = epoch + 1;
     log("FILLLOG-KEEPER", `rotating epoch ${epoch} -> ${next} (commit budget exhausted)`);
-    await ensureEpochReady(next);
+    try {
+      await ensureEpochReady(next);
+    } catch (e: any) {
+      // Includes the wallet floor. Back off rather than retrying every 4s: a
+      // low balance and a dead base RPC both need a human, not a tighter loop.
+      log("FILLLOG-KEEPER", `rotation to epoch ${next} failed: ${errText(e)}`);
+      await sleep(ROTATE_REFUSED_SLEEP_MS);
+      return false;
+    }
     epoch = next;
     commitsThisEpoch = 0;
+    rotationsAt.push(Date.now());
+    rotationBaselineCursor = await readMarketCursor();
+    return true;
   }
 
   /** mirror_fills on the ER: append new orderbook fills to the current FillLog. */
@@ -160,8 +280,10 @@ async function main() {
   /** commit_fill_log on the ER; rotate first if at the budget edge. Returns the
    *  ER FillLog header count we expect to see committed on L1. */
   async function commit(): Promise<boolean> {
-    if (commitsThisEpoch >= COMMITS_BEFORE_ROTATE) {
-      await rotate();
+    if (commitsThisEpoch >= COMMITS_BEFORE_ROTATE && !(await rotate())) {
+      // Refused. Committing anyway would just revert on the sponsored-commit
+      // cap and ask to rotate again.
+      return false;
     }
     const [fillLog] = findFillLogPda(marketIndex, epoch, programId);
     const erInfo = await er.getAccountInfo(fillLog);
@@ -251,7 +373,10 @@ async function main() {
       let next = cursor + 1n;
       for (const f of fills) {
         if (f.sequence < next) continue; // already settled
-        if (f.sequence !== next) break; // gap — the program stops here too
+        if (f.sequence !== next) {
+          if (REQUIRE_CONTIGUOUS) break; // gap — the program stops here too
+          next = f.sequence; // FILL_LOG_REQUIRE_CONTIGUOUS=0: step over the hole
+        }
         windowFills.push(f);
         next += 1n;
         if (windowFills.length >= MAX_FILLS_PER_TX) break;
@@ -472,6 +597,10 @@ async function main() {
   // windows for fills the program will just report as already settled.
   try {
     lastSettledSeq = await readMarketCursor();
+    // Seed the rotation baseline from the SAME read, so a restart into an
+    // already-wedged market refuses its first rotation instead of paying for one
+    // more epoch to rediscover what the previous 461 established.
+    rotationBaselineCursor = lastSettledSeq;
     log("FILLLOG-KEEPER", `L1 settlement cursor: ${lastSettledSeq}`);
   } catch {
     /* base may be unreachable at boot; settle() copes with a null cursor */
@@ -484,9 +613,11 @@ async function main() {
     try {
       await tick();
       consecutiveErrors = 0;
+      beat("fill-log", true);
     } catch (e: any) {
       consecutiveErrors += 1;
       log("FILLLOG-KEEPER", `tick error (${consecutiveErrors}): ${errText(e)}`);
+      beat("fill-log", false, errText(e));
       if (consecutiveErrors > 10) {
         log("FILLLOG-KEEPER", "too many consecutive errors, backing off 60s");
         await sleep(60_000);

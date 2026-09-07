@@ -3,6 +3,7 @@ import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./sh
 import { fetchMarket } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
 import { readPythPrice } from "./shared/pyth";
+import { beat } from "./shared/heartbeat";
 import { createCrankTwapInstruction } from "../../client/src/instructions";
 
 const MARKET_INDEX = 0;
@@ -49,12 +50,22 @@ async function main() {
   // Only log the stale/fresh transition, not every poll: at an 8s cadence an
   // unconditional line would be ~10,800 entries a day and bury the real errors.
   let wasStale = false;
+  // publish_time of the reading the last SUCCESSFUL crank consumed. Freshness
+  // is a window, not an edge: this loop polls every 8s and the devnet feed
+  // republishes every ~300s, so "fresh" stays true for up to ~45s after a
+  // publish and the keeper re-cranked the SAME reading five or six times.
+  // crank_twap appends each of those to the TWAP ring as a distinct sample,
+  // which costs a signature every time and races the tail of the staleness
+  // window (a re-crank sent at age 44s can execute at age 61s and revert).
+  // One crank per publish is all the oracle actually has to say.
+  let lastCrankedPublishTime = 0;
 
   while (true) {
     try {
       const market = await fetchMarket(connection, MARKET_INDEX);
       if (!market) {
         log("TWAP", "Market not found, waiting...");
+        beat("twap", true);
         await sleep(5_000);
         continue;
       }
@@ -68,8 +79,14 @@ async function main() {
           log("TWAP", `Pyth stale (${px.ageSecs}s > ${MAX_AGE_TO_SEND_SECS}s) — holding until it publishes`);
           wasStale = true;
         }
+        beat("twap", true);
         await sleep(CRANK_INTERVAL_MS);
         continue;
+      }
+      if (px.publishTime === lastCrankedPublishTime) {
+        beat("twap", true);
+        await sleep(CRANK_INTERVAL_MS);
+        continue; // already cranked this reading — nothing new to sample
       }
       if (wasStale) {
         log("TWAP", `Pyth fresh again (${px.ageSecs}s, $${px.priceFloat.toFixed(4)}) — cranking`);
@@ -90,10 +107,13 @@ async function main() {
       const tx = new Transaction().add(ix);
       const sig = await sendAndConfirm(connection, tx, [keeper]);
       log("TWAP", `Cranked TWAP, sig=${sig}`);
+      lastCrankedPublishTime = px.publishTime;
       consecutiveErrors = 0;
+      beat("twap", true);
     } catch (err: any) {
       consecutiveErrors++;
       log("TWAP", `Error (${consecutiveErrors}): ${err.message}`);
+      beat("twap", false, err?.message ?? String(err));
       if (consecutiveErrors > 10) {
         log("TWAP", "Too many consecutive errors, backing off 60s");
         await sleep(60_000);

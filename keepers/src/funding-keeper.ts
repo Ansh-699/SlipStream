@@ -2,6 +2,7 @@ import { Transaction } from "@solana/web3.js";
 import { getBaseConnection, loadKeypair, sendAndConfirm, sleep, log } from "./shared/connection";
 import { fetchMarket } from "./shared/accounts";
 import { getKeeperAddresses } from "./shared/manifest";
+import { beat } from "./shared/heartbeat";
 import { createComputeFundingInstruction } from "../../client/src/instructions";
 import { PublicKey } from "@solana/web3.js";
 
@@ -36,6 +37,7 @@ async function main() {
       const market = await fetchMarket(connection, MARKET_INDEX);
       if (!market) {
         log("FUNDING", "Market not found, waiting...");
+        beat("funding", true);
         await sleep(5_000);
         continue;
       }
@@ -48,6 +50,7 @@ async function main() {
       if (elapsed < interval) {
         const remaining = interval - elapsed;
         log("FUNDING", `Next funding in ${remaining}s`);
+        beat("funding", true);
         await sleep(Math.min(remaining * 1000, CHECK_INTERVAL_MS));
         continue;
       }
@@ -59,9 +62,11 @@ async function main() {
       const sig = await sendAndConfirm(connection, tx, [keeper]);
       log("FUNDING", `Computed funding, sig=${sig}`);
       consecutiveErrors = 0;
+      beat("funding", true);
     } catch (err: any) {
       consecutiveErrors++;
       log("FUNDING", `Error (${consecutiveErrors}): ${err.message}`);
+      beat("funding", false, err?.message ?? String(err));
       if (consecutiveErrors > 5) {
         log("FUNDING", "Too many consecutive errors, backing off 5m");
         await sleep(300_000);
