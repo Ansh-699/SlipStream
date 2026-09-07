@@ -229,7 +229,7 @@ const ALLOWED_METHODS = new Set([
   // single getAccountInfo, so nothing in frontend/src calls it any more (the
   // keepers reach their RPC directly — clientRpc only returns this proxy URL in
   // the browser). Left in the allowlist it was an unfiltered, unauthenticated,
-  // retry-amplified full-program scan — 20 per request, >600 KB of upstream
+  // retry-amplified full-program scan — MAX_BATCH_CALLS per request, >600 KB of upstream
   // egress each — pointed at the deployer's paid RPC quota: exactly what the
   // comment above says burned that quota once already. If a feature ever needs
   // it back, re-add it gated on a required non-empty `filters` array plus a
@@ -282,8 +282,55 @@ async function readCapped(req: NextRequest, max: number): Promise<string | null>
   return Buffer.concat(chunks).toString("utf8");
 }
 
-/** Solana's own per-call ceiling for getMultipleAccounts; summed across a batch. */
-const MAX_MULTI_ACCOUNTS = 100;
+/**
+ * Calls per JSON-RPC batch.
+ *
+ * MEASURED 2026-09-07 against frontend/src: the app issues NO batch at all —
+ * the largest batch it actually sends is ONE call per request.
+ *
+ * To re-derive: a JSON-RPC batch only exists if something coalesces calls into
+ * a single array body. `Promise.all` does NOT — it makes N separate POSTs.
+ * frontend/src has zero hand-built array bodies (`grep 'JSON.stringify(\['`),
+ * and @solana/kit's default transport does not coalesce. web3.js v1 emits an
+ * array from exactly three methods — getParsedTransactions, getTransactions,
+ * getParsedConfirmedTransactions — none of which appear in frontend/src, and
+ * none of which are in ALLOWED_METHODS above, so they are rejected on the
+ * method check before this cap is ever consulted. (getMultipleAccountsInfo is
+ * NOT a batch: it is one call carrying an array of keys — see below.)
+ *
+ * 20 was the amplifier: 20 x getAccountInfo on the ~836 KB order book is ~16 MB
+ * of upstream egress, on the deployer's paid quota, for one anonymous request.
+ * 4 keeps 4x headroom over the measured 1, and matches the largest per-request
+ * account fan-in the app has (use-session.ts, 4 keys) — the size this would
+ * need if that one call ever became four coalesced singles.
+ */
+const MAX_BATCH_CALLS = 4;
+
+/**
+ * Pubkeys per getMultipleAccounts, summed across a batch. Solana's own per-call
+ * ceiling is 100, which is where this started; the app's real need is far less.
+ *
+ * MEASURED 2026-09-07: the largest fan-in is 4 keys (use-session.ts:232,
+ * `ata ? [userPda, pda, publicKey, ata] : [userPda, pda, publicKey]`). The only
+ * other call site passes a fixed 2 (use-triggers.ts:34). Neither is
+ * dynamic-length, so nothing in the app grows past 4.
+ *
+ * 100 was the LARGER of the two amplifiers here and the one that had not been
+ * costed: nothing requires the pubkeys to be distinct, so 100 repeats of the
+ * ~836 KB order book is ~83 MB of upstream egress for one anonymous request —
+ * 5x worse than the 20-call batch above. 8 is 2x the measured maximum; a
+ * feature that legitimately needs more gets a clean 403 and can re-derive the
+ * number from this comment rather than guessing.
+ */
+const MAX_MULTI_ACCOUNTS = 8;
+
+// ponytail: both caps bound the COUNT of calls and accounts, never the BYTES
+// they return, so one getAccountInfo on the 836 KB order book in a tight loop
+// is still unbounded egress on an unauthenticated route. Per-IP rate limiting
+// is the actual fix for byte amplification — these caps only stop a single
+// request from being worth many. Add it at the edge (the CDN in front of this
+// app) rather than in-process: this proxy has no shared state across Node
+// workers, so an in-process counter would be per-worker and wrong.
 
 function methodsAllowed(body: string): boolean {
   let parsed: unknown;
@@ -293,7 +340,7 @@ function methodsAllowed(body: string): boolean {
     return false;
   }
   const calls = Array.isArray(parsed) ? parsed : [parsed];
-  if (calls.length === 0 || calls.length > 20) return false;
+  if (calls.length === 0 || calls.length > MAX_BATCH_CALLS) return false;
   if (
     !calls.every(
       (c) =>
@@ -306,14 +353,13 @@ function methodsAllowed(body: string): boolean {
     return false;
   }
 
-  // The byte cap and the 20-call batch cap bound the REQUEST; neither bounds
-  // what it fetches. getMultipleAccounts takes an array of pubkeys, and the
-  // accounts this program owns are large -- the order book is ~626 KB raw
-  // (~836 KB base64 on the wire). 2,125 pubkeys fit inside the ~100 KB body
-  // limit, and 20 batched calls of 100 each fit too, so one unauthenticated
-  // POST could pull ~1.7 GB from the upstream, on the deployer's paid quota,
-  // in a loop. Bound the ACCOUNTS, summed across the batch, at Solana's own
-  // per-call maximum.
+  // The byte cap and the batch cap bound the REQUEST; neither bounds what it
+  // fetches. getMultipleAccounts takes an array of pubkeys, and the accounts
+  // this program owns are large -- the order book is ~626 KB raw (~836 KB
+  // base64 on the wire). 2,125 pubkeys fit inside the ~100 KB body limit, so
+  // one unauthenticated POST could pull GBs from the upstream, on the
+  // deployer's paid quota, in a loop. Bound the ACCOUNTS, summed across the
+  // batch, at the app's measured need (MAX_MULTI_ACCOUNTS, above).
   let accounts = 0;
   for (const c of calls) {
     const { method, params } = c as { method: string; params?: unknown };
@@ -326,21 +372,35 @@ function methodsAllowed(body: string): boolean {
   return true;
 }
 
+/**
+ * The single definition of "is this a real layer", shared by BOTH verbs.
+ *
+ * It lived inside POST only, so GET answered `{ ok: true, layer: "__proto__" }`
+ * for anything at all — the two verbs disagreed about what this route even
+ * serves, and a probe could enumerate which one was which. Returns the 404 to
+ * send, or null when the layer is good.
+ *
+ * Own-property lookup: a plain `UPSTREAMS[layer]` also resolves inherited keys
+ * ("toString", "constructor", "__proto__"), which are truthy and would sail past
+ * an `if (!upstream)` guard. The truthiness check is kept as well so a blank
+ * configured upstream still fails closed.
+ */
+function layerNotFound(layer: string): Response | null {
+  if (Object.hasOwn(UPSTREAMS, layer) && UPSTREAMS[layer]) return null;
+  // Fixed text, and the caller's own path segment is NOT echoed back.
+  return new Response(JSON.stringify({ error: "unknown rpc layer" }), {
+    status: 404,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ layer: string }> }
 ): Promise<Response> {
   const { layer } = await ctx.params;
-  // Own-property lookup: a plain `UPSTREAMS[layer]` also resolves inherited keys
-  // ("toString", "constructor", "__proto__"), which are truthy and would sail past
-  // an `if (!upstream)` guard.
-  const upstream = Object.hasOwn(UPSTREAMS, layer) ? UPSTREAMS[layer] : undefined;
-  if (!upstream) {
-    return new Response(
-      JSON.stringify({ error: `unknown rpc layer "${layer}"` }),
-      { status: 404, headers: { "Content-Type": "application/json" } }
-    );
-  }
+  const bad = layerNotFound(layer);
+  if (bad) return bad;
   const body = await readCapped(req, MAX_BODY_BYTES);
   if (body === null) {
     return new Response(JSON.stringify({ error: "request body too large" }), {
@@ -367,6 +427,9 @@ export async function GET(
   ctx: { params: Promise<{ layer: string }> }
 ): Promise<Response> {
   const { layer } = await ctx.params;
+  const bad = layerNotFound(layer);
+  if (bad) return bad;
+  // `layer` is now known to be an allowlist key, so echoing it is safe.
   return new Response(JSON.stringify({ ok: true, layer }), {
     status: 200,
     headers: { "Content-Type": "application/json" },
