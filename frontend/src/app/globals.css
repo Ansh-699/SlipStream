@@ -1552,3 +1552,9 @@ input[type="number"] {
   --t-warn: #f59e0b;
   --t-link: #58a6ff;
 }
+
+/* Fig. 1's destroyed-range fill. `currentColor` so the container's own
+   token-set colour carries it, which no colour utility could do here. */
+.hatch-down {
+  background-image: repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 6px);
+}
