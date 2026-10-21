@@ -9,10 +9,92 @@
 import { PRICE_SCALE, SENTINEL } from "./constants";
 import {
   decodeOrderBook,
+  decodeOrderBookHeader,
+  decodeOrderSlot,
+  decodePriceLevel,
+  decodeFillEvent,
+  computeOrderBookAccountSize,
+  ORDER_BOOK_HEADER_SIZE,
+  ORDER_SLOT_SIZE,
+  PRICE_LEVEL_SIZE,
+  FILL_EVENT_SIZE,
   type OrderBookState,
   type OrderSlot,
   type PriceLevel,
+  type FillEvent,
 } from "./accounts";
+
+/** The previous decode, kept so the next one can reuse what did not change. */
+export interface BookDecodeCache {
+  data: Uint8Array;
+  book: OrderBookState;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array, offset: number, length: number): boolean {
+  for (let i = offset, end = offset + length; i < end; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+/**
+ * `decodeOrderBook`, reusing every record whose bytes are unchanged since `prev`.
+ *
+ * WHY: the book is one 626,736-byte account -- 2,048 order slots, 2x512 price
+ * levels and a 4,096-entry fill ring -- and a full decode builds ~10,000
+ * objects including 10,240 PublicKeys, every update. A trade or a requote
+ * rewrites a handful of those records, so with the rollup now PUSHING each
+ * update (up to 20 renders/s) re-decoding the whole thing each time was most of
+ * the main thread. Comparing bytes is a tight loop with no allocation; only the
+ * records that differ are decoded again.
+ *
+ * Unchanged records keep their object identity, so the result is safe to diff
+ * by reference. Output is byte-for-byte what `decodeOrderBook` returns,
+ * including its truncation check.
+ */
+export function decodeOrderBookIncremental(data: Buffer, prev: BookDecodeCache | null): OrderBookState {
+  const header = decodeOrderBookHeader(data);
+  const needed = computeOrderBookAccountSize(
+    header.maxOrderSlots,
+    header.maxPriceLevelsPerSide,
+    header.maxFillEvents
+  );
+  if (data.length < needed) {
+    throw new Error(`OrderBook buffer truncated: header declares ${needed} bytes, got ${data.length}`);
+  }
+  const base =
+    prev &&
+    prev.data.length === data.length &&
+    prev.book.header.maxOrderSlots === header.maxOrderSlots &&
+    prev.book.header.maxPriceLevelsPerSide === header.maxPriceLevelsPerSide &&
+    prev.book.header.maxFillEvents === header.maxFillEvents
+      ? prev
+      : null;
+  if (!base) return decodeOrderBook(data);
+  const old = base.data;
+
+  let offset = ORDER_BOOK_HEADER_SIZE;
+  const orderSlots: OrderSlot[] = new Array(header.maxOrderSlots);
+  for (let i = 0; i < header.maxOrderSlots; i++, offset += ORDER_SLOT_SIZE) {
+    orderSlots[i] = sameBytes(data, old, offset, ORDER_SLOT_SIZE)
+      ? base.book.orderSlots[i]
+      : decodeOrderSlot(data, offset);
+  }
+  const levels = (previous: PriceLevel[]): PriceLevel[] => {
+    const out: PriceLevel[] = new Array(header.maxPriceLevelsPerSide);
+    for (let i = 0; i < header.maxPriceLevelsPerSide; i++, offset += PRICE_LEVEL_SIZE) {
+      out[i] = sameBytes(data, old, offset, PRICE_LEVEL_SIZE) ? previous[i] : decodePriceLevel(data, offset);
+    }
+    return out;
+  };
+  const bidLevels = levels(base.book.bidLevels);
+  const askLevels = levels(base.book.askLevels);
+  const fillEvents: FillEvent[] = new Array(header.maxFillEvents);
+  for (let i = 0; i < header.maxFillEvents; i++, offset += FILL_EVENT_SIZE) {
+    fillEvents[i] = sameBytes(data, old, offset, FILL_EVENT_SIZE)
+      ? base.book.fillEvents[i]
+      : decodeFillEvent(data, offset);
+  }
+  return { header, orderSlots, bidLevels, askLevels, fillEvents };
+}
 
 export interface AggregatedLevel {
   /** Human-readable price (scaled down by PRICE_SCALE). */

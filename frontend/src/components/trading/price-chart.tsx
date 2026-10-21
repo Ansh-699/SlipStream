@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useLivePrice } from "@/hooks/use-live-price";
 import { useMarkPrice } from "@/hooks/use-mark-price";
 import { usePythCandles, RESOLUTIONS, type Resolution, type Candle } from "@/hooks/use-pyth-candles";
+import { DepthChart } from "./depth-chart";
 
 type ChartType = "candles" | "line" | "area";
 
@@ -29,6 +30,7 @@ export function PriceChart() {
   // headlines, so the two prices on this screen cannot disagree.
   const { reference } = useMarkPrice(0);
   const [chartType, setChartType] = useState<ChartType>("candles");
+  const [view, setView] = useState<"chart" | "depth">("chart");
 
   // Merge the live streamed price into a "forming" candle for the current bucket,
   // so the right edge updates in real time between history refreshes.
@@ -79,19 +81,21 @@ export function PriceChart() {
           <button
             type="button"
             role="tab"
-            aria-selected
+            aria-selected={view === "chart"}
             aria-controls="chart-panel"
             className="tk-tab"
+            onClick={() => setView("chart")}
           >
             Chart
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={false}
-            disabled
-            title="No depth-of-market view yet — the ladder is in the Book panel."
+            aria-selected={view === "depth"}
+            aria-controls="chart-panel"
+            title="Cumulative depth from the live rollup book"
             className="tk-tab"
+            onClick={() => setView("depth")}
           >
             Depth
           </button>
@@ -110,7 +114,9 @@ export function PriceChart() {
         </div>
       </div>
 
-      {/* Toolbar — interval chips | chart type chips */}
+      {/* Toolbar — interval chips | chart type chips. Candle-only, as is the
+          OHLC legend under it: neither means anything on the depth view. */}
+      {view === "chart" && (
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-[var(--t-border)] px-3 py-1.5 sm:h-9 sm:flex-nowrap sm:py-0">
         <div role="group" aria-label="Candle interval" className="flex items-center gap-1">
           {RESOLUTIONS.map((r, i) => (
@@ -151,8 +157,10 @@ export function PriceChart() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Legend */}
+      {view === "chart" && (
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 py-[6px] text-[11px]">
         <span className="text-[var(--t-text-2)]">
           <span className="font-semibold text-[var(--t-text)]">SOL-PERP</span>
@@ -174,10 +182,18 @@ export function PriceChart() {
           </span>
         </span>
       </div>
+      )}
 
       {/* Canvas chart */}
-      <div id="chart-panel" role="tabpanel" aria-label="Price chart" className="relative flex-1 bg-[var(--t-bg)]">
-        {candles.length >= 2 ? (
+      <div
+        id="chart-panel"
+        role="tabpanel"
+        aria-label={view === "depth" ? "Order book depth" : "Price chart"}
+        className="relative flex-1 bg-[var(--t-bg)]"
+      >
+        {view === "depth" ? (
+          <DepthChart />
+        ) : candles.length >= 2 ? (
           <CandleCanvas candles={candles} chartType={chartType} resolution={resolution} />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-6 text-center">
@@ -201,11 +217,17 @@ export function PriceChart() {
         {/* Below xl a plain wheel scrolls the page instead of zooming (see the
             wheel handler), so the hint has to say which gesture actually works
             at this width rather than promise one that no longer does. */}
-        <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
-        <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
-        <span>
-          {resolution.label} candles · {source ? `${source} history` : "history"} + MagicBlock live
-        </span>
+        {view === "depth" ? (
+          <span>Cumulative resting size within 2% of the mid · live from the MagicBlock rollup book</span>
+        ) : (
+          <>
+            <span className="hidden xl:inline">Scroll to zoom · drag to pan</span>
+            <span className="xl:hidden">Ctrl-scroll to zoom · drag to pan</span>
+            <span>
+              {resolution.label} candles · {source ? `${source} history` : "history"} + MagicBlock live
+            </span>
+          </>
+        )}
       </div>
     </div>
   );

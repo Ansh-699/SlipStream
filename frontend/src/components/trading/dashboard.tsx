@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import { TerminalNav } from "./terminal-nav";
 import { MarketBar } from "./market-bar";
 import { PriceChart } from "./price-chart";
@@ -10,6 +11,8 @@ import { StatusPanel } from "./status-panel";
 import { ActivityDrawer } from "./activity-drawer";
 import { StatusStrip } from "./status-strip";
 import { FillToasts } from "./fill-toasts";
+import { TxToasts } from "./tx-toasts";
+import { warmErBlockhash } from "@/lib/er-exec";
 import { useMarket } from "@/hooks/use-market";
 import { manifestError } from "@/lib/manifest";
 
@@ -26,6 +29,18 @@ import { manifestError } from "@/lib/manifest";
 export function TradingDashboard() {
   const { market } = useMarket(0);
   const markPrice = market?.lastMarkPrice ?? null;
+
+  // Keep a rollup blockhash ready while the terminal is visible, so pressing
+  // an order button only signs and sends (lib/er-exec.ts). One tiny
+  // getLatestBlockhash every ~2s; nothing while the tab is hidden.
+  useEffect(() => {
+    const warm = () => {
+      if (!document.hidden) warmErBlockhash();
+    };
+    warm();
+    const timer = setInterval(warm, 1_000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <div className="terminal flex min-h-screen flex-col xl:h-screen xl:overflow-hidden">
@@ -44,19 +59,19 @@ export function TradingDashboard() {
       <main className="flex min-h-0 flex-1 flex-col xl:flex-row">
         {/* Chart + activity. Owns the slack at xl; fixed height while stacked. */}
         <div className="tk-col order-2 flex min-h-0 min-w-0 flex-col xl:order-none xl:flex-1">
-          <div className="h-[420px] shrink-0 xl:h-auto xl:min-h-0 xl:flex-1">
+          <div className="h-[420px] shrink-0 sm:h-[520px] xl:h-auto xl:min-h-0 xl:flex-1">
             <PriceChart />
           </div>
           <ActivityDrawer markPrice={markPrice} />
         </div>
 
         {/* Depth. */}
-        <div className="tk-col order-3 flex h-[560px] w-full shrink-0 flex-col xl:order-none xl:h-auto xl:w-[336px]">
+        <div className="tk-col order-3 flex h-[460px] w-full shrink-0 flex-col sm:h-[560px] xl:order-none xl:h-auto xl:w-[320px]">
           <OrderBookDisplay />
         </div>
 
         {/* Entry, wallet, and system truth. */}
-        <div className="tk-col slim-scroll order-1 flex w-full shrink-0 flex-col xl:order-none xl:w-[336px] xl:overflow-y-auto">
+        <div className="tk-col slim-scroll order-1 flex w-full shrink-0 flex-col xl:order-none xl:w-[340px] xl:overflow-y-auto">
           <OrderForm />
           <SessionPanel />
           <StatusPanel />
@@ -64,7 +79,12 @@ export function TradingDashboard() {
       </main>
 
       <StatusStrip />
-      <FillToasts />
+      {/* One stack, above the status strip: order/cancel results on top, then
+          fills that involve this wallet. */}
+      <div className="pointer-events-none fixed bottom-10 right-4 z-50 flex flex-col items-end gap-2">
+        <TxToasts />
+        <FillToasts />
+      </div>
     </div>
   );
 }
