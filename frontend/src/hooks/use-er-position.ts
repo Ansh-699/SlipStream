@@ -47,28 +47,41 @@ function pnl(signedQty: bigint, entry: bigint, mark: bigint): bigint {
   return (diff * absQty) / 1_000_000_000n; // BASE_SCALE
 }
 
+/** The replayed fills, before pricing: everything except unrealized PnL. */
+interface Replayed {
+  size: bigint; // signed, base atoms
+  entry: bigint; // 6-dp price
+  collateral: bigint; // 6-dp
+  realized: bigint; // 6-dp
+  count: number;
+}
+
 /**
  * Replay the owner's fills (as maker or taker) in sequence order, applying the
  * SAME position-update logic as the on-chain settle_trades. The result is the
  * net position the user holds on the ER right now.
+ *
+ * Deliberately NOT a function of the mark price. It walks the whole 4,096-entry
+ * fill ring, and it used to be re-run inside the same memo that priced it -- so
+ * every oracle tick (the live feed pushes ~20/s) replayed the entire ring and
+ * base58-encoded two keys per fill: ~35 ms of main thread each time, measured
+ * against the live devnet book, i.e. most of a core spent re-deriving a
+ * position that had not changed. Replay now runs only when the fills, the owner
+ * or the settlement cursor change; pricing is the cheap step below.
  */
-function reconstruct(
+function replay(
   fills: FillEvent[],
-  ownerB58: string,
-  // Nullable deliberately: priced at 0n the pnl() below returns a large
-  // fabricated number that renders green or red by sign, next to a Mark column
-  // that correctly shows "—". No price means no PnL, not a free one.
-  markPrice: bigint | null,
+  owner: PublicKey,
   // The L1 settlement cursor. NOT optional and NOT defaultable to 0n: see the
   // note on `settledSeq` in the hook below. Callers that cannot read it must
   // not call this function at all.
   lastSettledSequence: bigint
-): ErPosition | null {
+): Replayed | null {
   // Sort by sequence ascending so VWAP / reductions apply in match order.
   // Fills at or below the L1 settlement cursor are already reflected in the
   // real Position account — replaying them here would double-count an
   // already-settled position as still "pending".
-  const ordered = [...fills]
+  const ordered = fills
     .filter((f) => f.quantity > 0n && f.sequence > lastSettledSequence)
     .sort((a, b) => (a.sequence < b.sequence ? -1 : a.sequence > b.sequence ? 1 : 0));
 
@@ -79,8 +92,10 @@ function reconstruct(
   let count = 0;
 
   for (const f of ordered) {
-    const isMaker = f.maker.toBase58() === ownerB58;
-    const isTaker = f.taker.toBase58() === ownerB58;
+    // Byte comparison, not base58: toBase58() twice per fill was the bulk of
+    // this loop's cost.
+    const isMaker = f.maker.equals(owner);
+    const isTaker = f.taker.equals(owner);
     if (!isMaker && !isTaker) continue;
     count += 1;
 
@@ -128,8 +143,17 @@ function reconstruct(
   }
 
   if (count === 0 || size === 0n) return null;
+  return { size, entry, collateral, realized, count };
+}
 
-  const up = markPrice === null ? null : pnl(size, entry, markPrice);
+function price(
+  r: Replayed,
+  // Nullable deliberately: priced at 0n the pnl() below returns a large
+  // fabricated number that renders green or red by sign, next to a Mark column
+  // that correctly shows "—". No price means no PnL, not a free one.
+  markPrice: bigint | null
+): ErPosition {
+  const up = markPrice === null ? null : pnl(r.size, r.entry, markPrice);
   // `up` stays null all the way to the cell. It used to be handed to
   // `Number(null)`, which is 0, so the row painted a green "+$0.00" in the one
   // money cell while Mark, Liq. and Health beside it honestly rendered "—".
@@ -137,13 +161,13 @@ function reconstruct(
   // colour test was `unrealizedPnl >= 0` and `null >= 0` is true in JS, which
   // would have produced a green em dash.
   return {
-    isLong: size > 0n,
-    size: Number(size) / 1e9,
-    entryPrice: Number(entry) / PRICE_SCALE,
-    collateral: Number(collateral) / PRICE_SCALE,
-    realizedPnl: Number(realized) / PRICE_SCALE,
+    isLong: r.size > 0n,
+    size: Number(r.size) / 1e9,
+    entryPrice: Number(r.entry) / PRICE_SCALE,
+    collateral: Number(r.collateral) / PRICE_SCALE,
+    realizedPnl: Number(r.realized) / PRICE_SCALE,
     unrealizedPnl: up === null ? null : Number(up) / PRICE_SCALE,
-    fillCount: count,
+    fillCount: r.count,
   };
 }
 
@@ -171,7 +195,7 @@ export function useErPosition(
   //
   // This used to be best-effort — an unreachable Market meant a cursor of 0n,
   // which reads as "nothing has ever settled". That is not a conservative
-  // default, it is the most destructive possible value: reconstruct() keeps
+  // default, it is the most destructive possible value: replay() keeps
   // every fill with `sequence > 0`, i.e. the ENTIRE 4096-entry ring including
   // months of fills that L1 settled long ago, and replays them into a position
   // that does not exist. Reproduced against live devnet: with the real cursor
@@ -197,15 +221,20 @@ export function useErPosition(
   // disagree, and erring towards "still pending" never invents exposure.
   const settledSeq = market ? BigInt(market.lastSettledSequence) : null;
 
-  // Re-price on every oracle tick; the fills themselves only change when the
-  // shared poller ticks. Reconstructing from a bounded ring already in memory
-  // is pure CPU.
-  const position = useMemo<ErPosition | null>(
+  // Replay only when the fills, the owner or the cursor change (the shared
+  // feed keeps `fillEvents` referentially stable while the ring is untouched);
+  // re-price on every oracle tick, which is a handful of bigint ops.
+  const ownerKey = owner?.toBase58() ?? null;
+  const replayed = useMemo<Replayed | null>(
     () =>
-      owner && settledSeq !== null
-        ? reconstruct(fillEvents, owner.toBase58(), markPrice, settledSeq)
+      ownerKey !== null && settledSeq !== null
+        ? replay(fillEvents, new PublicKey(ownerKey), settledSeq)
         : null,
-    [owner, fillEvents, markPrice, settledSeq]
+    [ownerKey, fillEvents, settledSeq]
+  );
+  const position = useMemo<ErPosition | null>(
+    () => (replayed ? price(replayed, markPrice) : null),
+    [replayed, markPrice]
   );
 
   // POS-1. `position === null` has two causes that must not render alike: "you

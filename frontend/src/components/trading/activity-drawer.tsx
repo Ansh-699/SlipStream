@@ -5,6 +5,7 @@ import { ChevronDown } from "lucide-react";
 import { OpenOrders } from "./open-orders";
 import { PositionsTable } from "./positions-table";
 import { TradeHistory } from "./trade-history";
+import { ErTxPanel } from "./er-tx-panel";
 
 type Tab = "positions" | "orders" | "history";
 
@@ -16,14 +17,17 @@ const TABS: { id: Tab; label: string }[] = [
 
 /**
  * The activity drawer under the chart. Collapsed it is just its tab strip, so a
- * trader can give the whole column to the chart without losing the tabs.
+ * trader can give the whole column to the chart without losing the tabs. From
+ * `md` up the live rollup transaction panel sits beside it (as in Equinox), so
+ * every order's measured execution time stays in view while trading.
  */
 export function ActivityDrawer({ markPrice }: { markPrice: bigint | null }) {
   const [tab, setTab] = useState<Tab>("positions");
   const [open, setOpen] = useState(true);
 
   return (
-    <section className="flex shrink-0 flex-col border-t border-[var(--t-border)]" aria-label="Your activity">
+    <div className="grid shrink-0 grid-cols-1 md:grid-cols-[minmax(0,1fr)_300px]">
+    <section className="flex min-w-0 flex-col border-t border-[var(--t-border)]" aria-label="Your activity">
       <div className="tk-head gap-4">
         <div role="tablist" aria-label="Activity" className="flex items-center gap-4">
           {TABS.map((t) => (
@@ -63,5 +67,7 @@ export function ActivityDrawer({ markPrice }: { markPrice: bigint | null }) {
         </div>
       )}
     </section>
+    <ErTxPanel collapsed={!open} />
+    </div>
   );
 }

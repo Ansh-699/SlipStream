@@ -1,6 +1,5 @@
 "use client";
 
-import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet, useConnection } from "@/hooks/use-wallet-compat";
 import { Transaction } from "@solana/web3.js";
@@ -12,7 +11,7 @@ import { useSession } from "@/hooks/use-session";
 import { useTriggers } from "@/hooks/use-triggers";
 import { useMarkPrice } from "@/hooks/use-mark-price";
 import { useMarket } from "@/hooks/use-market";
-import { PROGRAM_ID, MARKET_INDEX, LOT_SIZE, MAX_LEVERAGE } from "@/lib/manifest";
+import { PROGRAM_ID, MARKET_INDEX, LOT_SIZE, MAX_LEVERAGE, explorerTx } from "@/lib/manifest";
 import {
   createPlaceOrderInstruction,
   createClosePositionInstruction,
@@ -26,6 +25,8 @@ import {
 } from "@/lib/slipstream";
 import { confirmSignature } from "@/lib/confirm";
 import { revalidateOrderBook } from "@/hooks/use-orderbook";
+import { executeEr } from "@/lib/er-exec";
+import { pushTxToast } from "@/lib/tx-toasts";
 
 const PRICE_SCALE = 1_000_000;
 /** "1 unsettled fill" / "3 unsettled fills" / "unsettled fills" before the read lands. */
@@ -385,21 +386,21 @@ export function PositionsTable({}: PositionsTableProps) {
         signerPk
       );
 
-      const tx = new Transaction().add(ix);
-      const erConn = erConnection;
-      const { blockhash } = await erConn.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-
-      let sig: string;
-      if (useSessionKey) {
-        tx.feePayer = sessionKp!.publicKey;
-        tx.sign(sessionKp!);
-        sig = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-      } else {
-        tx.feePayer = publicKey;
-        sig = await sendTransaction(tx, erConn, { skipPreflight: false });
-      }
-      await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
+      // Same rollup fast path as the order ticket (lib/er-exec.ts).
+      const { signature, ms } = await executeEr({
+        instructions: [ix],
+        owner: publicKey,
+        sessionKeypair: useSessionKey ? sessionKp : null,
+        walletSend: sendTransaction,
+        kind: "Close (pending)",
+      });
+      pushTxToast({
+        ok: true,
+        pending: false,
+        title: `Close ${wantSol.toFixed(1)} SOL · done`,
+        detail: `Processed in the rollup · ${ms} ms from click`,
+        href: explorerTx(signature, "er"),
+      });
       // Draining the position to zero leaves any SL/TP PDA armed against
       // nothing, which the leftover-trigger banner below has to be able to see
       // at once rather than up to 5s later on the trigger poll. See TRIG-1.

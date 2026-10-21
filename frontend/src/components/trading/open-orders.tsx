@@ -1,17 +1,16 @@
 "use client";
 
-import { erConnection } from "@/lib/connections";
 import { useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
-import { Transaction } from "@solana/web3.js";
 import { useOpenOrders } from "@/hooks/use-open-orders";
 import { revalidateOrderBook } from "@/hooks/use-orderbook";
 import { useSession } from "@/hooks/use-session";
-import { PROGRAM_ID, MARKET_INDEX } from "@/lib/manifest";
+import { PROGRAM_ID, MARKET_INDEX, explorerTx } from "@/lib/manifest";
 import { createCancelOrderInstruction,
   humanizeError,
 } from "@/lib/slipstream";
-import { confirmSignature } from "@/lib/confirm";
+import { executeEr } from "@/lib/er-exec";
+import { pushTxToast, settleTxToast } from "@/lib/tx-toasts";
 
 /**
  * The connected wallet's RESTING orders on the ER book — the orders that have
@@ -32,6 +31,7 @@ export function OpenOrders() {
     if (!publicKey) return;
     setCancelling(orderId.toString());
     setCancelErr(null);
+    const toastId = pushTxToast({ ok: true, pending: true, title: `Cancel order #${orderId} · sending…` });
     try {
       const sessionKp = getSessionKeypair();
       const useSessionKey = session.sessionActive && sessionKp !== null;
@@ -44,34 +44,32 @@ export function OpenOrders() {
         PROGRAM_ID,
         signerPk
       );
-      const tx = new Transaction().add(ix);
 
-      // cancel_order runs on the ER (book + credit are delegated there).
-      const erConn = erConnection;
-      const { blockhash } = await erConn.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-
-      let sig: string;
-      if (useSessionKey) {
-        tx.feePayer = sessionKp!.publicKey;
-        tx.sign(sessionKp!);
-        sig = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-      } else {
-        tx.feePayer = publicKey;
-        sig = await sendTransaction(tx, erConn, { skipPreflight: false });
-      }
-      await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
-      // Re-read the shared book NOW. The claim that used to sit here -- that
-      // the next poll tick lands "within 2s" -- was wrong: startPoll's gap is
-      // 2s AFTER the previous fetch completes and decays geometrically to 16s
-      // on failure. Measured in production the render gaps were 2.3s, 2.5s,
-      // 2.5s, 2.8s, 12.3s. A user who just watched a cancel confirm sat looking
-      // at the order for up to ~16s and reasonably concluded it had not worked.
-      // This does not resurrect the third poller that was deleted: it runs the
-      // ONE shared fetch once, off-schedule.
+      // cancel_order runs on the ER (book + credit are delegated there); the
+      // fast path is lib/er-exec.ts, and the rollup pushes the updated book.
+      const { signature, ms } = await executeEr({
+        instructions: [ix],
+        owner: publicKey,
+        sessionKeypair: useSessionKey ? sessionKp : null,
+        walletSend: sendTransaction,
+        kind: "Cancel",
+      });
+      // Re-read the shared book NOW as well, in case the push feed is down: the
+      // fallback poll's gap is 2s AFTER the previous fetch completes and decays
+      // geometrically to 16s on failure, and a user who just watched a cancel
+      // confirm would sit looking at the order and conclude it had not worked.
+      // With the feed up the push lands first and this read is dropped.
       revalidateOrderBook(MARKET_INDEX);
+      settleTxToast(toastId, {
+        ok: true,
+        title: `Order #${orderId} cancelled`,
+        detail: `Processed in the rollup · ${ms} ms from click`,
+        href: explorerTx(signature, "er"),
+      });
     } catch (err) {
-      setCancelErr(humanizeError(err));
+      const message = humanizeError(err);
+      setCancelErr(message);
+      settleTxToast(toastId, { ok: false, title: `Cancel #${orderId} failed`, detail: message });
       console.error("cancel failed:", err);
     } finally {
       setCancelling(null);

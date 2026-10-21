@@ -1,9 +1,8 @@
 "use client";
 
 import { erConnection } from "@/lib/connections";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useWallet } from "@/hooks/use-wallet-compat";
-import { Transaction } from "@solana/web3.js";
 import { useSession } from "@/hooks/use-session";
 import { useMarket } from "@/hooks/use-market";
 import { useMarkPrice } from "@/hooks/use-mark-price";
@@ -27,8 +26,10 @@ import {
   decodeProgramError,
   humanizeError,
 } from "@/lib/slipstream";
-import { confirmSignature } from "@/lib/confirm";
-import { revalidateOrderBook } from "@/hooks/use-orderbook";
+import { executeEr, ErExecError } from "@/lib/er-exec";
+import { pushTxToast, settleTxToast } from "@/lib/tx-toasts";
+import { onBookPricePick } from "@/lib/ticket-bus";
+import { revalidateOrderBook, BOOK_DEPTH } from "@/hooks/use-orderbook";
 
 type OrderType = "limit" | "market";
 const ORDER_TYPE_VALUES: Record<OrderType, number> = { limit: ORDER_TYPE_LIMIT, market: ORDER_TYPE_MARKET };
@@ -85,9 +86,23 @@ export function OrderForm() {
   const [margin, setMargin] = useState(""); // dollars the trader posts
   const [leverage, setLeverage] = useState(5);
   const [slippageBps, setSlippageBps] = useState("50");
-  const [submitting, setSubmitting] = useState(false);
+  // Orders in flight. Session-key orders sign locally, so several can be in
+  // the rollup at once and the button never blocks on the previous one; a
+  // wallet-signed order still waits, because each one is a wallet prompt.
+  const [inFlight, setInFlight] = useState(0);
+  const submitting = inFlight > 0;
   const [lastSig, setLastSig] = useState<string | null>(null);
   const [lastErr, setLastErr] = useState<string | null>(null);
+
+  // Clicking a level in the book prices a limit order there.
+  useEffect(
+    () =>
+      onBookPricePick((picked) => {
+        setOrderType("limit");
+        setPrice(picked.toFixed(3));
+      }),
+    []
+  );
 
   const isMarket = orderType === "market";
 
@@ -173,9 +188,9 @@ export function OrderForm() {
     // never block a market order because the RPC hiccuped.
     if (bookStatus !== "live" && bookStatus !== "empty") return null;
     const ladder = side === "long" ? asks : bids;
-    // buildLadders caps at depth 20, so a full 20 levels may be truncated and we
-    // cannot claim to know the real depth.
-    if (ladder.length >= 20) return null;
+    // The ladder is capped at BOOK_DEPTH levels, so a full one may be
+    // truncated and we cannot claim to know the real depth.
+    if (ladder.length >= BOOK_DEPTH) return null;
     const window = mark !== null && !stampStale ? (mark * effectiveBps) / 10_000 : null;
     let fillable = 0;
     for (const level of ladder) {
@@ -196,39 +211,41 @@ export function OrderForm() {
       return;
     }
 
-    setSubmitting(true);
     setLastErr(null);
     setLastSig(null);
+    const sideVal = side === "long" ? SIDE_BID : SIDE_ASK;
+    const typeVal = ORDER_TYPE_VALUES[orderType];
+    const sizeVal = BigInt(Math.round(derived.sizeSol * 1e9));
+    const priceVal =
+      typeVal === ORDER_TYPE_MARKET ? 0n : BigInt(Math.round(parseFloat(price) * PRICE_SCALE));
+    const slippageVal = typeVal === ORDER_TYPE_MARKET ? effectiveBps : 0;
+
+    if (sizeVal <= 0n || sizeVal % LOT_SIZE !== 0n) {
+      setLastErr("Size must round to at least one 0.1 SOL lot — increase the amount or the multiplier.");
+      return;
+    }
+    if (typeVal !== ORDER_TYPE_MARKET && (priceVal <= 0n || priceVal % TICK_SIZE !== 0n)) {
+      setLastErr("Price must be a positive multiple of $0.001 (tick size).");
+      return;
+    }
+    if (typeVal !== ORDER_TYPE_MARKET) {
+      const required = requiredMarginAtoms(sizeVal, priceVal);
+      if (session.initialized && required > session.available) {
+        setLastErr(
+          `Insufficient credit: needs $${(Number(required) / PRICE_SCALE).toFixed(2)} margin, ` +
+            `you have $${availUsd.toFixed(2)}. Lower the amount/multiplier or fund more credit.`
+        );
+        return;
+      }
+    }
+
+    const label = `${side === "long" ? buyLabel : sellLabel} ${derived.sizeSol.toFixed(1)} SOL${
+      isMarket ? "" : ` @ ${(Number(priceVal) / PRICE_SCALE).toFixed(3)}`
+    }`;
+    setInFlight((n) => n + 1);
+    const toastId = pushTxToast({ ok: true, pending: true, title: `${label} · sending…` });
+    let sentSig: string | null = null;
     try {
-      const sideVal = side === "long" ? SIDE_BID : SIDE_ASK;
-      const typeVal = ORDER_TYPE_VALUES[orderType];
-      const sizeVal = BigInt(Math.round(derived.sizeSol * 1e9));
-      const priceVal =
-        typeVal === ORDER_TYPE_MARKET ? 0n : BigInt(Math.round(parseFloat(price) * PRICE_SCALE));
-      const slippageVal = typeVal === ORDER_TYPE_MARKET ? effectiveBps : 0;
-
-      if (sizeVal <= 0n || sizeVal % LOT_SIZE !== 0n) {
-        setLastErr("Size must round to at least one 0.1 SOL lot — increase the amount or the multiplier.");
-        setSubmitting(false);
-        return;
-      }
-      if (typeVal !== ORDER_TYPE_MARKET && (priceVal <= 0n || priceVal % TICK_SIZE !== 0n)) {
-        setLastErr("Price must be a positive multiple of $0.001 (tick size).");
-        setSubmitting(false);
-        return;
-      }
-      if (typeVal !== ORDER_TYPE_MARKET) {
-        const required = requiredMarginAtoms(sizeVal, priceVal);
-        if (session.initialized && required > session.available) {
-          setLastErr(
-            `Insufficient credit: needs $${(Number(required) / PRICE_SCALE).toFixed(2)} margin, ` +
-              `you have $${availUsd.toFixed(2)}. Lower the amount/multiplier or fund more credit.`
-          );
-          setSubmitting(false);
-          return;
-        }
-      }
-
       const sessionKp = getSessionKeypair();
       const useSessionKey = session.sessionActive && sessionKp !== null;
       const signerPk = useSessionKey ? sessionKp!.publicKey : publicKey;
@@ -248,35 +265,38 @@ export function OrderForm() {
         signerPk
       );
 
-      const tx = new Transaction().add(ix);
-      const erConn = erConnection;
-      const { blockhash } = await erConn.getLatestBlockhash();
-      tx.recentBlockhash = blockhash;
-
-      let sig: string;
-      if (useSessionKey) {
-        tx.feePayer = sessionKp!.publicKey;
-        tx.sign(sessionKp!);
-        sig = await erConn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-      } else {
-        tx.feePayer = publicKey;
-        sig = await sendTransaction(tx, erConn, { skipPreflight: false });
-      }
-
-      // Confirm by HTTP polling (NOT the WS subscription, which can't reach the
-      // same-origin proxy and would hang forever).
-      try {
-        await confirmSignature(erConn, sig, { timeoutMs: 30_000 });
-        // The order either rested (a new level) or crossed (levels consumed).
-        // Either way the shared book is now behind; ask for it immediately
-        // instead of showing the pre-trade ladder for up to a poll interval.
-        revalidateOrderBook(MARKET_INDEX);
-      } catch (confErr) {
-        const confMsg = confErr instanceof Error ? confErr.message : String(confErr);
+      // Warm blockhash, direct send, and "processed" from a websocket push
+      // raced against a tight status poll -- see lib/er-exec.ts.
+      const { signature, ms } = await executeEr({
+        instructions: [ix],
+        owner: publicKey,
+        sessionKeypair: useSessionKey ? sessionKp : null,
+        walletSend: sendTransaction,
+        kind: isMarket ? "Market order" : "Limit order",
+        onSent: (sig) => {
+          sentSig = sig;
+        },
+      });
+      // The rollup pushes the new book on its own; this read only matters if
+      // that socket is down, and is dropped by the slot guard otherwise.
+      revalidateOrderBook(MARKET_INDEX);
+      setLastSig(signature);
+      setMargin("");
+      settleTxToast(toastId, {
+        ok: true,
+        title: `${label} · done`,
+        detail: `Processed in the rollup · ${ms} ms from click`,
+        href: explorerTx(signature, "er"),
+      });
+    } catch (err) {
+      const sig = err instanceof ErExecError ? err.signature : sentSig;
+      if (sig) {
+        // Sent, but it either executed and failed or never answered in time.
+        const confMsg = err instanceof Error ? err.message : String(err);
         let logs: string[] = [];
         let landed = false;
         try {
-          const t = await erConn.getTransaction(sig, {
+          const t = await erConnection.getTransaction(sig, {
             commitment: "confirmed",
             maxSupportedTransactionVersion: 0,
           });
@@ -289,37 +309,38 @@ export function OrderForm() {
         } catch {
           /* ignore — treated as "could not verify" below */
         }
-        if (!landed) {
+        // The signature is the only way the user can check for themselves, so
+        // it must survive the failure path rather than being thrown away.
+        setLastSig(sig);
+        if (landed) {
+          setMargin("");
+          settleTxToast(toastId, { ok: true, title: `${label} · done`, href: explorerTx(sig, "er") });
+        } else {
           const name = decodeProgramError({ message: confMsg, logs });
-          // The signature is the only way the user can check for themselves, so
-          // it must survive the failure path rather than being thrown away.
-          setLastSig(sig);
-          setLastErr(
+          const message =
             // humanizeError only when we KNOW it was an on-chain rejection: its
             // network branch says "nothing was sent", which is false once
-            // sendRawTransaction has handed back a signature.
+            // the send has handed back a signature.
             name
               ? humanizeError({ message: confMsg, logs })
               : "Couldn't confirm in time — the order may still have landed. " +
-                "Check the transaction before retrying."
-          );
-          return;
+                "Check the transaction before retrying.";
+          setLastErr(message);
+          settleTxToast(toastId, { ok: false, title: `${label} · not placed`, detail: message, href: explorerTx(sig, "er") });
         }
+      } else {
+        // Everything reaching here failed BEFORE or DURING submission, which is
+        // exactly the case humanizeError's wording is written for — and it is
+        // the one decoder the other four submit paths in this app share.
+        const message = humanizeError(err);
+        setLastErr(message);
+        settleTxToast(toastId, { ok: false, title: `${label} · not placed`, detail: message });
+        console.error("order failed:", err);
       }
-
-      setLastSig(sig);
-      setMargin("");
-    } catch (err) {
-      // Everything reaching here failed BEFORE or DURING submission, which is
-      // exactly the case humanizeError's wording is written for — and it is the
-      // one decoder the other four submit paths in this app already share.
-      setLastErr(humanizeError(err));
-      console.error("order failed:", err);
     } finally {
-      setSubmitting(false);
+      setInFlight((n) => n - 1);
     }
   };
-
 
   const showPriceInput = !isMarket;
   // A market order takes whatever is resting at the best price, right now.
@@ -380,7 +401,8 @@ export function OrderForm() {
                       : insufficient
                         ? "Margin exceeds available credit"
                         : null;
-  const disabled = submitting || blocker !== null;
+  // Session-key orders pipeline; wallet-signed ones wait for their prompt.
+  const disabled = blocker !== null || (submitting && !session.sessionActive);
 
   return (
     <div className="flex flex-col border border-[var(--t-border)] bg-[var(--t-bg)]">
@@ -657,7 +679,7 @@ export function OrderForm() {
                 : "bg-[var(--t-down-3)] text-[var(--t-on-fill)] hover:bg-[var(--t-down-2)]"
           }`}
         >
-          {submitting
+          {submitting && !session.sessionActive
             ? "Placing…"
             : blocker ?? `${side === "long" ? buyLabel : sellLabel} ${derived ? derived.sizeSol.toFixed(1) : "0.0"} SOL`}
         </button>

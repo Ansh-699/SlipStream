@@ -42,6 +42,20 @@ interface Entry<T> {
    * a newer one. Same defect that had to be fixed in useSession and usePositions.
    */
   seq: number;
+  /** Stops the live feed, when the key has one. */
+  stopLive?: () => void;
+}
+
+/**
+ * A push source for a shared key. While it reports `fresh()`, the poller's
+ * scheduled ticks are skipped -- the poll is the fallback, not a second feed.
+ * `revalidate` still forces a read.
+ */
+export interface LiveFeed<T> {
+  /** Called with the first subscriber; the returned cleanup with the last. */
+  start(push: (value: T) => void): () => void;
+  /** True while pushes are known to be current. */
+  fresh(): boolean;
 }
 
 const registry = new Map<string, Entry<unknown>>();
@@ -71,10 +85,14 @@ function entryFor<T>(key: string): Entry<T> {
 export function useSharedSource<T>(
   key: string | null,
   fetcher: () => Promise<T>,
-  intervalMs: number
+  intervalMs: number,
+  live?: LiveFeed<T>
 ): { data: T | null; error: unknown } {
   const [, rerender] = useReducer((c: number) => c + 1, 0);
   const fetcherRef = useRef(fetcher);
+  // Same capture-once-per-key contract as the fetcher, and the same reason for
+  // reading it through a ref: the subscribe effect must not re-run per render.
+  const liveRef = useRef(live);
 
   // Tracking the latest fetcher belongs in an effect, not in the render body:
   // writing a ref during render is a react-hooks/refs error and is unsafe under
@@ -87,6 +105,7 @@ export function useSharedSource<T>(
   // file one market's data under the other's key.
   useEffect(() => {
     fetcherRef.current = fetcher;
+    liveRef.current = live;
   });
 
   useEffect(() => {
@@ -135,13 +154,28 @@ export function useSharedSource<T>(
       // keeps it from surfacing as an unhandled rejection.
       e.run = run;
       void run().catch(() => {});
-      e.stop = startPoll(run, intervalMs);
+      const capturedLive = liveRef.current;
+      if (capturedLive) {
+        // A push supersedes any read still in flight: bumping `seq` makes that
+        // read drop its result instead of landing an older value over this one.
+        e.stopLive = capturedLive.start((value) => {
+          e.seq += 1;
+          e.data = value;
+          e.error = null;
+          e.subscribers.forEach((f) => f());
+        });
+      }
+      e.stop = startPoll(
+        () => (capturedLive?.fresh() ? undefined : run()),
+        intervalMs
+      );
     }
 
     return () => {
       e.subscribers.delete(notify);
       if (e.subscribers.size === 0) {
         e.stop?.();
+        e.stopLive?.();
         registry.delete(key);
       }
     };

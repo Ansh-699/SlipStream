@@ -1526,6 +1526,16 @@ input[type="number"] {
                              surface exposed, which is exactly the kind of
                              pair the old code never checked. */
   --t-link: #0369a1;      /*  5.6:1  sky-700 */
+  /* Order book depth and flash tints (the ladder's bars sit under the side-
+     coloured text, so they stay well below it in strength). */
+  --t-book-bid: #167a38;
+  --t-book-ask: #c8312a;
+  --t-book-bid-fill: rgba(22, 122, 56, 0.16);
+  --t-book-ask-fill: rgba(200, 49, 42, 0.14);
+  --t-book-bid-flash: rgba(22, 122, 56, 0.30);
+  --t-book-ask-flash: rgba(200, 49, 42, 0.28);
+  /* The viewer's own resting orders. 7.2:1 on white. */
+  --t-accent: #7f4900;
 }
 
 .dark {
@@ -1551,6 +1561,39 @@ input[type="number"] {
   --t-scroll-thumb-hover: rgba(255, 255, 255, 0.3);
   --t-warn: #f59e0b;
   --t-link: #58a6ff;
+  --t-book-bid: #3abf72;
+  --t-book-ask: #e05555;
+  --t-book-bid-fill: rgba(58, 191, 114, 0.20);
+  --t-book-ask-fill: rgba(224, 85, 85, 0.20);
+  --t-book-bid-flash: rgba(58, 191, 114, 0.34);
+  --t-book-ask-flash: rgba(224, 85, 85, 0.32);
+  --t-accent: #e7963d;
+}
+
+/* Order book: a light sweep over the skeleton while the first read lands. */
+.book-shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%, color-mix(in srgb, var(--t-text) 6%, transparent) 50%, transparent 80%);
+  background-size: 220% 100%;
+  animation: book-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes book-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+@media (prefers-reduced-motion: reduce) { .book-shimmer::after { animation: none; } }
+/* The viewer's own resting orders, marked down the ladder's left edge. */
+.terminal [data-mine] { box-shadow: inset 2px 0 0 var(--t-accent); }
+
+/* A new card drops in on top, then settles. */
+.card-enter { animation: card-enter 420ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes card-enter {
+  0% { opacity: 0; transform: translateY(-8px) scale(0.98); }
+  60% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .card-enter { animation: none; }
 }
 
 /* Fig. 1's destroyed-range fill. `currentColor` so the container's own

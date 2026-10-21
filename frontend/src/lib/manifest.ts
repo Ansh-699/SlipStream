@@ -151,9 +151,13 @@ export const MAX_LEVERAGE: number = manifest.maxLeverage ?? 20;
 export const LOT_SOL: number = Number(LOT_SIZE) / 1e9;
 
 /** Direct upstream RPC URLs (used server-side, and as the source the API proxy
- *  forwards to). The BROWSER does NOT call these directly — calling the
- *  MagicBlock ER cross-origin fails with "Failed to fetch" (CORS). Instead the
- *  browser uses the same-origin /api/rpc/* proxy (see RPC_URL / ER_RPC below). */
+ *  forwards to). Most browser reads go through the same-origin /api/rpc/*
+ *  proxy (see RPC_URL / ER_RPC below), which adds retries and failover.
+ *  The latency-critical ER paths -- the order book websocket feed, its
+ *  compressed reads, and order send/confirm (lib/er-socket.ts, use-orderbook.ts,
+ *  lib/er-exec.ts) -- call ER_RPC_DIRECT: the ER now answers CORS with
+ *  `access-control-allow-origin: *`, and each of those paths falls back to the
+ *  proxy when the browser cannot reach it. */
 export const BASE_RPC_DIRECT: string =
   ENV.rpcUrl ?? manifest.network ?? "https://api.devnet.solana.com";
 
