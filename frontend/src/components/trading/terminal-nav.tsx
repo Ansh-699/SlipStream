@@ -66,9 +66,7 @@ export function TerminalNav() {
         </a>
         {/* S13-05: the terminal had no theme control at all - ThemeToggle was
             rendered only on the landing page and /docs. `border-0` because this
-            component's own default border is tuned for the landing glass
-            surface; its text colour is left alone so the existing light-mode
-            remap (which carries !important) keeps winning. */}
+            component's own default border is tuned for the landing surface. */}
         <ThemeToggle className="border-0 rounded" />
         <div className="ml-2">
           <ConnectButton />
