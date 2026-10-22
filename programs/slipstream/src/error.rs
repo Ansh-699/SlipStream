@@ -67,6 +67,9 @@ pub enum SlipstreamError {
     CreditCeilingExceeded,
     FillSequenceOutOfRange,
     LegacyLayoutRejected,
+    // Round 11 — APPEND ONLY. skip_unsettleable_fill refused a fill that
+    // settlement can still apply.
+    FillSettleable,
 }
 
 impl From<SlipstreamError> for ProgramError {

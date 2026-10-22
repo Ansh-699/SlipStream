@@ -90,7 +90,8 @@ untouched** — there is zero new work on the hot trading path.
 | `0x1E` | `delegate_fill_log` | L1 | Delegate it to the ER (the proven small-account flow, mirroring `delegate_trading_credit`). |
 | `0x1F` | `mirror_fills` | **ER** | Copy OrderBook fills with `sequence > last_mirrored_sequence` into the FillLog ring. Streams **one fill at a time** (a `[FillEvent; 80]` stack array would overflow the 4 KB BPF frame). |
 | `0x20` | `commit_fill_log` | **ER** | `ScheduleCommit` the **small** log to L1 (cheap; uses the log's own commit budget). |
-| `0x21` | `settle_from_log` | **L1** | Read the committed log **read-only**, write/update `Position` accounts, OI, fees, insurance fund. **Skips orphan fills.** |
+| `0x21` | `settle_from_log` | **L1** | Read the committed log **read-only**, write/update `Position` accounts, OI, fees, insurance fund. **Stops at an orphan fill.** |
+| `0x2B` | `skip_unsettleable_fill` | L1 | Authority only. Move the cursor past the one fill settlement is stuck on, when the program can prove it can never settle. |
 
 ### Why `mirror_fills` streams one at a time
 
@@ -98,13 +99,33 @@ A BPF program has a ~4 KB stack frame. An `[FillEvent; 80]` local is 80 × 104 =
 8,320 bytes — instant stack overflow. So the mirror copies fills individually
 rather than buffering a batch on the stack.
 
-### Why `settle_from_log` skips "orphan" fills
+### Why `settle_from_log` stops at "orphan" fills, and how to get past one
 
 A `FillEvent` references a `maker` and a `taker`. Some fills involve a party that
 has **no L1 account** (e.g. a maker/taker from a prior bot session that was torn
-down). Settling such a fill is impossible — there's no Position to write. Rather
-than letting one orphan fill wedge the whole queue, `settle_from_log` **skips it
-and advances the cursor past it**, so settlement never stalls.
+down). Settling such a fill is impossible — there's no Position to write.
+
+`settle_from_log` is permissionless, and whether an account is "missing" is
+decided only by what the caller passes. So it must **not** advance the cursor
+past a fill it could not apply: an earlier version did, and anyone could discard
+the whole queue by calling it with no accounts. It stops instead, and the cursor
+stays below the orphan.
+
+`skip_unsettleable_fill` (`0x2B`) is the way past one. It is signed by the
+program authority and moves the cursor by exactly one sequence, and only when the
+program can prove for itself that the fill at `cursor + 1` can never settle:
+
+- the maker's or taker's `UserAccount` or `Position` is absent at its canonical
+  PDA (only the owner can create those, so absence there means absence
+  everywhere), or
+- the fill breaks the margin bound settlement enforces.
+
+A fill whose accounts all exist and whose margin is in bounds is refused with
+`FillSettleable`, so the instruction cannot discard a real trade. A skip is
+irreversible: the fill is never applied on L1. A missing `Position` can be
+created by its owner with one `initialize_position`, so check that first.
+`keepers/src/skip-unsettleable-fill.ts --epoch <n>` reports the blocking fill and
+what is missing, and only sends with `--send`.
 
 ### Reusing the battle-tested settlement math
 

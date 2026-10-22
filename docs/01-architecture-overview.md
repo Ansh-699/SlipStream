@@ -106,7 +106,7 @@ decoupled through a tiny side account.
 ┌───────────────┴──────────────────────────────────────────┴────────┐
 │  Layer 1 — On-chain program (Pinocchio, Rust)                       │
 │  slipstream/programs/slipstream/                                    │
-│  40 instructions (0x00–0x27). Runs on L1 AND (delegated) in the ER. │
+│  44 instructions (0x00–0x2B). Runs on L1 AND (delegated) in the ER. │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

@@ -116,7 +116,7 @@ flowchart LR
     S["PDAs · decoders · ix builders"]
   end
   subgraph L1p["Layer 1 — On-chain Program"]
-    P["Pinocchio (Rust)<br/>zero-copy · 40 instructions"]
+    P["Pinocchio (Rust)<br/>zero-copy · 44 instructions"]
   end
 
   F --> S

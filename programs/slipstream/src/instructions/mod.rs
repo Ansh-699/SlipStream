@@ -42,6 +42,8 @@ pub mod accept_authority;
 pub mod seed_credit_ledger;
 pub mod reset_pending_fills;
 pub mod set_keeper;
+// Round 11 — remediate follow-up: an on-chain way past an unsettleable fill (F3).
+pub mod skip_unsettleable_fill;
 // MagicBlock's owner-program undelegation callback. Not a 1-byte instruction —
 // see the 8-byte route at the top of `process`.
 pub mod process_undelegation;
@@ -112,6 +114,9 @@ pub const IX_SEED_CREDIT_LEDGER: u8 = 0x28;
 pub const IX_RESET_PENDING_FILLS: u8 = 0x29;
 pub const IX_SET_KEEPER: u8 = 0x2A;
 
+// Round 11 — remediate follow-up (F3).
+pub const IX_SKIP_UNSETTLEABLE_FILL: u8 = 0x2B;
+
 pub fn process(
     program_id: &Pubkey,
     accounts: &[AccountInfo],
@@ -122,7 +127,7 @@ pub fn process(
     // matched before the 1-byte dispatch below — which otherwise reads byte 196,
     // finds no arm, and reverts the validator's whole `undelegate` transaction.
     // That is why 10 TradingCredit PDAs are stranded on devnet. 0xC4 is outside
-    // the 0x00..=0x2A one-byte space, so this route shadows no instruction.
+    // the 0x00..=0x2B one-byte space, so this route shadows no instruction.
     if let Some(seeds) =
         instruction_data.strip_prefix(&process_undelegation::EXTERNAL_UNDELEGATE_DISCRIMINATOR)
     {
@@ -189,6 +194,9 @@ pub fn process(
         IX_SEED_CREDIT_LEDGER => seed_credit_ledger::process(program_id, accounts, data),
         IX_RESET_PENDING_FILLS => reset_pending_fills::process(program_id, accounts, data),
         IX_SET_KEEPER => set_keeper::process(program_id, accounts, data),
+        IX_SKIP_UNSETTLEABLE_FILL => {
+            skip_unsettleable_fill::process(program_id, accounts, data)
+        }
         _ => Err(ProgramError::InvalidInstructionData),
     }
 }

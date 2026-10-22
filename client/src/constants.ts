@@ -92,6 +92,9 @@ export const IX_SETTLE_FROM_LOG = 0x21;
 export const IX_PLACE_TRIGGER = 0x22;
 export const IX_CANCEL_TRIGGER = 0x23;
 export const IX_EXECUTE_TRIGGER = 0x24;
+// Round 9 / 11 — remediate admin paths.
+export const IX_SEED_CREDIT_LEDGER = 0x28;
+export const IX_SKIP_UNSETTLEABLE_FILL = 0x2b;
 
 // Trigger kinds (SL/TP; also the last TriggerOrder PDA seed byte)
 export const TRIGGER_KIND_STOP_LOSS = 0;

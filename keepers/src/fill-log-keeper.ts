@@ -217,7 +217,9 @@ async function main() {
         const [fillLog] = findFillLogPda(marketIndex, epoch, programId);
         const l1 = await base.getAccountInfo(fillLog);
         if (l1 && decodeFillLogFills(l1.data as Buffer).some((f) => f.sequence === stuckAt)) {
-          detail = "next fill IS committed but will not settle (orphaned UserAccount/Position?)";
+          detail =
+            "next fill IS committed but will not settle (orphaned UserAccount/Position?) — " +
+            `run src/skip-unsettleable-fill.ts --epoch ${epoch} to inspect it`;
         }
       } catch {
         /* diagnostic only — never let it decide the refusal */
