@@ -33,6 +33,8 @@ const ERR_NAMES = [
   "SelfTrade", "PositionStillOpen",
   // Round 9 — APPEND ONLY, error.rs decodes by ordinal.
   "CreditCeilingExceeded", "FillSequenceOutOfRange", "LegacyLayoutRejected",
+  // Round 11.
+  "FillSettleable",
 ];
 const ERROR_BASE = 0x100;
 

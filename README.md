@@ -96,7 +96,7 @@ flowchart TB
 
 - **Program** (`programs/`): written in **Pinocchio** (minimal, zero-dep Solana SDK).
   The 612 KB order book is one flat `#[repr(C)]`/`Pod` account read via **zero-copy**
-  slices and grown in 10 KB chunks (Solana's per-CPI growth cap). 40 instructions,
+  slices and grown in 10 KB chunks (Solana's per-CPI growth cap). 44 instructions,
   including keeper-executed SL/TP triggers and a mark-price freshness gate that
   refuses to settle closes off a stale/dead price feed.
 - **Settlement** (`FillLog` pipeline): because the 612 KB book can't be committed to L1
@@ -179,7 +179,7 @@ Source of truth is [`deploy.json`](./deploy.json). Current deployment:
 
 ```
 slipstream/
-├── programs/slipstream/       # On-chain program (Pinocchio, Rust) — 40 instructions
+├── programs/slipstream/       # On-chain program (Pinocchio, Rust) — 44 instructions
 ├── client/                    # TypeScript client SDK (PDAs, decoders, ix builders)
 ├── keepers/                   # Off-chain bots (flat src/*.ts): fill-log, funding,
 │   │                          #   liquidation+triggers, twap, expiry, market-maker, taker

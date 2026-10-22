@@ -233,7 +233,11 @@ fn test_seed_credit_ledger_rejects_non_authority() {
 
     let (global_pk, _) = Pubkey::find_program_address(&[SEED_GLOBAL], &program_id);
     let user_pk = Pubkey::new_unique();
-    let credit_pk = Pubkey::new_unique();
+    // seed_credit_ledger reads each market's credit at its canonical PDA.
+    let (credit_pk, _) = Pubkey::find_program_address(
+        &[SEED_CREDIT, owner.as_ref(), &0u16.to_le_bytes()],
+        &program_id,
+    );
 
     let base = vec![
         (

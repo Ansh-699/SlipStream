@@ -105,3 +105,10 @@ mod test_funding_clamp_regressions;
 mod test_undelegation_callback;
 #[cfg(test)]
 mod test_funding_delta_clamp;
+
+// Round 11 — remediate review follow-ups: an on-chain way past an unsettleable
+// fill (F3) and a per-market credit-ledger seed (F4).
+#[cfg(test)]
+mod test_skip_unsettleable_fill;
+#[cfg(test)]
+mod test_seed_credit_ledger_markets;

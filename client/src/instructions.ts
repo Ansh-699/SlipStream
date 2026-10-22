@@ -43,6 +43,8 @@ import {
   IX_PLACE_TRIGGER,
   IX_CANCEL_TRIGGER,
   IX_EXECUTE_TRIGGER,
+  IX_SEED_CREDIT_LEDGER,
+  IX_SKIP_UNSETTLEABLE_FILL,
   DELEGATION_PROGRAM_ID,
   MAGIC_PROGRAM_ID,
   MAGIC_CONTEXT_ID,
@@ -1445,6 +1447,91 @@ export function createSettleFromLogInstruction(
       { pubkey: fillLog, isSigner: false, isWritable: false },
       { pubkey: globalState, isSigner: false, isWritable: false },
       ...remainingAccounts,
+    ],
+    programId,
+    data,
+  });
+}
+
+/**
+ * skip_unsettleable_fill (0x2B) — authority only. Moves the settlement cursor
+ * past the ONE fill settlement is stuck on, and only when the program can
+ * prove that fill unsettleable: a maker/taker UserAccount or Position missing
+ * at its canonical PDA, or a fill that breaks the margin bound. A settleable
+ * fill is refused (`FillSettleable`). The skipped fill is never applied on L1.
+ *
+ * `sequence` must be the market's `last_settled_sequence + 1`; `maker` and
+ * `taker` are that fill's parties, from the committed FillLog.
+ *
+ * Data: market_index u16, epoch u32, sequence u64.
+ */
+export function createSkipUnsettleableFillInstruction(
+  authority: PublicKey,
+  marketIndex: number,
+  epoch: number,
+  sequence: bigint,
+  maker: PublicKey,
+  taker: PublicKey,
+  programId: PublicKey = PROGRAM_ID
+): TransactionInstruction {
+  const [market] = findMarketPda(marketIndex, programId);
+  const [fillLog] = findFillLogPda(marketIndex, epoch, programId);
+  const [globalState] = findGlobalStatePda(programId);
+
+  const data = Buffer.alloc(15);
+  data[0] = IX_SKIP_UNSETTLEABLE_FILL;
+  writeU16LE(data, marketIndex, 1);
+  data.writeUInt32LE(epoch, 3);
+  writeU64LE(data, sequence, 7);
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: market, isSigner: false, isWritable: true },
+      { pubkey: fillLog, isSigner: false, isWritable: false },
+      { pubkey: globalState, isSigner: false, isWritable: false },
+      { pubkey: authority, isSigner: true, isWritable: false },
+      // Writable: an existing leg's pending_fills bump is released.
+      { pubkey: findUserAccountPda(maker, programId)[0], isSigner: false, isWritable: true },
+      { pubkey: findUserAccountPda(taker, programId)[0], isSigner: false, isWritable: true },
+      { pubkey: findPositionPda(maker, marketIndex, programId)[0], isSigner: false, isWritable: false },
+      { pubkey: findPositionPda(taker, marketIndex, programId)[0], isSigner: false, isWritable: false },
+    ],
+    programId,
+    data,
+  });
+}
+
+/**
+ * seed_credit_ledger (0x28) — authority only. Sets `owner`'s credit ledger to
+ * `sum over markets i of min(credit_i, amounts[i])`. `amounts` must have one
+ * entry per market (`max(GlobalState.market_count, 1)`), in market-index
+ * order; a market where the owner never created a credit contributes zero.
+ *
+ * Data: amount_i u64 per market. Accounts: global, user, credit 0, authority,
+ * then credits 1.. (the one-market form is the original 4-account layout).
+ */
+export function createSeedCreditLedgerInstruction(
+  authority: PublicKey,
+  owner: PublicKey,
+  amounts: bigint[],
+  programId: PublicKey = PROGRAM_ID
+): TransactionInstruction {
+  if (amounts.length === 0) throw new Error("seed_credit_ledger needs one amount per market");
+  const [globalState] = findGlobalStatePda(programId);
+  const [userAccount] = findUserAccountPda(owner, programId);
+  const credits = amounts.map((_, i) => findTradingCreditPda(owner, i, programId)[0]);
+
+  const data = Buffer.alloc(1 + 8 * amounts.length);
+  data[0] = IX_SEED_CREDIT_LEDGER;
+  amounts.forEach((amount, i) => writeU64LE(data, amount, 1 + 8 * i));
+
+  return new TransactionInstruction({
+    keys: [
+      { pubkey: globalState, isSigner: false, isWritable: false },
+      { pubkey: userAccount, isSigner: false, isWritable: true },
+      { pubkey: credits[0], isSigner: false, isWritable: false },
+      { pubkey: authority, isSigner: true, isWritable: false },
+      ...credits.slice(1).map((pubkey) => ({ pubkey, isSigner: false, isWritable: false })),
     ],
     programId,
     data,
